@@ -1,0 +1,7 @@
+# Normalize EOL for all files that Git considers text files.
+* text=auto eol=lf
+
+# Strip the godot_mcp dev-addon footprint (autoloads + enabled-plugin
+# entry) out of project.godot before it's committed. The filter itself
+# must be registered once per clone -- see tools/setup-git-filters.ps1.
+project.godot filter=godotstripmcp

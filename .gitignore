@@ -1,0 +1,30 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# MCP dev-addon (godot-mcp-pro free plugin) -- a dev-only editor tool, not
+# game content. Re-obtained on a fresh clone per README.md and never
+# committed. (project.godot's autoload/enabled-plugin refs to it are also
+# stripped from commits automatically -- see tools/strip-mcp-refs.py.)
+/addons/godot_mcp/
+
+# Export presets can embed signing/keystore secrets -- never commit.
+export_presets.cfg
+
+# Build/export output
+/build/
+
+# OS / editor cruft
+*.tmp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# C#/.NET generated. The project has a [dotnet] section (no C# scripts
+# yet), so keep these ignored ahead of when that changes.
+.mono/
+data_*/
+mono_crash.*
+
+# NOTE: *.import files are intentionally NOT ignored -- Godot needs them
+# committed for reproducible imports.
