@@ -43,16 +43,18 @@ var level = new LevelDefinition
     Width = Width,
     Height = Height,
     TileSet = ResourceReference.ToSelf(tileSetPath),
-    PlayerStart = new GridPosition(2, 7),
+    Spawns = new Dictionary<string, GridPosition> { ["start"] = new GridPosition(2, 7) },
+    DefaultSpawn = "start",
     Layers = new[]
     {
-        // Background: a stone pillar drawn behind the play field. Stone is flagged collides=true,
-        // but on a background-role layer collision is ignored — the player passes through it.
-        new LayerDefinition { Name = "background", Role = LayerRole.Background, Cells = BuildBackgroundLayer() },
-        // Main: the only layer that collides — solid ground, side walls, and a brick platform.
-        new LayerDefinition { Name = "main", Role = LayerRole.Main, Cells = BuildMainLayer() },
-        // Foreground: decorative water splashes drawn in front; never collides.
-        new LayerDefinition { Name = "foreground", Role = LayerRole.Foreground, Cells = BuildForegroundLayer() },
+        // Drawn back to front (array order). A stone pillar behind the play field on a
+        // non-collision layer: stone is flagged collides=true, but collision=false means the
+        // player passes straight through it — proving collision is per-layer, not per-tile.
+        new LayerDefinition { Name = "backdrop", Collision = false, Cells = BuildBackdropLayer() },
+        // The collision layer: solid ground, side walls, and a brick platform.
+        new LayerDefinition { Name = "terrain", Collision = true, Cells = BuildTerrainLayer() },
+        // Decorative water splashes drawn in front on a non-collision layer.
+        new LayerDefinition { Name = "decor", Collision = false, Cells = BuildDecorLayer() },
     },
 };
 builder.AddResource(ResourceKind.Level, ResourcePath.Create("levels/demo.json"), LevelContentSerializer.WriteLevel(level));
@@ -86,8 +88,8 @@ static byte[] SolidTile(int size, byte r, byte g, byte b)
 static byte Darken(byte channel) => (byte)(channel * 6 / 10);
 
 // A stone pillar behind the play field (rows 5-7, cols 9-10). Demonstrates that a
-// collides=true tile on a background layer does NOT collide.
-static int[] BuildBackgroundLayer()
+// collides=true tile on a non-collision layer does NOT collide.
+static int[] BuildBackdropLayer()
 {
     var cells = Filled(LayerDefinition.EmptyCell);
     for (var y = 5; y <= 7; y++)
@@ -99,9 +101,9 @@ static int[] BuildBackgroundLayer()
     return cells;
 }
 
-// The collidable play field: stone side walls, a grass surface at row 9, dirt fill below,
+// The collision layer: stone side walls, a grass surface at row 9, dirt fill below,
 // and a floating brick platform (row 6, cols 13-16) to jump onto.
-static int[] BuildMainLayer()
+static int[] BuildTerrainLayer()
 {
     var cells = Filled(LayerDefinition.EmptyCell);
     for (var y = 0; y < Height; y++)
@@ -123,8 +125,8 @@ static int[] BuildMainLayer()
     return cells;
 }
 
-// Decorative water splashes drawn in front of the play field; foreground never collides.
-static int[] BuildForegroundLayer()
+// Decorative water splashes drawn in front of the play field on a non-collision layer.
+static int[] BuildDecorLayer()
 {
     var cells = Filled(LayerDefinition.EmptyCell);
     Set(cells, 4, 8, 5);

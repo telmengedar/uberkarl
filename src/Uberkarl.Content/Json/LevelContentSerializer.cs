@@ -44,7 +44,6 @@ public static class LevelContentSerializer
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         };
         options.Converters.Add(new ResourceReferenceJsonConverter());
-        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
         return options;
     }
 }

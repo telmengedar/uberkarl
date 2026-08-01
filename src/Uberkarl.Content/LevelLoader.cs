@@ -16,13 +16,13 @@ public static class LevelLoader
         var tileSet = LevelContentSerializer.ReadTileSet(Resolve(resolver, level.TileSet, "tile set"));
         var graphics = ResolveGraphics(resolver, tileSet);
         var collidingTileIds = CollectCollidingTileIds(tileSet);
-        ValidatePlayerStart(level);
+        ValidateSpawns(level);
 
         var layers = new List<ResolvedLayer>(level.Layers.Count);
         foreach (var layer in level.Layers)
         {
             ValidateLayer(level, layer, graphics.Keys);
-            layers.Add(new ResolvedLayer { Name = layer.Name, Role = layer.Role, Cells = layer.Cells });
+            layers.Add(new ResolvedLayer { Name = layer.Name, Collision = layer.Collision, Cells = layer.Cells });
         }
 
         return new ResolvedLevel
@@ -33,7 +33,8 @@ public static class LevelLoader
             Layers = layers,
             TileGraphics = graphics,
             CollidingTileIds = collidingTileIds,
-            PlayerStart = level.PlayerStart,
+            Spawns = level.Spawns,
+            DefaultSpawn = level.DefaultSpawn,
         };
     }
 
@@ -69,13 +70,27 @@ public static class LevelLoader
         return colliding;
     }
 
-    private static void ValidatePlayerStart(LevelDefinition level)
+    private static void ValidateSpawns(LevelDefinition level)
     {
-        if (level.PlayerStart is not { } start)
+        foreach (var (name, cell) in level.Spawns)
+        {
+            if (cell.X < 0 || cell.Y < 0 || cell.X >= level.Width || cell.Y >= level.Height)
+                throw new LevelContentException(
+                    $"Spawn '{name}' ({cell.X},{cell.Y}) is outside the {level.Width}x{level.Height} grid.");
+        }
+
+        if (level.Spawns.Count == 0)
+        {
+            if (!string.IsNullOrEmpty(level.DefaultSpawn))
+                throw new LevelContentException(
+                    $"Default spawn '{level.DefaultSpawn}' is named but the level declares no spawns.");
             return;
-        if (start.X < 0 || start.Y < 0 || start.X >= level.Width || start.Y >= level.Height)
-            throw new LevelContentException(
-                $"Player start ({start.X},{start.Y}) is outside the {level.Width}x{level.Height} grid.");
+        }
+
+        if (string.IsNullOrEmpty(level.DefaultSpawn))
+            throw new LevelContentException("A default spawn must be named when the level declares spawns.");
+        if (!level.Spawns.ContainsKey(level.DefaultSpawn))
+            throw new LevelContentException($"Default spawn '{level.DefaultSpawn}' is not one of the declared spawns.");
     }
 
     private static Dictionary<int, byte[]> ResolveGraphics(IResourceResolver resolver, TileSetDefinition tileSet)

@@ -7,8 +7,8 @@ using Uberkarl.Packages;
 namespace Uberkarl {
 
     /// <summary>
-    /// The playable scene root. Loads the sample level, builds its tile layers (with collision on
-    /// the main layer), spawns the player at the level's player-start, and frames the level with a
+    /// The playable scene root. Loads the sample level, builds its tile layers (collision enabled
+    /// per layer), spawns the player at the level's default spawn, and frames the level with a
     /// static camera. Mirrors <see cref="LevelDisplay"/> but adds the player and physics.
     /// </summary>
     public partial class LevelPlay : Node2D {
@@ -41,7 +41,7 @@ namespace Uberkarl {
         }
 
         void SpawnPlayer(ResolvedLevel level) {
-            Vector2I start = level.PlayerStart is { } cell
+            Vector2I start = level.DefaultSpawnPosition is { } cell
                 ? new Vector2I(cell.X, cell.Y)
                 : FallbackStart;
 

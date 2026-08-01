@@ -7,10 +7,12 @@ public sealed class LayerDefinition
     public string Name { get; init; } = string.Empty;
 
     /// <summary>
-    /// The layer's role. Only <see cref="LayerRole.Main"/> honors tile collision;
-    /// defaults to <see cref="LayerRole.Background"/> so pre-role levels stay display-only.
+    /// Whether this layer is a collision layer. When <c>false</c> the layer never collides,
+    /// even for a tile flagged <see cref="TileDefinition.Collides"/>. Draw order is the layer
+    /// array order (back to front) and is independent of this flag. Defaults to <c>false</c>
+    /// so a layer is display-only unless it opts in.
     /// </summary>
-    public LayerRole Role { get; init; } = LayerRole.Background;
+    public bool Collision { get; init; }
 
     public IReadOnlyList<int> Cells { get; init; } = Array.Empty<int>();
 }

@@ -12,18 +12,33 @@ public sealed class ResolvedLevel
 
     public IReadOnlyDictionary<int, byte[]> TileGraphics { get; init; } = new Dictionary<int, byte[]>();
 
-    /// <summary>Tile ids flagged as solid in the tile set. Only enforced on <see cref="LayerRole.Main"/> layers.</summary>
+    /// <summary>Tile ids flagged as solid in the tile set. Only enforced on layers whose <see cref="ResolvedLayer.Collision"/> is true.</summary>
     public IReadOnlySet<int> CollidingTileIds { get; init; } = new HashSet<int>();
 
-    /// <summary>Optional player spawn cell (tile units); null when the level does not specify one.</summary>
-    public GridPosition? PlayerStart { get; init; }
+    /// <summary>Named spawn cells (tile units) keyed by spawn name. Empty when the level declares none.</summary>
+    public IReadOnlyDictionary<string, GridPosition> Spawns { get; init; }
+        = new Dictionary<string, GridPosition>();
+
+    /// <summary>Name of the default spawn; null when the level declares no spawns.</summary>
+    public string? DefaultSpawn { get; init; }
+
+    /// <summary>The default spawn cell, or null when the level declares no spawns.</summary>
+    public GridPosition? DefaultSpawnPosition
+        => DefaultSpawn is { } name && Spawns.TryGetValue(name, out var cell) ? cell : null;
+
+    /// <summary>
+    /// Resolves a spawn by name. The entry path for future level transitions that enter a level
+    /// at a specific named spawn rather than its default.
+    /// </summary>
+    public bool TryGetSpawn(string name, out GridPosition position) => Spawns.TryGetValue(name, out position);
 }
 
 public sealed class ResolvedLayer
 {
     public string Name { get; init; } = string.Empty;
 
-    public LayerRole Role { get; init; } = LayerRole.Background;
+    /// <summary>Whether this layer collides. A non-collision layer never blocks the player.</summary>
+    public bool Collision { get; init; }
 
     public IReadOnlyList<int> Cells { get; init; } = Array.Empty<int>();
 }

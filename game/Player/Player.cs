@@ -5,14 +5,19 @@ namespace Uberkarl {
     /// <summary>
     /// A minimal, readable platformer controller: gravity, left/right movement, and a jump,
     /// driven by the "move_left" / "move_right" / "jump" input actions. Collides against the
-    /// main tile layer via a rectangular collision shape. Built in code so the playable scene
-    /// stays a single script-on-Node2D with no hand-authored sub-scene.
+    /// collision-enabled tile layers via a rectangular collision shape. Built in code so the playable
+    /// scene stays a single script-on-Node2D with no hand-authored sub-scene.
     /// </summary>
     public partial class Player : CharacterBody2D {
 
-        const float MoveSpeed = 90f;      // px/s horizontal
-        const float JumpSpeed = 330f;     // px/s initial upward jump velocity
-        const float Gravity = 900f;       // px/s^2
+        /// <summary>Horizontal move speed in px/s. Editor-adjustable; a seam for per-level and script-driven overrides later.</summary>
+        [Export] public float MoveSpeed { get; set; } = 90f;
+
+        /// <summary>Initial upward jump velocity in px/s. Editor-adjustable; a seam for per-level and script-driven overrides later.</summary>
+        [Export] public float JumpSpeed { get; set; } = 330f;
+
+        /// <summary>Downward acceleration in px/s^2 applied while airborne. Editor-adjustable; a seam for per-level and script-driven overrides later.</summary>
+        [Export] public float Gravity { get; set; } = 900f;
 
         static readonly Vector2 BodyHalfExtents = new Vector2(6f, 12f);
 
