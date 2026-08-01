@@ -14,5 +14,6 @@
   <ItemGroup>
     <ProjectReference Include="src/Uberkarl.Packages/Uberkarl.Packages.csproj" />
     <ProjectReference Include="src/Uberkarl.Content/Uberkarl.Content.csproj" />
+    <ProjectReference Include="src/Uberkarl.Editor/Uberkarl.Editor.csproj" />
   </ItemGroup>
 </Project>

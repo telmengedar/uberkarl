@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Uberkarl.Editor</RootNamespace>
+    <AssemblyName>Uberkarl.Editor</AssemblyName>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Uberkarl.Packages\Uberkarl.Packages.csproj" />
+    <ProjectReference Include="..\Uberkarl.Content\Uberkarl.Content.csproj" />
+  </ItemGroup>
+</Project>
