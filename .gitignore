@@ -20,11 +20,18 @@ export_presets.cfg
 Thumbs.db
 desktop.ini
 
-# C#/.NET generated. The project has a [dotnet] section (no C# scripts
-# yet), so keep these ignored ahead of when that changes.
+# C#/.NET generated.
 .mono/
 data_*/
 mono_crash.*
+/obj/
+/bin/
+*.user
+.vs/
+
+# Copyrighted game-transcription MIDI test assets -- not ours to redistribute.
+# The SF2 soundfont in audio/ is public domain and stays committed.
+/audio/*.mid
 
 # .NET build output (library + test projects under src/ and tests/).
 [Bb]in/
