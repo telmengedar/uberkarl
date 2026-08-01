@@ -40,3 +40,10 @@ mono_crash.*
 
 # NOTE: *.import files are intentionally NOT ignored -- Godot needs them
 # committed for reproducible imports.
+
+# Godot generates a .cs.uid next to every C# file it scans, including the
+# engine-agnostic library and test projects that are NOT Godot scripts.
+# Only game-compile-set scripts (root, game/) keep their committed .uid.
+/src/**/*.cs.uid
+/tests/**/*.cs.uid
+/tools/**/*.cs.uid

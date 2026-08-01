@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Uberkarl"
-run/main_scene="res://scenes/bgm_smoke_test.tscn"
+run/main_scene="res://scenes/level_display.tscn"
 config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
 config/icon="res://icon.svg"
 
