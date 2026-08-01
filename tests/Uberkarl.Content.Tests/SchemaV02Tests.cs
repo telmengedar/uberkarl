@@ -248,6 +248,108 @@ public sealed class SchemaV02Tests
         });
     }
 
+    [Test]
+    public void Layer_ScrollSpeed_DefaultsToOne_WhenOmitted()
+    {
+        var json = Encoding.UTF8.GetBytes(
+            "{\"tileSize\":16,\"width\":1,\"height\":1,\"tileSet\":\"self:tileset.json\"," +
+            "\"layers\":[{\"name\":\"terrain\",\"collision\":true,\"cells\":[1]}]}");
+
+        var level = LevelContentSerializer.ReadLevel(json);
+
+        Assert.That(level.Layers[0].ScrollSpeed, Is.EqualTo(1f), "an omitted scrollSpeed loads as world-locked 1.0");
+    }
+
+    [Test]
+    public void Layer_ScrollSpeed_RoundTrips()
+    {
+        var original = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 1,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+            Layers = new[]
+            {
+                new LayerDefinition { Name = "backdrop", Collision = false, ScrollSpeed = 0.5f, Cells = new[] { LayerDefinition.EmptyCell } },
+            },
+        };
+
+        var restored = LevelContentSerializer.ReadLevel(LevelContentSerializer.WriteLevel(original));
+
+        Assert.That(restored.Layers[0].ScrollSpeed, Is.EqualTo(0.5f));
+    }
+
+    [Test]
+    public void Load_CarriesScrollSpeedOntoResolvedLayer()
+    {
+        var level = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 2,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+            Layers = new[]
+            {
+                new LayerDefinition { Name = "backdrop", Collision = false, ScrollSpeed = 0.5f, Cells = new[] { 2, LayerDefinition.EmptyCell } },
+                new LayerDefinition { Name = "terrain", Collision = true, ScrollSpeed = 1f, Cells = new[] { 1, 2 } },
+            },
+        };
+
+        using var registry = BuildRegistry(level);
+        var resolved = LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(resolved.Layers[0].ScrollSpeed, Is.EqualTo(0.5f), "the parallax background carries its scroll speed");
+            Assert.That(resolved.Layers[1].ScrollSpeed, Is.EqualTo(1f), "the world-locked terrain stays at 1.0");
+        });
+    }
+
+    [Test]
+    public void Load_WhenCollisionLayerHasNonUnitScrollSpeed_Throws()
+    {
+        var level = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 2,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+            Layers = new[]
+            {
+                new LayerDefinition { Name = "terrain", Collision = true, ScrollSpeed = 0.5f, Cells = new[] { 1, 2 } },
+            },
+        };
+
+        using var registry = BuildRegistry(level);
+
+        var exception = Assert.Throws<LevelContentException>(
+            () => LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath)));
+        Assert.That(exception!.Message, Does.Contain("scrollSpeed"));
+        Assert.That(exception!.Message, Does.Contain("world-locked"));
+    }
+
+    [Test]
+    public void Load_WhenNonCollisionLayerHasNonUnitScrollSpeed_Succeeds()
+    {
+        var level = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 2,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+            Layers = new[]
+            {
+                new LayerDefinition { Name = "backdrop", Collision = false, ScrollSpeed = 1.5f, Cells = new[] { 2, LayerDefinition.EmptyCell } },
+            },
+        };
+
+        using var registry = BuildRegistry(level);
+        var resolved = LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath));
+
+        Assert.That(resolved.Layers[0].ScrollSpeed, Is.EqualTo(1.5f), "a non-collision layer may take any scroll speed (foreground > 1.0 allowed)");
+    }
+
     private static PackageRegistry BuildRegistry(LevelDefinition level)
     {
         var tileSet = new TileSetDefinition

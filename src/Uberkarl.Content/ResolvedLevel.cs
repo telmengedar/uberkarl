@@ -40,5 +40,12 @@ public sealed class ResolvedLayer
     /// <summary>Whether this layer collides. A non-collision layer never blocks the player.</summary>
     public bool Collision { get; init; }
 
+    /// <summary>
+    /// Parallax scroll factor relative to the camera (<c>1.0</c> = world-locked, <c>&lt;1.0</c> =
+    /// slower background, <c>&gt;1.0</c> = faster foreground). Always <c>1.0</c> for a
+    /// <see cref="Collision"/> layer (enforced by the loader).
+    /// </summary>
+    public float ScrollSpeed { get; init; } = 1.0f;
+
     public IReadOnlyList<int> Cells { get; init; } = Array.Empty<int>();
 }

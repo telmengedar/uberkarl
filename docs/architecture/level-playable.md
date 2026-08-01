@@ -144,8 +144,10 @@ clean seam for per-level and script-driven overrides later without changing the 
 - **Level exits / transitions.** Named `spawns` + `TryGetSpawn(name)` are the entry seam: a
   transition system later enters a level at a chosen named spawn instead of the default. The
   transition/exit system itself is not built.
-- **Parallax scroll speeds.** A per-layer `scrollSpeed` needs a scrolling camera and
-  larger-than-screen levels (its own chunk). No dead field is added now.
+- **Parallax scroll speeds.** ~~A per-layer `scrollSpeed` needs a scrolling camera and
+  larger-than-screen levels (its own chunk). No dead field is added now.~~ **Built in Phase 1e
+  (DiVoid #7421)** — a per-layer `scrollSpeed` (default 1.0, world-locked) plus a follow-camera
+  with bounds limits and finite `Parallax2D` layers. See `level-scrolling-parallax.md`.
 - **Per-level & script-driven physics overrides.** The player's `[Export]` physics fields are the
   seam; nothing consumes an override source yet.
 
