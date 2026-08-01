@@ -15,12 +15,14 @@ public static class LevelLoader
 
         var tileSet = LevelContentSerializer.ReadTileSet(Resolve(resolver, level.TileSet, "tile set"));
         var graphics = ResolveGraphics(resolver, tileSet);
+        var collidingTileIds = CollectCollidingTileIds(tileSet);
+        ValidatePlayerStart(level);
 
         var layers = new List<ResolvedLayer>(level.Layers.Count);
         foreach (var layer in level.Layers)
         {
             ValidateLayer(level, layer, graphics.Keys);
-            layers.Add(new ResolvedLayer { Name = layer.Name, Cells = layer.Cells });
+            layers.Add(new ResolvedLayer { Name = layer.Name, Role = layer.Role, Cells = layer.Cells });
         }
 
         return new ResolvedLevel
@@ -30,6 +32,8 @@ public static class LevelLoader
             Height = level.Height,
             Layers = layers,
             TileGraphics = graphics,
+            CollidingTileIds = collidingTileIds,
+            PlayerStart = level.PlayerStart,
         };
     }
 
@@ -51,6 +55,27 @@ public static class LevelLoader
             throw new LevelContentException($"Tile size must be positive but was {level.TileSize}.");
         if (level.Width <= 0 || level.Height <= 0)
             throw new LevelContentException($"Level dimensions must be positive but were {level.Width}x{level.Height}.");
+    }
+
+    private static HashSet<int> CollectCollidingTileIds(TileSetDefinition tileSet)
+    {
+        var colliding = new HashSet<int>();
+        foreach (var tile in tileSet.Tiles)
+        {
+            if (tile.Collides)
+                colliding.Add(tile.Id);
+        }
+
+        return colliding;
+    }
+
+    private static void ValidatePlayerStart(LevelDefinition level)
+    {
+        if (level.PlayerStart is not { } start)
+            return;
+        if (start.X < 0 || start.Y < 0 || start.X >= level.Width || start.Y >= level.Height)
+            throw new LevelContentException(
+                $"Player start ({start.X},{start.Y}) is outside the {level.Width}x{level.Height} grid.");
     }
 
     private static Dictionary<int, byte[]> ResolveGraphics(IResourceResolver resolver, TileSetDefinition tileSet)
