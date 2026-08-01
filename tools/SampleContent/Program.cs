@@ -9,13 +9,14 @@ const int Height = 12;
 
 var outputPath = args.Length > 0 ? args[0] : Path.Combine("content", "sample.pkg");
 
-var palette = new (int Id, string File, byte R, byte G, byte B)[]
+// Id, file, RGB, and whether the tile is solid (collision is a property of the tile).
+var palette = new (int Id, string File, byte R, byte G, byte B, bool Collides)[]
 {
-    (1, "tiles/grass.png", 78, 168, 66),
-    (2, "tiles/dirt.png", 138, 92, 52),
-    (3, "tiles/stone.png", 128, 130, 138),
-    (4, "tiles/brick.png", 190, 74, 60),
-    (5, "tiles/water.png", 64, 122, 210),
+    (1, "tiles/grass.png", 78, 168, 66, true),
+    (2, "tiles/dirt.png", 138, 92, 52, true),
+    (3, "tiles/stone.png", 128, 130, 138, true),
+    (4, "tiles/brick.png", 190, 74, 60, true),
+    (5, "tiles/water.png", 64, 122, 210, false),
 };
 
 var builder = new PackageBuilder()
@@ -29,7 +30,7 @@ foreach (var entry in palette)
     var path = ResourcePath.Create(entry.File);
     var png = PngWriter.Encode(TileSize, TileSize, SolidTile(TileSize, entry.R, entry.G, entry.B));
     builder.AddResource(ResourceKind.TileGraphic, path, png, "image/png");
-    tiles.Add(new TileDefinition { Id = entry.Id, Graphic = ResourceReference.ToSelf(path) });
+    tiles.Add(new TileDefinition { Id = entry.Id, Graphic = ResourceReference.ToSelf(path), Collides = entry.Collides });
 }
 
 var tileSet = new TileSetDefinition { Tiles = tiles };
@@ -42,10 +43,16 @@ var level = new LevelDefinition
     Width = Width,
     Height = Height,
     TileSet = ResourceReference.ToSelf(tileSetPath),
+    PlayerStart = new GridPosition(2, 7),
     Layers = new[]
     {
-        new LayerDefinition { Name = "ground", Cells = BuildGroundLayer() },
-        new LayerDefinition { Name = "decoration", Cells = BuildDecorationLayer() },
+        // Background: a stone pillar drawn behind the play field. Stone is flagged collides=true,
+        // but on a background-role layer collision is ignored — the player passes through it.
+        new LayerDefinition { Name = "background", Role = LayerRole.Background, Cells = BuildBackgroundLayer() },
+        // Main: the only layer that collides — solid ground, side walls, and a brick platform.
+        new LayerDefinition { Name = "main", Role = LayerRole.Main, Cells = BuildMainLayer() },
+        // Foreground: decorative water splashes drawn in front; never collides.
+        new LayerDefinition { Name = "foreground", Role = LayerRole.Foreground, Cells = BuildForegroundLayer() },
     },
 };
 builder.AddResource(ResourceKind.Level, ResourcePath.Create("levels/demo.json"), LevelContentSerializer.WriteLevel(level));
@@ -78,7 +85,23 @@ static byte[] SolidTile(int size, byte r, byte g, byte b)
 
 static byte Darken(byte channel) => (byte)(channel * 6 / 10);
 
-static int[] BuildGroundLayer()
+// A stone pillar behind the play field (rows 5-7, cols 9-10). Demonstrates that a
+// collides=true tile on a background layer does NOT collide.
+static int[] BuildBackgroundLayer()
+{
+    var cells = Filled(LayerDefinition.EmptyCell);
+    for (var y = 5; y <= 7; y++)
+    {
+        Set(cells, 9, y, 3);
+        Set(cells, 10, y, 3);
+    }
+
+    return cells;
+}
+
+// The collidable play field: stone side walls, a grass surface at row 9, dirt fill below,
+// and a floating brick platform (row 6, cols 13-16) to jump onto.
+static int[] BuildMainLayer()
 {
     var cells = Filled(LayerDefinition.EmptyCell);
     for (var y = 0; y < Height; y++)
@@ -86,27 +109,26 @@ static int[] BuildGroundLayer()
         for (var x = 0; x < Width; x++)
         {
             if (x == 0 || x == Width - 1)
-                Set(cells, x, y, 3);
+                Set(cells, x, y, 3);       // stone side walls
             else if (y == 9)
-                Set(cells, x, y, 1);
+                Set(cells, x, y, 1);       // grass surface
             else if (y > 9)
-                Set(cells, x, y, 2);
+                Set(cells, x, y, 2);       // dirt fill
         }
     }
+
+    for (var x = 13; x <= 16; x++)
+        Set(cells, x, 6, 4);               // brick platform to jump onto
 
     return cells;
 }
 
-static int[] BuildDecorationLayer()
+// Decorative water splashes drawn in front of the play field; foreground never collides.
+static int[] BuildForegroundLayer()
 {
     var cells = Filled(LayerDefinition.EmptyCell);
-    for (var x = 7; x <= 11; x++)
-        Set(cells, x, 6, 4);
-    Set(cells, 15, 8, 4);
-    Set(cells, 16, 8, 4);
-    Set(cells, 16, 7, 4);
-    Set(cells, 4, 10, 5);
-    Set(cells, 5, 10, 5);
+    Set(cells, 4, 8, 5);
+    Set(cells, 5, 8, 5);
     return cells;
 }
 
