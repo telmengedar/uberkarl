@@ -2,17 +2,25 @@ using System;
 using Godot;
 using Uberkarl.Content;
 using Uberkarl.Editor;
+using Uberkarl.Editor.Input;
 
 namespace Uberkarl {
 
     /// <summary>
     /// The authoring surface. A <see cref="Control"/> that renders the level being edited (built once
     /// via <see cref="TileMapLevelBuilder.BuildEditable"/>, then updated one cell at a time) and turns
-    /// mouse clicks and drags into grid-cell interactions it raises to the controller. It owns only the
-    /// view and the pointer→cell mapping; it never touches the edit model. The level is fit to the panel
-    /// (scaled and centred); a grid and a hovered-cell highlight are drawn on top.
+    /// device input into grid-cell interactions it raises to the controller. It supports three input
+    /// modes with parity: the <b>mouse</b> hovers and clicks a cell; a <b>grid cursor</b> — the pointer
+    /// stand-in for gamepad and keyboard, which have none — is moved cell-by-cell with the cursor actions
+    /// and acted on with paint/erase. The two stay coherent: a mouse click snaps the grid cursor to the
+    /// clicked cell. It owns only the view, the pointer→cell mapping, and the grid cursor position; it
+    /// never touches the edit model.
     /// </summary>
     public partial class EditorCanvas : Control {
+
+        // Grid-cursor key/stick repeat: one initial delay, then a faster steady repeat while held.
+        const float MoveInitialDelay = 0.32f;
+        const float MoveRepeatRate = 0.06f;
 
         // The tile layers render inside this child; ShowBehindParent pushes the whole subtree behind the
         // Control's own _Draw so the grid and cursor overlay draw on top of the tiles.
@@ -31,11 +39,31 @@ namespace Uberkarl {
         int lastCellX = int.MinValue;
         int lastCellY = int.MinValue;
 
-        /// <summary>Raised when the pointer presses or drags onto a grid cell (x, y in tile units).</summary>
+        // The device-neutral grid cursor (gamepad / keyboard). Null until a level is set.
+        GridCursor cursor;
+        float moveCooldown;
+        bool moveHeld;
+
+        /// <summary>Raised when a cell is activated with the primary action — a mouse click/drag, or the
+        /// paint action at the grid cursor. The controller applies the active tool to this cell.</summary>
         public event Action<int, int> CellPressed;
+
+        /// <summary>Raised when the erase action is used at the grid cursor — an explicit erase regardless
+        /// of the active tool (the device convenience that has no single-button mouse equivalent).</summary>
+        public event Action<int, int> CellErased;
 
         public override void _Ready() {
             MouseFilter = MouseFilterEnum.Stop;
+            FocusMode = FocusModeEnum.All; // focusable, so gamepad/keyboard can direct input here
+            // The cursor-move actions share the arrow keys / D-pad / stick with Godot's ui_up/down/left/
+            // right focus navigation. Pinning the four directional focus neighbours to self keeps focus on
+            // the canvas while those move the grid cursor; leaving the canvas is done deliberately with the
+            // focus-next action (Tab / B) instead of by nudging a direction.
+            NodePath self = new NodePath(".");
+            FocusNeighborLeft = self;
+            FocusNeighborRight = self;
+            FocusNeighborTop = self;
+            FocusNeighborBottom = self;
             ClipContents = true;
             worldRoot = new Node2D { Name = "World", ShowBehindParent = true };
             AddChild(worldRoot);
@@ -52,6 +80,12 @@ namespace Uberkarl {
             tileSize = level.TileSize;
             width = level.Width;
             height = level.Height;
+
+            if (cursor == null)
+                cursor = new GridCursor(width, height);
+            else
+                cursor.Resize(width, height);
+
             Recenter();
             QueueRedraw();
         }
@@ -69,12 +103,77 @@ namespace Uberkarl {
                 layer.SetCell(cell, sourceId, Vector2I.Zero);
         }
 
+        // Poll the held cursor-move actions only while this surface has focus, so the same D-pad / stick /
+        // arrow keys drive the grid cursor here but navigate the side panels when a panel is focused. A
+        // repeat clock gives the familiar "step, pause, then stream" feel for a held direction.
+        public override void _Process(double delta) {
+            if (cursor == null || !HasFocus()) {
+                moveHeld = false;
+                return;
+            }
+
+            int dx = AxisFor(EditorAction.MoveCursorRight, EditorAction.MoveCursorLeft);
+            int dy = AxisFor(EditorAction.MoveCursorDown, EditorAction.MoveCursorUp);
+            if (dx == 0 && dy == 0) {
+                moveHeld = false; // released — the next press steps immediately
+                return;
+            }
+
+            if (!moveHeld) {
+                // Fresh press: step once now, then hold for the initial delay before the repeat stream.
+                moveHeld = true;
+                StepCursor(dx, dy);
+                moveCooldown = MoveInitialDelay;
+                return;
+            }
+
+            moveCooldown -= (float)delta;
+            if (moveCooldown <= 0f) {
+                StepCursor(dx, dy);
+                moveCooldown = MoveRepeatRate;
+            }
+        }
+
+        void StepCursor(int dx, int dy) {
+            if (cursor.TryMove(dx, dy))
+                QueueRedraw();
+        }
+
+        static int AxisFor(EditorAction positive, EditorAction negative) {
+            int value = 0;
+            if (Input.IsActionPressed(EditorActionMap.NameOf(positive)))
+                value += 1;
+            if (Input.IsActionPressed(EditorActionMap.NameOf(negative)))
+                value -= 1;
+            return value;
+        }
+
         public override void _GuiInput(InputEvent @event) {
+            // Grid-cursor paint / erase (gamepad button, keyboard) — act at the cursor cell.
+            if (@event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Paint))) {
+                if (cursor != null)
+                    CellPressed?.Invoke(cursor.X, cursor.Y);
+                AcceptEvent();
+                return;
+            }
+            if (@event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Erase))) {
+                if (cursor != null)
+                    CellErased?.Invoke(cursor.X, cursor.Y);
+                AcceptEvent();
+                return;
+            }
+
+            // Mouse: hover + click/drag paints via the active tool, and snaps the shared cursor to the cell.
             if (@event is InputEventMouseButton button && button.ButtonIndex == MouseButton.Left) {
                 if (button.Pressed) {
+                    GrabFocus();
                     pointerDown = true;
                     lastCellX = int.MinValue;
                     lastCellY = int.MinValue;
+                    if (TryCell(button.Position, out int cx, out int cy) && cursor != null) {
+                        cursor.MoveTo(cx, cy);
+                        QueueRedraw();
+                    }
                     EmitCellAt(button.Position);
                 } else {
                     pointerDown = false;
@@ -171,11 +270,22 @@ namespace Uberkarl {
             // Level border.
             DrawRect(new Rect2(origin, size), new Color(0.4f, 0.45f, 0.55f), false, 1.5f);
 
-            // Hovered-cell highlight.
+            // Hovered-cell highlight (mouse) — a soft amber wash.
             if (hoverX >= 0 && hoverY >= 0) {
                 Vector2 cellPos = origin + new Vector2(hoverX, hoverY) * step;
                 DrawRect(new Rect2(cellPos, new Vector2(step, step)), new Color(1f, 0.85f, 0.2f, 0.25f));
-                DrawRect(new Rect2(cellPos, new Vector2(step, step)), new Color(1f, 0.85f, 0.2f, 0.9f), false, 1.5f);
+            }
+
+            // Grid cursor (gamepad / keyboard) — a bold outline so it reads as "where an action lands".
+            // Bright while this surface is focused; dimmed when focus is on a panel, so its position is
+            // still visible but clearly not the active input target.
+            if (cursor != null) {
+                Vector2 cellPos = origin + new Vector2(cursor.X, cursor.Y) * step;
+                bool active = HasFocus();
+                float alpha = active ? 1f : 0.45f;
+                float thickness = active ? 2.5f : 1.5f;
+                DrawRect(new Rect2(cellPos, new Vector2(step, step)), new Color(1f, 0.85f, 0.2f, active ? 0.18f : 0.08f));
+                DrawRect(new Rect2(cellPos, new Vector2(step, step)), new Color(1f, 0.85f, 0.2f, alpha), false, thickness);
             }
         }
     }

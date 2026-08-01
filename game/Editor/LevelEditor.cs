@@ -4,6 +4,7 @@ using System.IO;
 using Godot;
 using Uberkarl.Content;
 using Uberkarl.Editor;
+using Uberkarl.Editor.Input;
 using Uberkarl.Packages;
 
 namespace Uberkarl {
@@ -27,6 +28,7 @@ namespace Uberkarl {
         LevelEditSession session;
         Tool activeTool = Tool.Paint;
         int activeTileId = LayerDefinition.EmptyCell;
+        int activePaletteIndex = -1;
         int activeLayerIndex;
         string currentFilePath;
 
@@ -53,7 +55,36 @@ namespace Uberkarl {
                 LoadFromResPath(SamplePackagePath);
             else
                 NewLevel();
+
+            // Start with the canvas focused so a gamepad or keyboard drives the grid cursor immediately,
+            // with no click required. Deferred so the whole UI tree is inside the scene tree first.
+            canvas.CallDeferred(Control.MethodName.GrabFocus);
         }
+
+        // Global editor actions that work regardless of which surface holds focus. Cursor movement and
+        // paint/erase-at-cursor are consumed by the focused EditorCanvas (see EditorCanvas._GuiInput /
+        // _Process); everything here is device-neutral and reaches _UnhandledInput because no focused
+        // Control claimed it. Guarded against key-repeat echo so a held key fires each action once.
+        public override void _UnhandledInput(InputEvent @event) {
+            if (@event.IsEcho())
+                return;
+
+            if (Fired(@event, EditorAction.CycleTilePrev)) CycleTile(-1);
+            else if (Fired(@event, EditorAction.CycleTileNext)) CycleTile(+1);
+            else if (Fired(@event, EditorAction.CycleLayerPrev)) CycleLayer(-1);
+            else if (Fired(@event, EditorAction.CycleLayerNext)) CycleLayer(+1);
+            else if (Fired(@event, EditorAction.ToggleTool)) ToggleTool();
+            else if (Fired(@event, EditorAction.Undo)) Undo();
+            else if (Fired(@event, EditorAction.Redo)) Redo();
+            else if (Fired(@event, EditorAction.Save)) Save();
+            else if (Fired(@event, EditorAction.FocusNext)) AdvanceFocus();
+            else return;
+
+            GetViewport().SetInputAsHandled();
+        }
+
+        static bool Fired(InputEvent @event, EditorAction action)
+            => @event.IsActionPressed(EditorActionMap.NameOf(action));
 
         // ----- UI construction -----
 
@@ -153,6 +184,7 @@ namespace Uberkarl {
                 SizeFlagsVertical = SizeFlags.ExpandFill,
             };
             canvas.CellPressed += OnCellPressed;
+            canvas.CellErased += OnCellErased;
             body.AddChild(canvas);
 
             return body;
@@ -248,8 +280,10 @@ namespace Uberkarl {
 
             if (paletteTileIds.Count > 0) {
                 paletteList.Select(0);
+                activePaletteIndex = 0;
                 activeTileId = paletteTileIds[0];
             } else {
+                activePaletteIndex = -1;
                 activeTileId = LayerDefinition.EmptyCell;
             }
         }
@@ -289,6 +323,51 @@ namespace Uberkarl {
             if (change is { } committed)
                 canvas.Apply(committed);
             UpdateState();
+        }
+
+        void OnCellErased(int x, int y) {
+            if (session == null)
+                return;
+            if (session.EraseCell(activeLayerIndex, x, y) is { } committed)
+                canvas.Apply(committed);
+            UpdateState();
+        }
+
+        // ----- action-driven navigation (gamepad + keyboard parity with mouse selection) -----
+
+        void CycleTile(int direction) {
+            if (paletteTileIds.Count == 0)
+                return;
+            int next = direction >= 0
+                ? CyclicSelection.Next(activePaletteIndex, paletteTileIds.Count)
+                : CyclicSelection.Prev(activePaletteIndex, paletteTileIds.Count);
+            paletteList.Select(next);
+            OnPaletteSelected(next); // reuses the mouse path: sets active tile + switches to Paint
+        }
+
+        void CycleLayer(int direction) {
+            if (session == null || session.Level.Layers.Count == 0)
+                return;
+            int next = direction >= 0
+                ? CyclicSelection.Next(activeLayerIndex, session.Level.Layers.Count)
+                : CyclicSelection.Prev(activeLayerIndex, session.Level.Layers.Count);
+            layerList.Select(next);
+            OnLayerSelected(next);
+        }
+
+        void ToggleTool() {
+            SetTool(activeTool == Tool.Paint ? Tool.Erase : Tool.Paint);
+            paintButton.ButtonPressed = activeTool == Tool.Paint;
+            eraseButton.ButtonPressed = activeTool == Tool.Erase;
+        }
+
+        // Move focus across the toolbar / panels / canvas so a gamepad or keyboard can reach every
+        // control. Godot's native focus navigation walks the visible controls; from the canvas this steps
+        // into the panels, and Tab / Shift+Tab (ui_focus_next/prev) cover the reverse on keyboard.
+        void AdvanceFocus() {
+            Control focused = GetViewport().GuiGetFocusOwner();
+            Control next = focused?.FindNextValidFocus();
+            (next ?? canvas)?.GrabFocus();
         }
 
         void Undo() {
@@ -333,10 +412,13 @@ namespace Uberkarl {
 
         void OnPaletteSelected(long index) {
             int i = (int)index;
-            if (i >= 0 && i < paletteTileIds.Count)
+            if (i >= 0 && i < paletteTileIds.Count) {
+                activePaletteIndex = i;
                 activeTileId = paletteTileIds[i];
+            }
             SetTool(Tool.Paint);
             paintButton.ButtonPressed = true;
+            eraseButton.ButtonPressed = false;
             UpdateState();
         }
 
