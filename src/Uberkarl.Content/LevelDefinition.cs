@@ -13,6 +13,15 @@ public sealed class LevelDefinition
     public ResourceReference TileSet { get; init; }
 
     /// <summary>
+    /// Optional solid fill rendered behind every layer, always covering the viewport regardless of
+    /// camera position, so a finite parallax layer's edge never hard-cuts to the viewport clear
+    /// colour. A hex string (<c>#RRGGBB</c> or <c>#RRGGBBAA</c>); <c>null</c> when the level declares
+    /// no fill (the viewport clear colour then shows through, as before). Parsed and validated to an
+    /// <see cref="RgbaColor"/> at load time.
+    /// </summary>
+    public string? BackgroundColor { get; init; }
+
+    /// <summary>
     /// Named spawn points keyed by spawn name, each a grid cell (tile units). Enables spawning
     /// the player at a chosen entry point; a single default is named by <see cref="DefaultSpawn"/>.
     /// Empty when the level declares no spawns (e.g. a display-only level).

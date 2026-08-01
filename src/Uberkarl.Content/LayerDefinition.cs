@@ -25,5 +25,15 @@ public sealed class LayerDefinition
     /// </summary>
     public float ScrollSpeed { get; init; } = 1.0f;
 
+    /// <summary>
+    /// Whether this layer's content tiles across the scroll extent instead of ending. When <c>true</c>
+    /// the layer is rendered through a repeating parallax wrapper whose repeat period is the layer's
+    /// content size, so a background repeats seamlessly rather than running out at a finite edge.
+    /// Defaults to <c>false</c> (finite). Invariant: a <see cref="Collision"/> layer MUST NOT repeat —
+    /// repeating the visuals would not repeat the authored collision geometry, so screen and world
+    /// would disagree. The loader enforces this.
+    /// </summary>
+    public bool Repeat { get; init; }
+
     public IReadOnlyList<int> Cells { get; init; } = Array.Empty<int>();
 }

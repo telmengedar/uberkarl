@@ -17,6 +17,7 @@ public static class LevelLoader
         var graphics = ResolveGraphics(resolver, tileSet);
         var collidingTileIds = CollectCollidingTileIds(tileSet);
         ValidateSpawns(level);
+        var backgroundColor = ParseBackgroundColor(level);
 
         var layers = new List<ResolvedLayer>(level.Layers.Count);
         foreach (var layer in level.Layers)
@@ -27,6 +28,7 @@ public static class LevelLoader
                 Name = layer.Name,
                 Collision = layer.Collision,
                 ScrollSpeed = layer.ScrollSpeed,
+                Repeat = layer.Repeat,
                 Cells = layer.Cells,
             });
         }
@@ -41,7 +43,19 @@ public static class LevelLoader
             CollidingTileIds = collidingTileIds,
             Spawns = level.Spawns,
             DefaultSpawn = level.DefaultSpawn,
+            BackgroundColor = backgroundColor,
         };
+    }
+
+    private static RgbaColor? ParseBackgroundColor(LevelDefinition level)
+    {
+        if (string.IsNullOrWhiteSpace(level.BackgroundColor))
+            return null;
+        if (!RgbaColor.TryParse(level.BackgroundColor, out var color))
+            throw new LevelContentException(
+                $"Background colour '{level.BackgroundColor}' is not a valid hex colour " +
+                "(expected #RRGGBB or #RRGGBBAA).");
+        return color;
     }
 
     private static byte[] Resolve(IResourceResolver resolver, ResourceReference reference, string role)
@@ -119,6 +133,11 @@ public static class LevelLoader
             throw new LevelContentException(
                 $"Layer '{layer.Name}' is a collision layer but has scrollSpeed {layer.ScrollSpeed}; a collision " +
                 "layer must be world-locked (scrollSpeed == 1.0) so its on-screen position matches its world position.");
+
+        if (layer.Collision && layer.Repeat)
+            throw new LevelContentException(
+                $"Layer '{layer.Name}' is a collision layer but has repeat enabled; a collision layer must not " +
+                "repeat because tiling its visuals would not tile its authored collision geometry.");
 
         var expected = level.Width * level.Height;
         if (layer.Cells.Count != expected)

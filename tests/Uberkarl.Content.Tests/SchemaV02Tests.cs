@@ -350,6 +350,239 @@ public sealed class SchemaV02Tests
         Assert.That(resolved.Layers[0].ScrollSpeed, Is.EqualTo(1.5f), "a non-collision layer may take any scroll speed (foreground > 1.0 allowed)");
     }
 
+    [Test]
+    public void Level_BackgroundColor_SerializesAndRoundTrips()
+    {
+        var original = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 1,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+            BackgroundColor = "#3A5A8C",
+        };
+
+        var json = Encoding.UTF8.GetString(LevelContentSerializer.WriteLevel(original));
+        var restored = LevelContentSerializer.ReadLevel(LevelContentSerializer.WriteLevel(original));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(json, Does.Contain("\"backgroundColor\": \"#3A5A8C\""));
+            Assert.That(restored.BackgroundColor, Is.EqualTo("#3A5A8C"));
+        });
+    }
+
+    [Test]
+    public void Level_BackgroundColor_OmittedWhenNull()
+    {
+        var level = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 1,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+        };
+
+        var json = Encoding.UTF8.GetString(LevelContentSerializer.WriteLevel(level));
+
+        Assert.That(json, Does.Not.Contain("backgroundColor"), "an absent background fill is omitted from JSON");
+    }
+
+    [Test]
+    public void Load_ParsesBackgroundColorToRgba()
+    {
+        var level = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 1,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+            BackgroundColor = "#20408060",
+            Layers = new[]
+            {
+                new LayerDefinition { Name = "backdrop", Collision = false, Cells = new[] { LayerDefinition.EmptyCell } },
+            },
+        };
+
+        using var registry = BuildRegistry(level);
+        var resolved = LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath));
+
+        Assert.That(resolved.BackgroundColor, Is.EqualTo(new RgbaColor(0x20, 0x40, 0x80, 0x60)));
+    }
+
+    [Test]
+    public void Load_WhenNoBackgroundColor_ResolvesNull()
+    {
+        var level = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 1,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+            Layers = new[]
+            {
+                new LayerDefinition { Name = "backdrop", Collision = false, Cells = new[] { LayerDefinition.EmptyCell } },
+            },
+        };
+
+        using var registry = BuildRegistry(level);
+        var resolved = LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath));
+
+        Assert.That(resolved.BackgroundColor, Is.Null);
+    }
+
+    [Test]
+    public void Load_WhenBackgroundColorMalformed_Throws()
+    {
+        var level = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 1,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+            BackgroundColor = "not-a-colour",
+        };
+
+        using var registry = BuildRegistry(level);
+
+        var exception = Assert.Throws<LevelContentException>(
+            () => LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath)));
+        Assert.That(exception!.Message, Does.Contain("hex colour"));
+    }
+
+    [Test]
+    public void RgbaColor_TryParse_HandlesHexFormats()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(RgbaColor.TryParse("#3A5A8C", out var withHash), Is.True);
+            Assert.That(withHash, Is.EqualTo(new RgbaColor(0x3A, 0x5A, 0x8C, 255)), "6-digit hex is fully opaque");
+
+            Assert.That(RgbaColor.TryParse("3a5a8c", out var noHashLower), Is.True);
+            Assert.That(noHashLower, Is.EqualTo(new RgbaColor(0x3A, 0x5A, 0x8C, 255)), "leading # optional, case-insensitive");
+
+            Assert.That(RgbaColor.TryParse("#20408060", out var withAlpha), Is.True);
+            Assert.That(withAlpha, Is.EqualTo(new RgbaColor(0x20, 0x40, 0x80, 0x60)), "8-digit hex carries alpha");
+
+            Assert.That(RgbaColor.TryParse("#FFF", out _), Is.False, "3-digit shorthand is not accepted");
+            Assert.That(RgbaColor.TryParse("#GGGGGG", out _), Is.False, "non-hex digits are rejected");
+            Assert.That(RgbaColor.TryParse("#204080GG", out _), Is.False, "a non-hex alpha pair is rejected");
+            Assert.That(RgbaColor.TryParse("#12345", out _), Is.False, "a 5-digit length is rejected");
+            Assert.That(RgbaColor.TryParse(null, out _), Is.False);
+            Assert.That(RgbaColor.TryParse("", out _), Is.False);
+        });
+    }
+
+    [Test]
+    public void Layer_Repeat_DefaultsToFalse_WhenOmitted()
+    {
+        var json = Encoding.UTF8.GetBytes(
+            "{\"tileSize\":16,\"width\":1,\"height\":1,\"tileSet\":\"self:tileset.json\"," +
+            "\"layers\":[{\"name\":\"backdrop\",\"cells\":[-1]}]}");
+
+        var level = LevelContentSerializer.ReadLevel(json);
+
+        Assert.That(level.Layers[0].Repeat, Is.False, "a layer is finite unless it opts into repeat");
+    }
+
+    [Test]
+    public void Layer_Repeat_SerializesAsBoolAndRoundTrips()
+    {
+        var original = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 1,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+            Layers = new[]
+            {
+                new LayerDefinition { Name = "backdrop", Collision = false, ScrollSpeed = 0.5f, Repeat = true, Cells = new[] { LayerDefinition.EmptyCell } },
+            },
+        };
+
+        var json = Encoding.UTF8.GetString(LevelContentSerializer.WriteLevel(original));
+        var restored = LevelContentSerializer.ReadLevel(LevelContentSerializer.WriteLevel(original));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(json, Does.Contain("\"repeat\": true"), "repeat emits a boolean field");
+            Assert.That(restored.Layers[0].Repeat, Is.True);
+        });
+    }
+
+    [Test]
+    public void Load_CarriesRepeatOntoResolvedLayer()
+    {
+        var level = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 2,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+            Layers = new[]
+            {
+                new LayerDefinition { Name = "backdrop", Collision = false, ScrollSpeed = 0.5f, Repeat = true, Cells = new[] { 2, LayerDefinition.EmptyCell } },
+                new LayerDefinition { Name = "terrain", Collision = true, ScrollSpeed = 1f, Repeat = false, Cells = new[] { 1, 2 } },
+            },
+        };
+
+        using var registry = BuildRegistry(level);
+        var resolved = LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(resolved.Layers[0].Repeat, Is.True, "the repeating backdrop carries its repeat flag");
+            Assert.That(resolved.Layers[1].Repeat, Is.False, "the finite terrain stays finite");
+        });
+    }
+
+    [Test]
+    public void Load_WhenCollisionLayerRepeats_Throws()
+    {
+        var level = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 2,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+            Layers = new[]
+            {
+                new LayerDefinition { Name = "terrain", Collision = true, ScrollSpeed = 1f, Repeat = true, Cells = new[] { 1, 2 } },
+            },
+        };
+
+        using var registry = BuildRegistry(level);
+
+        var exception = Assert.Throws<LevelContentException>(
+            () => LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath)));
+        Assert.Multiple(() =>
+        {
+            Assert.That(exception!.Message, Does.Contain("repeat"));
+            Assert.That(exception!.Message, Does.Contain("collision layer"));
+        });
+    }
+
+    [Test]
+    public void Load_WhenNonCollisionLayerRepeats_Succeeds()
+    {
+        var level = new LevelDefinition
+        {
+            TileSize = 16,
+            Width = 2,
+            Height = 1,
+            TileSet = ResourceReference.ToSelf(TileSetPath),
+            Layers = new[]
+            {
+                new LayerDefinition { Name = "backdrop", Collision = false, ScrollSpeed = 0.5f, Repeat = true, Cells = new[] { 2, LayerDefinition.EmptyCell } },
+            },
+        };
+
+        using var registry = BuildRegistry(level);
+        var resolved = LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath));
+
+        Assert.That(resolved.Layers[0].Repeat, Is.True, "a non-collision layer may repeat");
+    }
+
     private static PackageRegistry BuildRegistry(LevelDefinition level)
     {
         var tileSet = new TileSetDefinition
