@@ -45,6 +45,10 @@ var level = new LevelDefinition
     Width = Width,
     Height = Height,
     TileSet = ResourceReference.ToSelf(tileSetPath),
+    // A dusk-blue sky fill behind every layer. It always covers the viewport regardless of camera
+    // position, so scrolling to an edge never hard-cuts to the viewport clear colour behind the
+    // finite parallax hills.
+    BackgroundColor = "#3A5A8C",
     Spawns = new Dictionary<string, GridPosition> { ["start"] = new GridPosition(2, 10) },
     DefaultSpawn = "start",
     Layers = new[]
@@ -52,7 +56,8 @@ var level = new LevelDefinition
         // Drawn back to front (array order). A non-collision PARALLAX layer at scrollSpeed 0.5:
         // distant hills and clouds that scroll at half the camera's speed, so they visibly lag
         // behind the world-locked terrain as the player moves — proving the depth differential.
-        new LayerDefinition { Name = "backdrop", Collision = false, ScrollSpeed = 0.5f, Cells = BuildBackdropLayer() },
+        // repeat:true tiles the backdrop across the full scroll extent so it never runs out at an edge.
+        new LayerDefinition { Name = "backdrop", Collision = false, ScrollSpeed = 0.5f, Repeat = true, Cells = BuildBackdropLayer() },
         // The world-locked collision layer (scrollSpeed 1.0): ground, side walls, and platforms.
         new LayerDefinition { Name = "terrain", Collision = true, ScrollSpeed = 1.0f, Cells = BuildTerrainLayer() },
     },

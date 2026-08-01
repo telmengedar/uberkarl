@@ -10,14 +10,19 @@ namespace Uberkarl {
     /// on each colliding tile); each <see cref="TileMapLayer"/> sets <c>CollisionEnabled</c> from its
     /// layer's collision flag, so a non-collision layer never blocks the player even when it places a
     /// solid tile. Draw order is the layer array order (back to front), independent of collision.
-    /// A layer whose <c>ScrollSpeed != 1.0</c> is wrapped in a <see cref="Parallax2D"/> so it scrolls
-    /// at that factor relative to the camera; world-locked (1.0) layers are added directly and move
-    /// with the camera naturally.
+    /// A layer whose <c>ScrollSpeed != 1.0</c> or that opts into <c>Repeat</c> is wrapped in a
+    /// <see cref="Parallax2D"/> so it scrolls at that factor relative to the camera and, when
+    /// repeating, tiles across the scroll extent (repeat period = the layer's content size);
+    /// finite world-locked layers are added directly and move with the camera naturally.
     /// </summary>
     public static class TileMapLevelBuilder {
 
         public static Node2D Build(ResolvedLevel level) {
             BuiltTileSet shared = BuildTileSet(level);
+
+            // The layer's content size in pixels — used as the repeat period for a repeating layer so
+            // its content tiles seamlessly across the scroll extent.
+            Vector2 contentSize = new Vector2(level.Width * level.TileSize, level.Height * level.TileSize);
 
             Node2D root = new Node2D { Name = "Level" };
             foreach (ResolvedLayer layer in level.Layers) {
@@ -36,23 +41,25 @@ namespace Uberkarl {
                     }
                 }
 
-                root.AddChild(WrapForScroll(mapLayer, layer));
+                root.AddChild(WrapForScroll(mapLayer, layer, contentSize));
             }
 
             return root;
         }
 
-        // A world-locked layer (scrollSpeed 1.0) is added as-is. A parallax layer is wrapped in a
-        // Parallax2D that scrolls its child at scroll_scale = scrollSpeed relative to the camera.
-        // repeat_size = 0 keeps the layer finite (no tiling) — these are finite levels.
-        static Node2D WrapForScroll(TileMapLayer mapLayer, ResolvedLayer layer) {
-            if (layer.ScrollSpeed == 1f)
+        // A layer that is neither parallax nor repeating (scrollSpeed 1.0, repeat off) is added as-is
+        // — it moves with the camera naturally. A layer that parallax-scrolls (scrollSpeed != 1.0) or
+        // repeats is wrapped in a Parallax2D: scroll_scale = scrollSpeed relative to the camera, and
+        // repeat_size = the layer's content size when repeating (so it tiles across the scroll extent)
+        // or Vector2.Zero when finite (no tiling).
+        static Node2D WrapForScroll(TileMapLayer mapLayer, ResolvedLayer layer, Vector2 contentSize) {
+            if (layer.ScrollSpeed == 1f && !layer.Repeat)
                 return mapLayer;
 
             Parallax2D parallax = new Parallax2D {
                 Name = layer.Name,
                 ScrollScale = new Vector2(layer.ScrollSpeed, layer.ScrollSpeed),
-                RepeatSize = Vector2.Zero,
+                RepeatSize = layer.Repeat ? contentSize : Vector2.Zero,
             };
             mapLayer.Name = layer.Name + "Tiles";
             parallax.AddChild(mapLayer);

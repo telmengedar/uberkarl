@@ -162,14 +162,18 @@ Layer array order is `backdrop` then `terrain`, so the background draws behind t
 
 1. **Foreground parallax range** — `scrollSpeed > 1.0` (faster-than-world foreground) is permitted
    and validated but unused. Keep it open, or constrain to `(0, 1]` (background-only) until a real
-   foreground layer needs it?
+   foreground layer needs it? *(Still open — Toni: keep `> 1.0` allowed. See §13.)*
 2. **Finite-edge gap** — with finite parallax the background can run out before the level edge
    (transparent gap). Acceptable for now, or should a level declare a solid backdrop fill / clamp
-   colour behind the parallax so edges never show empty space?
+   colour behind the parallax so edges never show empty space? **Resolved (§13):** both — a level
+   `backgroundColor` fill behind everything *and* per-layer `repeat` tiling.
 3. **Camera smoothing** — light position smoothing (speed 8) is on by default. Keep it, make it a
-   per-level/authorable setting, or turn it off for a crisp 1:1 follow?
+   per-level/authorable setting, or turn it off for a crisp 1:1 follow? **Resolved (§13):** keep
+   smoothing, but bump to a fast smooth (speed 20) for a crisper follow. Per-level/authorable
+   deferred (seam left).
 4. **Zoom** — the 3× zoom (≈24 tiles visible) is inherited from the framing camera. Is that the
-   intended play field for a scrolling game, or should the visible span be tuned now?
+   intended play field for a scrolling game, or should the visible span be tuned now? *(Still open —
+   Toni: leave zoom as-is, adjustable later.)*
 
 ## 12. Implementation Milestones (as built)
 
@@ -181,3 +185,72 @@ Layer array order is `backdrop` then `terrain`, so the background draws behind t
    (`scroll_scale`, `repeat_size = 0`); world-locked layers unwrapped.
 4. Content: widen the sample to 60×16 with a `scrollSpeed 0.5` backdrop; regenerate `sample.pkg`.
 5. Verify in-engine (two-position parallax proof, edge clamps, gravity/collision, editor errors).
+
+## 13. Scrolling Polish Pass (feel review of PR #6)
+
+A lean follow-up increment off Toni's feel review of the scrolling feature (task #7430). Three
+small, cohesive changes; no new scope beyond the ask (#1184). Resolves §11 Q2 and Q3.
+
+### 13.1 Design decisions
+
+| # | Decision | Rationale | Alternatives rejected |
+|---|---|---|---|
+| D7 | **Level `backgroundColor`** is an optional authored **hex string** (`#RRGGBB`/`#RRGGBBAA`), parsed to an engine-agnostic `RgbaColor` value type at the loader boundary | A solid fill behind everything is the simplest cure for the finite-edge hard-cut; a hex string is human-authorable and conventional; parsing at the Godot-free boundary keeps validation unit-testable and fails loudly on a malformed colour, consistent with D2 | A per-channel `{r,g,b,a}` object in JSON (verbose to author); validating in the engine (moves a content error past the Godot-free seam); a full theme/gradient (over-scoped) |
+| D8 | The fill renders as a **full-rect `ColorRect` on a back `CanvasLayer`** (`layer = -100`), not a world-space node | A `CanvasLayer` is unaffected by the `Camera2D` transform, so the fill always covers the viewport regardless of camera position and never scrolls with the world — exactly the requirement. A negative layer index keeps it behind all layer-0 world content | A giant world-space `ColorRect` sized/moved to track the camera (reimplements what a `CanvasLayer` gives free); the viewport clear colour (not per-level authorable) |
+| D9 | **Per-layer `repeat` (bool, default false)**; a repeating layer's `Parallax2D.repeat_size` = the layer's content size | Backgrounds are usually repeatable or larger than the level (Toni); a single bool is the whole degree of freedom, composing with `scrollSpeed` with no new taxonomy. Content size as the repeat period tiles the backdrop seamlessly across the scroll extent | A repeat-count or explicit tile-size field (more knobs than needed); infinite/procedural backgrounds (out of scope) |
+| D10 | A collision layer **MUST NOT repeat** (loader-enforced), mirroring the D2 scroll invariant | Tiling the visuals would not tile the authored collision geometry, so screen and world would disagree — the same class of bug D2 guards against | Allowing it (silent physics/visual mismatch) |
+| D11 | `repeat` wraps a layer in `Parallax2D` **even when world-locked** (`scrollSpeed == 1.0`) — wrap when `scrollSpeed != 1.0` **or** `repeat` | `repeat` is a rendering behaviour that needs the `Parallax2D` to express; honouring it regardless of scroll speed avoids a surprising silent no-op on a world-locked repeating layer | Only honouring `repeat` on parallax layers (a world-locked `repeat:true` would silently do nothing) |
+| D12 | **Camera position-smoothing speed 8 → 20** (a fast smooth), extracted to a named constant | Toni wanted a crisper follow that still eases rather than snapping 1:1; 20 is crisp-but-not-instant. The named constant is the tuning seam for future camera scripting (deadzone/look-ahead), which is explicitly not built here | Instant 1:1 follow (loses the ease Toni wanted to keep); building camera scripting now (out of scope — seam only) |
+
+### 13.2 Schema additions (`src/Uberkarl.Content`, unit-tested)
+
+| Element | Field | Semantics | Default (back-compat) |
+|---|---|---|---|
+| Level | `backgroundColor` (string?) | Optional solid fill behind all layers, hex `#RRGGBB` or `#RRGGBBAA` (leading `#` optional, 6-digit = opaque). Parsed to `RgbaColor` on `ResolvedLevel`. | `null` — omitted from JSON; the viewport clear colour shows through, as before |
+| Level layer | `repeat` (bool) | Whether the layer tiles across the scroll extent instead of ending at a finite edge. | `false` — finite unless it opts in |
+
+- New engine-agnostic value type **`RgbaColor(byte R,G,B,A)`** with `TryParse` for the two hex
+  forms. `ResolvedLevel.BackgroundColor` is `RgbaColor?`; `ResolvedLayer.Repeat` is `bool`.
+- **Invariants (loader-enforced, both throw `LevelContentException` at the Godot-free boundary):** a
+  malformed `backgroundColor` throws (`"…is not a valid hex colour…"`); a `collision:true` layer
+  with `repeat:true` throws (D10). Non-collision layers may repeat freely.
+- `backgroundColor` omits-when-null (like `defaultSpawn`); `repeat` serialises as a plain bool
+  (like `collision`). All parsing/validation stays Godot-free and unit-tested.
+
+### 13.3 Package → Godot mapping
+
+| Concern | Node | Key properties |
+|---|---|---|
+| Background fill | `CanvasLayer` "BackgroundFill" (`layer = -100`) → `ColorRect` "Fill" (`FullRect` preset) | `Color` from `RgbaColor` (/255 per channel); covers the viewport, never scrolls |
+| Repeating layer | existing `Parallax2D` wrapper | `repeat_size = (Width·TileSize, Height·TileSize)` when `repeat`, else `(0,0)`; wrapped when `scrollSpeed != 1.0 OR repeat` (D11) |
+| Camera feel | existing player-child `Camera2D` | `position_smoothing_speed = 20` (was 8), via named constant |
+
+`scrollSpeed > 1.0` stays allowed (unchanged); zoom stays 3× (unchanged).
+
+### 13.4 Verification (Godot MCP)
+
+- `dotnet build Uberkarl.csproj` → **0 warnings / 0 errors**. Tests: `Uberkarl.Content.Tests`
+  **33/33** (was 22; +11 for `backgroundColor` serialise/omit/parse/malformed, `RgbaColor` hex
+  formats, and `repeat` default/round-trip/carry-through/collision-invariant throw+allow),
+  `Uberkarl.Packages.Tests` **31/31**. Content-lib coverage line **94.0%** / branch **88.4%** (all
+  changed schema classes 100%; `LevelLoader` 94%/88%, `RgbaColor` 95%/95%). Authored-source
+  comment-grep (TODO/FIXME/HACK/XXX + commented-out code): **0**. `get_editor_errors`: **0**.
+- Ran the wide sample (`backgroundColor "#3A5A8C"`, `backdrop` `repeat:true`). Engine confirmed the
+  built tree: `BackgroundFill` `CanvasLayer` (`layer -100`) → `Fill` `ColorRect` (`color #3a5a8cff`,
+  size `1152×648`, `FullRect`); `backdrop` `Parallax2D` `repeat_size (960,256)` = content size,
+  `scroll_scale 0.5`; `terrain` bare world-locked; `Camera2D` `position_smoothing_speed 20`,
+  `limit_right 960`, zoom 3×.
+- **Screenshots (two):** at the **right edge** (camera clamped at the right limit, right wall flush
+  at screen right) the dusk-blue fill covers the whole viewport with no hard cut to the clear
+  colour, and backdrop hills are present right up to the wall (no finite gap); at **mid-level**
+  (player dead-centre, camera unclamped) the fast follow keeps the player centred, with the fill
+  behind the tiled hills. The player follows visibly crisper than the prior speed-8 smoothing.
+
+### 13.5 Future seams (still not built)
+
+- **Per-level / authorable camera smoothing** — the speed is a named constant seam; future camera
+  scripting (deadzone, look-ahead, zoom transitions) layers on at `AttachCamera`. Not built.
+- **Background gradient / image fill** — `backgroundColor` is a single solid colour; a gradient or
+  image backdrop is a later, separate concern.
+- **Foreground parallax (`scrollSpeed > 1.0`)** and **zoom tuning** — left as Toni directed
+  (allowed/unchanged); §11 Q1 and Q4 remain open.

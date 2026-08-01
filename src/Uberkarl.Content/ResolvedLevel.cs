@@ -8,6 +8,13 @@ public sealed class ResolvedLevel
 
     public int Height { get; init; }
 
+    /// <summary>
+    /// The parsed solid background fill rendered behind every layer, or <c>null</c> when the level
+    /// declares none (the viewport clear colour shows through). Always covers the viewport regardless
+    /// of camera position and does not scroll with the world.
+    /// </summary>
+    public RgbaColor? BackgroundColor { get; init; }
+
     public IReadOnlyList<ResolvedLayer> Layers { get; init; } = Array.Empty<ResolvedLayer>();
 
     public IReadOnlyDictionary<int, byte[]> TileGraphics { get; init; } = new Dictionary<int, byte[]>();
@@ -46,6 +53,12 @@ public sealed class ResolvedLayer
     /// <see cref="Collision"/> layer (enforced by the loader).
     /// </summary>
     public float ScrollSpeed { get; init; } = 1.0f;
+
+    /// <summary>
+    /// Whether this layer tiles across the scroll extent (repeating parallax) rather than ending at a
+    /// finite edge. Always <c>false</c> for a <see cref="Collision"/> layer (enforced by the loader).
+    /// </summary>
+    public bool Repeat { get; init; }
 
     public IReadOnlyList<int> Cells { get; init; } = Array.Empty<int>();
 }
