@@ -33,5 +33,10 @@ mono_crash.*
 # The SF2 soundfont in audio/ is public domain and stays committed.
 /audio/*.mid
 
+# .NET build output (library + test projects under src/ and tests/).
+[Bb]in/
+[Oo]bj/
+[Tt]est[Rr]esults/
+
 # NOTE: *.import files are intentionally NOT ignored -- Godot needs them
 # committed for reproducible imports.
