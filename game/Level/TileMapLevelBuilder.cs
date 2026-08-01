@@ -10,6 +10,9 @@ namespace Uberkarl {
     /// on each colliding tile); each <see cref="TileMapLayer"/> sets <c>CollisionEnabled</c> from its
     /// layer's collision flag, so a non-collision layer never blocks the player even when it places a
     /// solid tile. Draw order is the layer array order (back to front), independent of collision.
+    /// A layer whose <c>ScrollSpeed != 1.0</c> is wrapped in a <see cref="Parallax2D"/> so it scrolls
+    /// at that factor relative to the camera; world-locked (1.0) layers are added directly and move
+    /// with the camera naturally.
     /// </summary>
     public static class TileMapLevelBuilder {
 
@@ -33,10 +36,27 @@ namespace Uberkarl {
                     }
                 }
 
-                root.AddChild(mapLayer);
+                root.AddChild(WrapForScroll(mapLayer, layer));
             }
 
             return root;
+        }
+
+        // A world-locked layer (scrollSpeed 1.0) is added as-is. A parallax layer is wrapped in a
+        // Parallax2D that scrolls its child at scroll_scale = scrollSpeed relative to the camera.
+        // repeat_size = 0 keeps the layer finite (no tiling) — these are finite levels.
+        static Node2D WrapForScroll(TileMapLayer mapLayer, ResolvedLayer layer) {
+            if (layer.ScrollSpeed == 1f)
+                return mapLayer;
+
+            Parallax2D parallax = new Parallax2D {
+                Name = layer.Name,
+                ScrollScale = new Vector2(layer.ScrollSpeed, layer.ScrollSpeed),
+                RepeatSize = Vector2.Zero,
+            };
+            mapLayer.Name = layer.Name + "Tiles";
+            parallax.AddChild(mapLayer);
+            return parallax;
         }
 
         static BuiltTileSet BuildTileSet(ResolvedLevel level) {

@@ -22,7 +22,13 @@ public static class LevelLoader
         foreach (var layer in level.Layers)
         {
             ValidateLayer(level, layer, graphics.Keys);
-            layers.Add(new ResolvedLayer { Name = layer.Name, Collision = layer.Collision, Cells = layer.Cells });
+            layers.Add(new ResolvedLayer
+            {
+                Name = layer.Name,
+                Collision = layer.Collision,
+                ScrollSpeed = layer.ScrollSpeed,
+                Cells = layer.Cells,
+            });
         }
 
         return new ResolvedLevel
@@ -109,6 +115,11 @@ public static class LevelLoader
 
     private static void ValidateLayer(LevelDefinition level, LayerDefinition layer, IReadOnlyCollection<int> knownTileIds)
     {
+        if (layer.Collision && layer.ScrollSpeed != 1f)
+            throw new LevelContentException(
+                $"Layer '{layer.Name}' is a collision layer but has scrollSpeed {layer.ScrollSpeed}; a collision " +
+                "layer must be world-locked (scrollSpeed == 1.0) so its on-screen position matches its world position.");
+
         var expected = level.Width * level.Height;
         if (layer.Cells.Count != expected)
             throw new LevelContentException(

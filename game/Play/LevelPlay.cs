@@ -8,12 +8,14 @@ namespace Uberkarl {
 
     /// <summary>
     /// The playable scene root. Loads the sample level, builds its tile layers (collision enabled
-    /// per layer), spawns the player at the level's default spawn, and frames the level with a
-    /// static camera. Mirrors <see cref="LevelDisplay"/> but adds the player and physics.
+    /// per layer, parallax layers wrapped in <see cref="Parallax2D"/>), spawns the player at the
+    /// level's default spawn, and gives the player a <see cref="Camera2D"/> that follows within the
+    /// level bounds. Mirrors <see cref="LevelDisplay"/> but adds the player, physics, and scrolling.
     /// </summary>
     public partial class LevelPlay : Node2D {
 
         const string PackagePath = "res://content/sample.pkg";
+        const float CameraZoom = 3f;
         static readonly Vector2I FallbackStart = new Vector2I(1, 1);
 
         public override void _Ready() {
@@ -28,8 +30,8 @@ namespace Uberkarl {
                 try {
                     ResolvedLevel level = LevelLoader.Load(registry, FindLevelReference(registry.Origin));
                     AddChild(TileMapLevelBuilder.Build(level));
-                    SpawnPlayer(level);
-                    AddCamera(level);
+                    Player player = SpawnPlayer(level);
+                    AttachCamera(player, level);
                     GD.Print($"LevelPlay: playable {level.Width}x{level.Height} level, " +
                         $"{level.CollidingTileIds.Count} solid tile ids across {level.Layers.Count} layers.");
                 } finally {
@@ -40,7 +42,7 @@ namespace Uberkarl {
             }
         }
 
-        void SpawnPlayer(ResolvedLevel level) {
+        Player SpawnPlayer(ResolvedLevel level) {
             Vector2I start = level.DefaultSpawnPosition is { } cell
                 ? new Vector2I(cell.X, cell.Y)
                 : FallbackStart;
@@ -52,15 +54,24 @@ namespace Uberkarl {
                 Position = new Vector2(start.X * level.TileSize + level.TileSize / 2f, start.Y * level.TileSize),
             };
             AddChild(player);
+            return player;
         }
 
-        void AddCamera(ResolvedLevel level) {
+        // The camera is a child of the player, so it follows automatically. Limits from the level
+        // bounds clamp it at the edges so it never scrolls past them; light smoothing softens the
+        // follow. Parallax2D layers read this current camera to compute their scroll.
+        void AttachCamera(Player player, ResolvedLevel level) {
             Camera2D camera = new Camera2D {
                 Name = "Camera",
-                Position = new Vector2(level.Width * level.TileSize / 2f, level.Height * level.TileSize / 2f),
-                Zoom = new Vector2(3f, 3f),
+                Zoom = new Vector2(CameraZoom, CameraZoom),
+                LimitLeft = 0,
+                LimitTop = 0,
+                LimitRight = level.Width * level.TileSize,
+                LimitBottom = level.Height * level.TileSize,
+                PositionSmoothingEnabled = true,
+                PositionSmoothingSpeed = 8f,
             };
-            AddChild(camera);
+            player.AddChild(camera);
             camera.MakeCurrent();
         }
 
