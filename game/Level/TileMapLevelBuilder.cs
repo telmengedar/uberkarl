@@ -6,26 +6,29 @@ namespace Uberkarl {
 
     /// <summary>
     /// Translates a Godot-free <see cref="ResolvedLevel"/> into a tree of <see cref="TileMapLayer"/>s.
-    /// Collidable tiles get a full-tile collision polygon on a TileSet physics layer, but only the
-    /// <see cref="LayerRole.Main"/> layers use that physics-enabled TileSet — background and
-    /// foreground layers use a plain TileSet with no physics layer, so they never collide.
+    /// All layers share ONE <see cref="TileSet"/> (a physics layer with a full-tile collision polygon
+    /// on each colliding tile); each <see cref="TileMapLayer"/> sets <c>CollisionEnabled</c> from its
+    /// layer's collision flag, so a non-collision layer never blocks the player even when it places a
+    /// solid tile. Draw order is the layer array order (back to front), independent of collision.
     /// </summary>
     public static class TileMapLevelBuilder {
 
         public static Node2D Build(ResolvedLevel level) {
-            BuiltTileSet solid = BuildTileSet(level, withCollision: true);
-            BuiltTileSet plain = BuildTileSet(level, withCollision: false);
+            BuiltTileSet shared = BuildTileSet(level);
 
             Node2D root = new Node2D { Name = "Level" };
             foreach (ResolvedLayer layer in level.Layers) {
-                BuiltTileSet chosen = layer.Role == LayerRole.Main ? solid : plain;
-                TileMapLayer mapLayer = new TileMapLayer { Name = layer.Name, TileSet = chosen.Set };
+                TileMapLayer mapLayer = new TileMapLayer {
+                    Name = layer.Name,
+                    TileSet = shared.Set,
+                    CollisionEnabled = layer.Collision,
+                };
                 for (int y = 0; y < level.Height; y++) {
                     for (int x = 0; x < level.Width; x++) {
                         int id = layer.Cells[y * level.Width + x];
                         if (id == LayerDefinition.EmptyCell)
                             continue;
-                        if (chosen.SourceByTile.TryGetValue(id, out int sourceId))
+                        if (shared.SourceByTile.TryGetValue(id, out int sourceId))
                             mapLayer.SetCell(new Vector2I(x, y), sourceId, Vector2I.Zero);
                     }
                 }
@@ -36,10 +39,9 @@ namespace Uberkarl {
             return root;
         }
 
-        static BuiltTileSet BuildTileSet(ResolvedLevel level, bool withCollision) {
+        static BuiltTileSet BuildTileSet(ResolvedLevel level) {
             TileSet tileSet = new TileSet { TileSize = new Vector2I(level.TileSize, level.TileSize) };
-            if (withCollision)
-                tileSet.AddPhysicsLayer();
+            tileSet.AddPhysicsLayer();
 
             Dictionary<int, int> sourceByTile = new Dictionary<int, int>();
             foreach (KeyValuePair<int, byte[]> graphic in level.TileGraphics) {
@@ -56,7 +58,7 @@ namespace Uberkarl {
                 source.CreateTile(Vector2I.Zero);
                 sourceByTile[graphic.Key] = tileSet.AddSource(source);
 
-                if (withCollision && level.CollidingTileIds.Contains(graphic.Key))
+                if (level.CollidingTileIds.Contains(graphic.Key))
                     AddFullTileCollision(source, level.TileSize);
             }
 

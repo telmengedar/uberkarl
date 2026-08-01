@@ -1,8 +1,13 @@
 # Architectural Document: Playable Level — Tile Collision + Player Controller
 
-Phase 1c. Turns the *displayed* level (Phase 1b, `level-display.md`) into a *playable* one:
+Phase 1c/1d. Turns the *displayed* level (Phase 1b, `level-display.md`) into a *playable* one:
 a `CharacterBody2D` player with gravity, movement, and jump that collides against solid
 tiles. Builds directly on the schema decisions ratified by Toni on 2026-08-01 (DiVoid #7416).
+
+**This document reflects the level model v0.2** (Phase 1d, DiVoid #7419) — refined from Toni's
+play-test feedback on the v0.1 increment (PR #4). The current model is stated below; §12 is the
+v0.1 → v0.2 changelog so the deltas are explicit. Terms that were removed in v0.2 (the layer
+`role` enum; the single `playerStart`) appear only in §12 as history, never as the current model.
 
 This is a lean design update shipped together with a working increment. Scope is deliberately
 small — see Non-Scope.
@@ -16,61 +21,69 @@ and must be honored only where the ratified schema says it should be.
 
 ## 2. Scope & Non-Scope
 
-**In scope:** the `collides` tile flag; the layer `role`; native Godot tile collision on the
-main layer; a minimal platformer controller; a player start; an extended sample level; a
-playable scene verified in-engine.
+**In scope:** the `collides` tile flag; the per-layer `collision` flag; native Godot tile
+collision via one shared TileSet; named `spawns` with a `defaultSpawn`; editor-adjustable player
+physics; a minimal platformer controller; an extended sample level; a playable scene verified
+in-engine.
 
 **Out of scope (YAGNI):** enemies, hazards, death/respawn, scripted behavior, a level editor,
-animation, camera work beyond a static framing camera, and multiple-active-layer switching
-(seam only — see §10).
+animation, camera work beyond a static framing camera, active-collision-layer switching, level
+exits/transitions, parallax scroll speeds, and per-level/script-driven physics overrides — all
+seams only (see §10).
 
-## 3. Ratified Schema Direction (from #7416, quoted)
+## 3. Ratified Model Direction (v0.2, from #7418 / #7419)
 
-- Collision is **a flag on the tile definition** (`collides`).
-- Layers have a **role** (`background` / `main` / `foreground`); **only the `main` layer
-  honors collision** — background and foreground always ignore it, *even if a tile has
-  `collides`*.
-- Keep resource kinds separate; level grid uniform square; flat `int[]` cells with a seam
-  for alternates. Multiple switchable active layers is **future** (seam only).
+- Collision is **a flag on the tile definition** (`collides`) AND **a flag on the layer**
+  (`collision`). A tile collides only when a `collides` tile sits on a `collision:true` layer.
+- **Draw order is the layer array order** (back → front) and is **independent of collision** —
+  no role concept; a collision layer can sit anywhere in the draw stack.
+- Player spawns are **named**: a `spawns` map (`name → {x,y}`) plus a `defaultSpawn` name.
+  Runtime spawns at the default; named lookup is the seam for future transitions.
+- Player physics (gravity/jump/speed) are **editor-adjustable** with the current values as
+  defaults; per-level and script-driven overrides are a future seam.
+- Keep resource kinds separate; level grid uniform square; flat `int[]` cells with a seam for
+  alternates. Active-collision-layer *switching* among collision layers is **future** (seam only).
 
-## 4. Schema v0.1 Additions (`src/Uberkarl.Content`, engine-agnostic)
+## 4. Schema v0.2 (`src/Uberkarl.Content`, engine-agnostic)
 
-| Element | Addition | Semantics | Default (back-compat) |
+| Element | Field | Semantics | Default (back-compat) |
 |---|---|---|---|
-| Tile definition | `collides` (bool) | Tile is solid. Only enforced on a `main` layer. | `false` — absent tiles are non-solid |
-| Level layer | `role` (enum: `background`/`main`/`foreground`) | Only `main` honors collision. | `background` — pre-role levels stay display-only, never collide |
-| Level | `playerStart` (optional grid cell `{x,y}`, tile units) | Where the player spawns. | absent → engine falls back to a spawn convention |
+| Tile definition | `collides` (bool) | Tile is solid. Enforced only on a `collision:true` layer. | `false` — absent tiles are non-solid |
+| Level layer | `collision` (bool) | Whether this layer is an active collision layer. A non-collision layer **never** collides, even for a `collides` tile. | `false` — a layer is display-only unless it opts in |
+| Level | `spawns` (map `name → {x,y}` grid cell, tile units) | Named spawn points. | empty — a display-only level may declare none |
+| Level | `defaultSpawn` (string, name) | The spawn used when no specific spawn is requested. | null — required whenever `spawns` is non-empty |
 
-- `role` serializes as a **camelCase string** (`"main"`). `collides` and `playerStart` are
-  omitted from JSON when default/null (the sample only writes what it needs).
-- **Roles govern collision, not draw order.** Draw order remains child/array order (first
-  layer at the bottom), unchanged from Phase 1b. Authors should still order layers
-  background → main → foreground for the visual result they expect; the role is an orthogonal
-  collision tag. Keeping these two concerns separate is the smallest change that satisfies the
-  ratified rule without re-architecting the renderer.
-- The loader now (a) collects the set of colliding tile ids from the tile set, (b) carries
-  each layer's role through to `ResolvedLevel`, (c) validates `playerStart` is within the grid.
-  `ResolvedLevel` gains `CollidingTileIds` and `PlayerStart`; `ResolvedLayer` gains `Role`.
-  All parsing/validation stays Godot-free and unit-tested.
+- `collision` serializes as a plain boolean; `collides`, `spawns`, and `defaultSpawn` are
+  omitted from JSON when default/empty/null (the sample only writes what it needs).
+- **Collision and draw order are orthogonal.** Draw order is purely the layer array order (first
+  layer at the bottom, last on top), unchanged from Phase 1b and independent of the `collision`
+  flag. Authors order layers for the visual result they want and tag whichever layer(s) should
+  collide — the two concerns never interfere. This is the smallest model that satisfies the
+  ratified rule without a role taxonomy.
+- The loader now (a) collects the set of colliding tile ids from the tile set, (b) carries each
+  layer's `collision` flag through to `ResolvedLevel`, (c) validates every spawn is within the
+  grid and that `defaultSpawn` names a declared spawn (and is present iff spawns exist).
+  `ResolvedLevel` gains `CollidingTileIds`, `Spawns`, `DefaultSpawn` (plus a `DefaultSpawnPosition`
+  convenience and a `TryGetSpawn(name)` seam); `ResolvedLayer` gains `Collision`. All
+  parsing/validation stays Godot-free and unit-tested.
 
 ## 5. Package → Godot Collision Mapping (don't fight the engine)
 
-`TileMapLevelBuilder.Build(ResolvedLevel)` builds **two** `TileSet`s from the same graphics:
+`TileMapLevelBuilder.Build(ResolvedLevel)` builds **one shared** `TileSet` from the graphics: it
+has a single physics layer, and each **colliding** tile id gets a full-tile square collision
+polygon on its atlas source tile. A non-colliding tile has no polygon.
 
-- a **physics-enabled** TileSet — has one physics layer; each **colliding** tile id gets a
-  full-tile square collision polygon on its atlas source tile;
-- a **plain** TileSet — no physics layer.
+Every `TileMapLayer` references that one shared TileSet, and each layer sets Godot's native
+`CollisionEnabled` property **from its layer's `collision` flag**. Godot generates static
+collision only for layers with `CollisionEnabled == true`; a `collision:false` layer produces no
+collision bodies even when it places a `collides=true` tile (verified in §8 — the player walks
+straight through the non-collision backdrop stone pillar). This is the engine-native
+implementation of the ratified rule.
 
-Each `TileMapLayer` is assigned the physics TileSet **iff its role is `main`**, otherwise the
-plain one. Godot's `TileMapLayer` then auto-generates static collision from the polygons — the
-native path, no per-cell body juggling. Because background/foreground layers reference a TileSet
-with no physics layer, they *cannot* collide even when they place a `collides=true` tile. This
-is the unambiguous, engine-native implementation of the ratified rule (verified in §8 — the
-player walks straight through the background stone pillar).
-
-Cost: two TileSets duplicate a handful of small textures. For per-level tile counts this is
-negligible and keeps the rule airtight; sharing one TileSet would leak collision onto
-background layers whenever a solid tile id is reused there.
+A tile is a *reference*, not a copy — the same graphic appearing in one shared TileSet used by
+several layers is not real texture duplication. Consolidating to one TileSet (from the v0.1
+two-TileSet split) removes the duplicated atlas sources and makes the collision decision a
+per-layer switch, which is also the natural seam for future active-layer switching (§10).
 
 ## 6. Player & Playable Scene (Godot side, game compile set)
 
@@ -81,13 +94,16 @@ background layers whenever a solid tile id is reused there.
   tilemap's physics layer.
 - **`LevelPlay` (`Node2D`)** — the playable scene root (`scenes/level_playable.tscn`, the run
   target). Loads the sample package (same path/flow as `LevelDisplay`), builds the tile layers,
-  spawns the `Player` at `playerStart` (fallback cell if absent), and adds a static framing
-  `Camera2D`. Errors are caught at the scene boundary and logged; the scene never crashes.
+  spawns the `Player` at the level's default spawn (`DefaultSpawnPosition`, fallback cell if the
+  level declares none), and adds a static framing `Camera2D`. Errors are caught at the scene
+  boundary and logged; the scene never crashes.
 - **Input actions** (`move_left` = A/←, `move_right` = D/→, `jump` = Space/W/↑) are defined in
   `project.godot` for all devices.
 
-Physics constants (px, px/s): move speed 90, jump 330, gravity 900 — the ground-to-platform
-gap (~3 tiles) is comfortably clearable.
+Player physics are **editor-adjustable** `[Export]` fields — `MoveSpeed` (90 px/s), `JumpSpeed`
+(330 px/s), `Gravity` (900 px/s²) — with the ratified feel values as defaults (not tuned in
+v0.2; the ground-to-platform gap of ~3 tiles is comfortably clearable). Exporting them leaves a
+clean seam for per-level and script-driven overrides later without changing the controller.
 
 ## 7. Contracts & Interfaces (unchanged seams)
 
@@ -98,40 +114,64 @@ gap (~3 tiles) is comfortably clearable.
 
 ## 8. Verification (Godot MCP)
 
-- `dotnet build Uberkarl.csproj` → 0 errors; `Uberkarl.Content.Tests` 13/13 (was 7),
-  `Uberkarl.Packages.Tests` 31/31; Content-lib coverage line 93.2% / branch 81.8% (all new
+- `dotnet build Uberkarl.csproj` → 0 errors; `Uberkarl.Content.Tests` 17/17 (was 13),
+  `Uberkarl.Packages.Tests` 31/31; Content-lib coverage line 92.8% / branch 83.3% (all changed
   schema classes 100%). Authored-source comment-grep (TODO/FIXME/HACK/XXX + commented-out
   code): 0.
-- Ran `scenes/level_playable.tscn`: player **rests on the grass surface** (gravity + collision,
-  does not fall through). `simulate_action` move_right + jump → player traverses to the right
-  wall and is **stopped by the wall** (collision), **passing through the background stone
-  pillar** on the way (background never collides), and **lifts on jump**. Log:
-  `playable 20x12 level, 4 solid tile ids across 3 layers`. `get_editor_errors`: 0.
+- Ran `scenes/level_playable.tscn`: player **spawns at the default spawn** (`start`, cell (2,7))
+  and gravity settles it **onto the grass surface** (velocity 0, does not fall through). Engine
+  inspection: `backdrop` layer `collision_enabled=false`, `terrain` layer `collision_enabled=true`
+  (one shared TileSet, per-layer switch). Holding `move_right` → player traverses the full level
+  and is **stopped hard against the right stone wall** (x≈298 at the col-19 wall, velocity 0),
+  having **passed straight through the non-collision backdrop pillar** at cols 9-10 en route
+  (reaching the wall is only possible if the pillar does not block). `jump` → player **lifts off
+  the grass** and settles back. Log: `playable 20x12 level, 4 solid tile ids across 3 layers`.
+  `get_editor_errors`: 0.
 
 ## 9. Risks & Mitigations
 
 | Risk | Mitigation |
 |---|---|
 | Input events bound to a specific device would ignore a real keyboard | Bound to all devices (`device:-1`) so both real keys and simulated actions work. |
-| A solid tile reused on a background layer silently blocking the player | Separate physics/plain TileSets make background collision structurally impossible. |
-| Two TileSets duplicating textures at scale | Acceptable for per-level tile counts; revisit only if levels grow large (open question). |
+| A solid tile reused on a non-collision layer silently blocking the player | The per-layer `CollisionEnabled` switch on the shared TileSet makes non-collision layers produce no collision bodies at all — structurally impossible to block. |
+| A level with malformed spawns (out of bounds, default names a missing spawn) | Loader validates every spawn in-bounds and that `defaultSpawn` names a declared spawn (present iff spawns exist); a bad level throws `LevelContentException` at the Godot-free boundary, caught at the scene boundary. |
 
-## 10. Future Seam — multiple active layers (NOT built)
+## 10. Future Seams (NOT built)
 
-The rule is expressed as *"the layer whose role is `main` collides"*. Generalizing to *"the
-currently-active layer collides"* later means selecting which layer(s) get the physics TileSet
-at build/switch time — no schema or `ResolvedLevel` change is forced. Nothing here assumes a
-single main layer beyond the sample content.
+- **Active-collision-layer switching.** v0.2 collides on whichever layer(s) carry `collision:true`.
+  Generalizing to a runtime-switchable active collision layer means flipping `CollisionEnabled`
+  on the shared-TileSet layers at switch time — no schema or `ResolvedLevel` change is forced.
+- **Level exits / transitions.** Named `spawns` + `TryGetSpawn(name)` are the entry seam: a
+  transition system later enters a level at a chosen named spawn instead of the default. The
+  transition/exit system itself is not built.
+- **Parallax scroll speeds.** A per-layer `scrollSpeed` needs a scrolling camera and
+  larger-than-screen levels (its own chunk). No dead field is added now.
+- **Per-level & script-driven physics overrides.** The player's `[Export]` physics fields are the
+  seam; nothing consumes an override source yet.
 
 ## 11. Open Questions for Toni
 
-1. **Player start representation** — kept as an optional `{x,y}` grid cell on the level (you
-   offered "a level field or a convention"). Good enough, or do you want multiple named
-   spawns / a spawn *entity* later?
-2. **Two-TileSet collision split** — clean and rule-tight, but duplicates textures. Fine, or
-   would you prefer one shared TileSet with a documented "don't reuse solids on background"
-   caveat?
-3. **Role vs. draw order** — role is collision-only; draw order stays array order. Keep them
-   orthogonal, or should role also drive draw order (background behind, foreground in front)?
-4. **Physics tuning** — speed/jump/gravity are placeholder platformer values. Tune now or defer
-   to a feel pass?
+1. **Spawn shape** — a `spawns` map + `defaultSpawn` name is in. Is a bare `{x,y}` per spawn
+   enough, or will spawns eventually need a facing/direction or a spawn *entity* (e.g. for
+   transition-linked entry)?
+2. **Collision-layer count** — v0.2 permits *any* number of `collision:true` layers (all collide
+   simultaneously). The sample uses exactly one. Is "many simultaneous collision layers" a real
+   need, or should the model assume a single active collision layer until switching lands?
+3. **Spawn-less levels** — a level may declare no spawns (display-only), and the playable scene
+   falls back to a hard-coded cell. Keep that fallback, or should a playable level be *required*
+   to declare a default spawn (loader error if absent)?
+
+## 12. Changelog: v0.1 → v0.2 (Phase 1d, DiVoid #7419)
+
+Refinements from Toni's play-test of the v0.1 increment. Identifiers listed as *removed* here do
+not appear anywhere else as the current model.
+
+| v0.1 | v0.2 | Why |
+|---|---|---|
+| Layer `role` enum (`background`/`main`/`foreground`); only `main` collided | Removed. Per-layer `collision` (bool); any `collision:true` layer collides | Toni: roles conflated collision with draw stacking; a plain orthogonal collision flag is clearer |
+| Two TileSets (physics + plain) chosen by role | One shared TileSet; per-layer native `CollisionEnabled` | Toni: a tile is a reference, not a copy — two TileSets was not real dedup; one shared set + a per-layer switch is the clearer engine-native path |
+| Single `playerStart` (`{x,y}`) | Named `spawns` map + `defaultSpawn`; runtime uses the default | Sets up future level transitions (enter at a named spawn) without building them |
+| Physics as `const` fields | Physics as `[Export]` fields, same default values | Editor-adjustable feel; a clean seam for per-level/script overrides. Not tuned (Toni: feels fine) |
+
+Draw order was already the layer array order in v0.1 and stays so — v0.2 makes its independence
+from collision explicit (no role can drive it).
