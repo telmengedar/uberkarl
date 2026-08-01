@@ -31,20 +31,49 @@ namespace Uberkarl {
                     TileSet = shared.Set,
                     CollisionEnabled = layer.Collision,
                 };
-                for (int y = 0; y < level.Height; y++) {
-                    for (int x = 0; x < level.Width; x++) {
-                        int id = layer.Cells[y * level.Width + x];
-                        if (id == LayerDefinition.EmptyCell)
-                            continue;
-                        if (shared.SourceByTile.TryGetValue(id, out int sourceId))
-                            mapLayer.SetCell(new Vector2I(x, y), sourceId, Vector2I.Zero);
-                    }
-                }
-
+                FillLayer(mapLayer, layer, level, shared.SourceByTile);
                 root.AddChild(WrapForScroll(mapLayer, layer, contentSize));
             }
 
             return root;
+        }
+
+        /// <summary>
+        /// Builds the level for the editor canvas: the same shared tile set and per-layer grids, but the
+        /// layers are added flat (no <see cref="Parallax2D"/> wrapping, collision off) so a cell maps 1:1
+        /// to a screen position — the natural authoring view. The result exposes each layer node and the
+        /// tile-id → atlas-source map so the editor can paint or erase a single cell in place
+        /// (<c>SetCell</c>/<c>EraseCell</c>) without rebuilding the tree.
+        /// </summary>
+        public static BuiltLevel BuildEditable(ResolvedLevel level) {
+            BuiltTileSet shared = BuildTileSet(level);
+
+            Node2D root = new Node2D { Name = "Level" };
+            List<TileMapLayer> layers = new List<TileMapLayer>(level.Layers.Count);
+            foreach (ResolvedLayer layer in level.Layers) {
+                TileMapLayer mapLayer = new TileMapLayer {
+                    Name = layer.Name,
+                    TileSet = shared.Set,
+                    CollisionEnabled = false,
+                };
+                FillLayer(mapLayer, layer, level, shared.SourceByTile);
+                root.AddChild(mapLayer);
+                layers.Add(mapLayer);
+            }
+
+            return new BuiltLevel(root, layers, shared.SourceByTile);
+        }
+
+        static void FillLayer(TileMapLayer mapLayer, ResolvedLayer layer, ResolvedLevel level, Dictionary<int, int> sourceByTile) {
+            for (int y = 0; y < level.Height; y++) {
+                for (int x = 0; x < level.Width; x++) {
+                    int id = layer.Cells[y * level.Width + x];
+                    if (id == LayerDefinition.EmptyCell)
+                        continue;
+                    if (sourceByTile.TryGetValue(id, out int sourceId))
+                        mapLayer.SetCell(new Vector2I(x, y), sourceId, Vector2I.Zero);
+                }
+            }
         }
 
         // A layer that is neither parallax nor repeating (scrollSpeed 1.0, repeat off) is added as-is
@@ -103,6 +132,26 @@ namespace Uberkarl {
             };
             data.AddCollisionPolygon(0);
             data.SetCollisionPolygonPoints(0, 0, square);
+        }
+
+        /// <summary>
+        /// The result of building a level for the editor: the parent node, the per-layer tile-map nodes
+        /// (index-aligned to the level's layers) and the tile-id → atlas-source-id map used to place a
+        /// tile on a layer. The editor paints a cell with <c>Layers[i].SetCell(cell, SourceByTile[id], Zero)</c>
+        /// and erases with <c>Layers[i].EraseCell(cell)</c>.
+        /// </summary>
+        public sealed class BuiltLevel {
+            public BuiltLevel(Node2D root, IReadOnlyList<TileMapLayer> layers, IReadOnlyDictionary<int, int> sourceByTile) {
+                Root = root;
+                Layers = layers;
+                SourceByTile = sourceByTile;
+            }
+
+            public Node2D Root { get; }
+
+            public IReadOnlyList<TileMapLayer> Layers { get; }
+
+            public IReadOnlyDictionary<int, int> SourceByTile { get; }
         }
 
         readonly struct BuiltTileSet {
