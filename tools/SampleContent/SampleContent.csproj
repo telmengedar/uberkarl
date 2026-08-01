@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Uberkarl.Tools.SampleContent</RootNamespace>
+    <AssemblyName>Uberkarl.Tools.SampleContent</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Uberkarl.Content\Uberkarl.Content.csproj" />
+    <ProjectReference Include="..\..\src\Uberkarl.Packages\Uberkarl.Packages.csproj" />
+  </ItemGroup>
+</Project>

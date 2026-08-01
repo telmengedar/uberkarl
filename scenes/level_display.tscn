@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://b5gxg4f8p5jkx"]
+
+[ext_resource type="Script" uid="uid://b88wt55blgnky" path="res://game/Level/LevelDisplay.cs" id="1_qayw3"]
+
+[node name="LevelDisplay" type="Node2D" unique_id=1138455439]
+script = ExtResource("1_qayw3")
