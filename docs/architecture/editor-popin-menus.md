@@ -268,3 +268,47 @@ path is proven on the gamepad and keyboard menus which `simulate_action` drives 
    New-with-dimensions, playtest) once those features exist, or keep it to shipped ops (per #1184)?
 5. **O5 — radial clamp-to-viewport** when the cursor is at a level edge (cosmetic polish) — worth a small
    follow-up, or fine as-is?
+
+## 14. As-Fixed Addendum — Gamepad Pop-in Bug Fixes (DiVoid #7449)
+
+A real-gamepad playtest (Toni, 2026-08-02) found two defects that the in-harness verification missed because
+`simulate_action` injects a single named action, whereas a real stick/D-pad fires the editor's directional
+action **and** Godot's built-in `ui_*` focus-navigation from one physical input. Both were focus-fragility
+bugs; both fixed with minimal, targeted C# (no `project.godot` change, edit/undo/save spine untouched).
+
+**Bug A — grid cursor moved while a radial was open.** *Root cause:* the canvas cursor poll was gated only on
+`HasFocus()`, and §11 relied on the open radial "holding focus". But aiming with the stick fires `ui_*`, and
+the radial's focus neighbours were unset, so the aim bounced focus off the wheel onto the full-rect canvas
+underneath — which then passed its own focus gate and stepped the cursor. *Fix:* (1) a new engine-agnostic
+`CursorInputGate.AllowsCursorMovement(hasFocus, directionalCaptured)` policy; `EditorCanvas` exposes
+`DirectionalInputCaptured`, and the controller sets it every frame to `radialOpen || focusZone != Canvas`, so
+the cursor freezes independent of which control momentarily holds focus. (2) `PopInMenu` pins all focus
+neighbours to itself so the aim can no longer bounce focus off the wheel (also keeps its own A/Esc confirm
+working). The §11 risk row's premise ("focus-gated") is thus replaced by an **explicit** capture flag.
+
+**Bug C — the B-revealed classic toolbar/panel was unusable on gamepad (any input insta-closed it).** *Root
+cause:* `UpdateReveals` keyed panel visibility on the *live focus owner* (`FocusInside`); the first directional
+press fired `ui_*`, which escaped the zone (the buttons'/lists' default focus neighbours point outside), so
+`FocusInside` went false → the panel hid, and focus landed on the canvas which then moved the cursor. *Fix:*
+(1) **sticky reveal** — visibility is now also held by the explicit `focusZone` (Toolbar/Panel), so momentary
+focus loss no longer hides it (the mouse's `FocusInside`/edge-band reveal is retained). (2) **focus
+containment** — the toolbar buttons pin their vertical (and row-end horizontal) neighbours to self, and the
+panel's two lists pin their horizontal + outer-vertical neighbours to self, so directional input navigates
+*within* the revealed surface instead of escaping. (3) the cursor stays frozen while any focus-zone is active
+(same `DirectionalInputCaptured` flag). B still cycles Canvas→Toolbar→Panel→Canvas, so B "switches between the
+system and tile menus" and cycling back to Canvas is the close.
+
+**Contract added:** `CursorInputGate` (pure) — the grid cursor acts on a move request **iff** its surface has
+focus **and** no radial/panel is capturing directional input. Invariant regression-tested engine-free in
+`EditorInputTests` (gate truth-table + a `GridCursor` that stays put across repeated move requests while a menu
+is "open", then moves once it closes).
+
+**Verification (Godot MCP):** baseline — grid cursor moved/clamped freely. Radial held open + up/left aim → the
+**wheel highlight changed** (aim steers the wheel) while the **cursor stayed at its corner cell**; on close the
+same up/left moved it again (directions were live, not dead) — cursor was **frozen only while the radial was
+open**. B → the classic toolbar revealed with focus; raw `ui_*` navigation moved focus across the toolbar and
+into the layer list and **changed the active layer (backdrop→terrain)** with **nothing dismissing** and the
+grid cursor **not** hijacked; B cycled back to canvas. `get_editor_errors`: only the MCP harness's own
+`mcp_input_service.gd` keycode-lookup noise — no project errors. Tests: **Editor 50/50** (48 → +2 gate/freeze),
+Content 33/33, Packages 31/31; `dotnet build` 0 warnings / 0 errors. §6.10 comment-grep (TODO/FIXME/HACK/XXX +
+commented-out code) on the changed files **0**.

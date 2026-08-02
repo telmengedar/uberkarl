@@ -164,4 +164,46 @@ public sealed class EditorInputTests
         Assert.That(CyclicSelection.Next(-1, 3), Is.EqualTo(0));
         Assert.That(CyclicSelection.Next(5, 3), Is.EqualTo(0)); // 5 → (5+1)%3 = 0
     }
+
+    // ----- cursor input gate (regression: grid cursor frozen while a menu/panel captures direction) -----
+
+    [Test]
+    public void Gate_AllowsMovement_OnlyWhenFocusedAndNothingCapturingDirection()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(CursorInputGate.AllowsCursorMovement(surfaceHasFocus: true, directionalCaptured: false),
+                Is.True, "focused canvas with no menu/panel up should move.");
+            Assert.That(CursorInputGate.AllowsCursorMovement(surfaceHasFocus: false, directionalCaptured: false),
+                Is.False, "an unfocused canvas never moves.");
+            // The invariant: a menu/panel capturing direction freezes the cursor even if focus bounced back
+            // onto the canvas (the real-gamepad bug — ui_* aim bounced focus off the radial onto the canvas).
+            Assert.That(CursorInputGate.AllowsCursorMovement(surfaceHasFocus: true, directionalCaptured: true),
+                Is.False, "a captured direction (radial/panel open) freezes the cursor despite focus.");
+            Assert.That(CursorInputGate.AllowsCursorMovement(surfaceHasFocus: false, directionalCaptured: true),
+                Is.False);
+        });
+    }
+
+    [Test]
+    public void GridCursor_DoesNotMove_WhileAMenuCapturesDirectionalInput()
+    {
+        var cursor = new GridCursor(10, 10);
+        cursor.MoveTo(5, 5);
+
+        // A radial (or focused panel) is open: directional input is captured. A move request must be gated
+        // out entirely — the cursor underneath stays put no matter how many directions are pushed.
+        const bool menuOpen = true;
+        for (var i = 0; i < 5; i++)
+        {
+            if (CursorInputGate.AllowsCursorMovement(surfaceHasFocus: true, directionalCaptured: menuOpen))
+                cursor.TryMove(1, 0);
+        }
+        Assert.That((cursor.X, cursor.Y), Is.EqualTo((5, 5)), "cursor moved while a menu was open.");
+
+        // Menu closed, canvas focused again: the same request now steps the cursor.
+        if (CursorInputGate.AllowsCursorMovement(surfaceHasFocus: true, directionalCaptured: false))
+            cursor.TryMove(1, 0);
+        Assert.That((cursor.X, cursor.Y), Is.EqualTo((6, 5)), "cursor should move once the menu closes.");
+    }
 }
