@@ -47,3 +47,16 @@ public sealed class UnresolvedReferenceException : PackageException
 
     public ResourceReference Reference { get; }
 }
+
+public sealed class PackageUnavailableException : PackageException
+{
+    public PackageUnavailableException(string locator)
+        : base($"Package '{locator}' is no longer available.")
+    {
+    }
+
+    public PackageUnavailableException(string locator, Exception inner)
+        : base($"Package '{locator}' is no longer available.", inner)
+    {
+    }
+}

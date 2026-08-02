@@ -34,6 +34,8 @@ namespace Uberkarl {
         enum FocusZone { Canvas, Toolbar }
 
         const string SamplePackagePath = "res://content/sample.pkg";
+        const string SeedContentDir = "res://content";
+        const string PackagesDirPath = "user://packages";
         const int NewLevelTileSize = 16;
         const int NewLevelWidth = 24;
         const int NewLevelHeight = 16;
@@ -50,9 +52,13 @@ namespace Uberkarl {
         int activeLayerIndex;
         string currentFilePath;
 
+        IPackageSource packageSource;
+        PackageHandle? sourceHandle;
+
         EditorCanvas canvas;
         Control topBar;
         PopInMenu popIn;
+        PackageBrowser packageBrowser;
         // Tile/layer selection STATE persists here (the radials read it); the visible side-panel lists that
         // used to mirror it are gone — the Tiles (LB) / Layers (RB) radials fully cover selection.
         readonly List<int> paletteTileIds = new List<int>();
@@ -65,7 +71,6 @@ namespace Uberkarl {
         Button eraseButton;
         Button firstToolButton;
         Label statusLabel;
-        FileDialog openDialog;
         FileDialog saveDialog;
 
         HoldWatch tilesTrigger;
@@ -85,6 +90,7 @@ namespace Uberkarl {
             actionsTrigger = new HoldWatch(HoldThreshold);
             contextTrigger = new HoldWatch(HoldThreshold);
 
+            InitializePackageSource();
             BuildUi();
 
             if (Godot.FileAccess.FileExists(SamplePackagePath))
@@ -107,11 +113,12 @@ namespace Uberkarl {
             float d = (float)delta;
             UpdateReveals();
 
-            // Freeze the grid cursor whenever a radial owns directional input, OR a toolbar/panel focus-zone
-            // is active (gamepad/keyboard is navigating it) — independent of which control momentarily holds
-            // focus, so the cursor can never step underneath an open menu or a focused panel.
+            // Freeze the grid cursor whenever a radial or the package browser owns directional input, OR a
+            // toolbar/panel focus-zone is active (gamepad/keyboard is navigating it) — independent of which
+            // control momentarily holds focus, so the cursor can never step underneath an open menu, the
+            // browser, or a focused panel.
             canvas.DirectionalInputCaptured =
-                CursorInputGate.DirectionCaptured(popIn.IsOpen, focusZone != FocusZone.Canvas);
+                CursorInputGate.DirectionCaptured(popIn.IsOpen || packageBrowser.IsOpen, focusZone != FocusZone.Canvas);
 
             tilesTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenTileMenu)), d);
             layersTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenLayerMenu)), d);
@@ -248,7 +255,7 @@ namespace Uberkarl {
         void InvokeFileCommand(EditorFileCommand command) {
             switch (command) {
                 case EditorFileCommand.New: NewLevel(); break;
-                case EditorFileCommand.Open: openDialog.PopupCentered(new Vector2I(720, 480)); break;
+                case EditorFileCommand.Open: SummonBrowser(); break;
                 case EditorFileCommand.Save: Save(); break;
                 case EditorFileCommand.SaveAs: saveDialog.PopupCentered(new Vector2I(720, 480)); break;
             }
@@ -272,7 +279,7 @@ namespace Uberkarl {
             if (topBar == null)
                 return;
 
-            bool menuOpen = popIn.IsOpen;
+            bool menuOpen = popIn.IsOpen || packageBrowser.IsOpen;
             Vector2 mouse = GetViewport().GetMousePosition();
             Control focus = GetViewport().GuiGetFocusOwner();
 
@@ -288,7 +295,7 @@ namespace Uberkarl {
         // focused EditorCanvas; everything here is device-neutral and reaches _UnhandledInput because no
         // focused Control claimed it. Guarded against key-repeat echo so a held key fires each action once.
         public override void _UnhandledInput(InputEvent @event) {
-            if (@event.IsEcho() || (popIn != null && popIn.IsOpen))
+            if (@event.IsEcho() || (popIn != null && popIn.IsOpen) || (packageBrowser != null && packageBrowser.IsOpen))
                 return;
 
             if (Fired(@event, EditorAction.CycleTilePrev)) CycleTile(-1);
@@ -333,6 +340,11 @@ namespace Uberkarl {
             popIn.Cancelled += OnMenuCancelled;
             AddChild(popIn);
 
+            packageBrowser = new PackageBrowser();
+            packageBrowser.ResourceChosen += OnBrowserResourceChosen;
+            packageBrowser.Cancelled += OnBrowserCancelled;
+            AddChild(packageBrowser);
+
             BuildFileDialogs();
         }
 
@@ -343,7 +355,7 @@ namespace Uberkarl {
 
             firstToolButton = MakeButton("New", NewLevel);
             row.AddChild(firstToolButton);
-            row.AddChild(MakeButton("Open", () => openDialog.PopupCentered(new Vector2I(720, 480))));
+            row.AddChild(MakeButton("Open", SummonBrowser));
             saveButton = MakeButton("Save", Save);
             row.AddChild(saveButton);
             row.AddChild(MakeButton("Save As", () => saveDialog.PopupCentered(new Vector2I(720, 480))));
@@ -403,15 +415,6 @@ namespace Uberkarl {
         }
 
         void BuildFileDialogs() {
-            openDialog = new FileDialog {
-                FileMode = FileDialog.FileModeEnum.OpenFile,
-                Access = FileDialog.AccessEnum.Filesystem,
-                Title = "Open level package",
-                Filters = new[] { "*.pkg ; Uberkarl package" },
-            };
-            openDialog.FileSelected += OnOpenFileSelected;
-            AddChild(openDialog);
-
             saveDialog = new FileDialog {
                 FileMode = FileDialog.FileModeEnum.SaveFile,
                 Access = FileDialog.AccessEnum.Filesystem,
@@ -421,12 +424,62 @@ namespace Uberkarl {
             saveDialog.FileSelected += OnSaveFileSelected;
             AddChild(saveDialog);
 
-            string contentDir = ProjectSettings.GlobalizePath("res://content");
-            if (DirAccess.DirExistsAbsolute(contentDir)) {
-                openDialog.CurrentDir = contentDir;
+            string contentDir = ProjectSettings.GlobalizePath(SeedContentDir);
+            if (DirAccess.DirExistsAbsolute(contentDir))
                 saveDialog.CurrentDir = contentDir;
+        }
+
+        // ----- package source -----
+
+        // The canonical, system-agnostic package source folder (design §12): user:// is writable and
+        // survives export, unlike res://content which is read-only once exported. First run seeds it
+        // from the shipped res://content sample so a fresh install has visible content.
+        void InitializePackageSource() {
+            string packagesDir = ProjectSettings.GlobalizePath(PackagesDirPath);
+            Directory.CreateDirectory(packagesDir);
+            SeedPackagesDirIfEmpty(packagesDir);
+            packageSource = new FolderPackageSource(packagesDir);
+        }
+
+        static void SeedPackagesDirIfEmpty(string packagesDir) {
+            if (HasAnyPackage(packagesDir))
+                return;
+
+            foreach (string fileName in DirAccess.GetFilesAt(SeedContentDir)) {
+                if (!fileName.EndsWith(PackageFormat.FileExtension, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                byte[] bytes = Godot.FileAccess.GetFileAsBytes($"{SeedContentDir}/{fileName}");
+                if (bytes != null && bytes.Length > 0)
+                    File.WriteAllBytes(Path.Combine(packagesDir, fileName), bytes);
             }
         }
+
+        static bool HasAnyPackage(string directory) {
+            foreach (string _ in Directory.EnumerateFiles(directory, "*" + PackageFormat.FileExtension))
+                return true;
+            return false;
+        }
+
+        void SummonBrowser() => packageBrowser.Summon(packageSource);
+
+        void OnBrowserResourceChosen(PackageHandle handle, ResourcePath path) {
+            try {
+                using Package package = packageSource.Open(handle);
+                EditableLevel level = EditableLevelReader.FromPackage(package, path);
+                sourceHandle = handle;
+                currentFilePath = null;
+                AdoptSession(level);
+                GD.Print($"LevelEditor: loaded {level.Width}x{level.Height} level '{level.Name}' " +
+                    $"({level.Tiles.Count} tiles, {level.Layers.Count} layers) from the package source.");
+            } catch (Exception exception) {
+                GD.PrintErr($"LevelEditor: {exception.GetType().Name}: {exception.Message}");
+            }
+
+            canvas?.GrabFocus();
+        }
+
+        void OnBrowserCancelled() => canvas?.GrabFocus();
 
         // ----- session lifecycle -----
 
@@ -434,6 +487,7 @@ namespace Uberkarl {
             EditableLevel level = EditableLevel.CreateBlank(
                 "Untitled", NewLevelTileSize, NewLevelWidth, NewLevelHeight, DefaultPalette.Build(NewLevelTileSize));
             currentFilePath = null;
+            sourceHandle = null;
             AdoptSession(level);
             GD.Print($"LevelEditor: new blank {NewLevelWidth}x{NewLevelHeight} level.");
         }
@@ -447,19 +501,11 @@ namespace Uberkarl {
             LoadFromBytes(bytes, ProjectSettings.GlobalizePath(resPath));
         }
 
-        void LoadFromAbsolutePath(string absolutePath) {
-            try {
-                byte[] bytes = File.ReadAllBytes(absolutePath);
-                LoadFromBytes(bytes, absolutePath);
-            } catch (Exception exception) {
-                GD.PrintErr($"LevelEditor: failed to read '{absolutePath}': {exception.GetType().Name}: {exception.Message}");
-            }
-        }
-
         void LoadFromBytes(byte[] bytes, string sourcePath) {
             try {
                 EditableLevel level = EditableLevelReader.FromPackageBytes(bytes);
                 currentFilePath = sourcePath;
+                sourceHandle = null;
                 AdoptSession(level);
                 GD.Print($"LevelEditor: loaded {level.Width}x{level.Height} level '{level.Name}' " +
                     $"({level.Tiles.Count} tiles, {level.Layers.Count} layers) from {sourcePath}.");
@@ -590,10 +636,28 @@ namespace Uberkarl {
         }
 
         void Save() {
-            if (currentFilePath == null)
+            if (sourceHandle is { } handle && packageSource is IWritablePackageSource writable)
+                WriteToSource(handle, writable);
+            else if (currentFilePath == null)
                 saveDialog.PopupCentered(new Vector2I(720, 480));
             else
                 WriteToPath(currentFilePath);
+        }
+
+        void WriteToSource(PackageHandle handle, IWritablePackageSource writable) {
+            if (session == null)
+                return;
+
+            try {
+                byte[] bytes = session.Save();
+                writable.Write(handle, bytes);
+                GD.Print($"LevelEditor: saved {bytes.Length} bytes to '{session.Level.Name}' in the package source.");
+            } catch (Exception exception) {
+                session.MarkDirty();
+                GD.PrintErr($"LevelEditor: save failed: {exception.GetType().Name}: {exception.Message}");
+            }
+
+            UpdateState();
         }
 
         void WriteToPath(string absolutePath) {
@@ -604,6 +668,7 @@ namespace Uberkarl {
                 byte[] bytes = session.Save();
                 File.WriteAllBytes(absolutePath, bytes);
                 currentFilePath = absolutePath;
+                sourceHandle = null;
                 GD.Print($"LevelEditor: saved {bytes.Length} bytes to {absolutePath}.");
             } catch (Exception exception) {
                 session.MarkDirty();
@@ -632,8 +697,6 @@ namespace Uberkarl {
             UpdateState();
         }
 
-        void OnOpenFileSelected(string path) => LoadFromAbsolutePath(path);
-
         void OnSaveFileSelected(string path) {
             if (!path.EndsWith(".pkg", StringComparison.OrdinalIgnoreCase))
                 path += ".pkg";
@@ -660,7 +723,9 @@ namespace Uberkarl {
             if (session == null)
                 return string.Empty;
 
-            string file = currentFilePath == null ? "unsaved" : Path.GetFileName(currentFilePath);
+            string file = sourceHandle != null
+                ? "package"
+                : currentFilePath == null ? "unsaved" : Path.GetFileName(currentFilePath);
             string dirty = session.IsDirty ? " *" : string.Empty;
             string layer = activeLayerIndex >= 0 && activeLayerIndex < session.Level.Layers.Count
                 ? session.Level.Layers[activeLayerIndex].Name
