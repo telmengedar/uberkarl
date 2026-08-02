@@ -38,6 +38,17 @@ namespace Uberkarl {
             SetAnchorsPreset(LayoutPreset.FullRect);
             MouseFilter = MouseFilterEnum.Stop; // eat input under the wheel while it is open
             FocusMode = FocusModeEnum.All;
+            // Pin every focus neighbour to self so a held stick / D-pad aim (which also fires Godot's
+            // ui_left/right/up/down focus navigation) cannot bounce focus off the wheel onto the canvas
+            // underneath while the menu is open — that bounce is what let the grid cursor move under the
+            // radial. Focus stays here so the wheel's own confirm/cancel (_GuiInput) also keeps working.
+            NodePath self = new NodePath(".");
+            FocusNeighborLeft = self;
+            FocusNeighborRight = self;
+            FocusNeighborTop = self;
+            FocusNeighborBottom = self;
+            FocusNext = self;
+            FocusPrevious = self;
             Visible = false;
             ZIndex = 100;
         }

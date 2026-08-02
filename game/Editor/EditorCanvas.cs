@@ -44,6 +44,13 @@ namespace Uberkarl {
         float moveCooldown;
         bool moveHeld;
 
+        /// <summary>Set by the controller while a pop-in radial is open or a toolbar/panel focus-zone is
+        /// active: directional input is being consumed by that surface, so the grid cursor must freeze even
+        /// if focus momentarily lands back on the canvas. This is the robust suppression the "menu holds
+        /// focus" assumption alone did not guarantee — Godot's directional focus navigation can bounce focus
+        /// off the radial onto this full-rect canvas while a stick/D-pad aim is held.</summary>
+        public bool DirectionalInputCaptured { get; set; }
+
         /// <summary>Raised when a cell is activated with the primary action — a mouse click/drag, or the
         /// paint action at the grid cursor. The controller applies the active tool to this cell.</summary>
         public event Action<int, int> CellPressed;
@@ -103,11 +110,12 @@ namespace Uberkarl {
                 layer.SetCell(cell, sourceId, Vector2I.Zero);
         }
 
-        // Poll the held cursor-move actions only while this surface has focus, so the same D-pad / stick /
-        // arrow keys drive the grid cursor here but navigate the side panels when a panel is focused. A
+        // Poll the held cursor-move actions only while this surface has focus AND no radial/panel is
+        // capturing directional input (CursorInputGate), so the same D-pad / stick / arrow keys drive the
+        // grid cursor here but steer an open wheel or navigate a focused panel instead — never both. A
         // repeat clock gives the familiar "step, pause, then stream" feel for a held direction.
         public override void _Process(double delta) {
-            if (cursor == null || !HasFocus()) {
+            if (cursor == null || !CursorInputGate.AllowsCursorMovement(HasFocus(), DirectionalInputCaptured)) {
                 moveHeld = false;
                 return;
             }

@@ -108,6 +108,11 @@ namespace Uberkarl {
             float d = (float)delta;
             UpdateReveals();
 
+            // Freeze the grid cursor whenever a radial owns directional input, OR a toolbar/panel focus-zone
+            // is active (gamepad/keyboard is navigating it) — independent of which control momentarily holds
+            // focus, so the cursor can never step underneath an open menu or a focused panel.
+            canvas.DirectionalInputCaptured = popIn.IsOpen || focusZone != FocusZone.Canvas;
+
             tilesTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenTileMenu)), d);
             layersTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenLayerMenu)), d);
             actionsTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenActionMenu)), d);
@@ -263,9 +268,11 @@ namespace Uberkarl {
 
         // ----- auto-hide / edge-reveal -----
 
-        // Keep the whole area as canvas: hide the toolbar and the layer/tile panel by default, revealing the
-        // toolbar when the pointer is in the top band (or it holds focus) and the panel when the pointer is
-        // in the left band (or it holds focus). Everything hides while a radial is open.
+        // Keep the whole area as canvas: hide the toolbar and the layer/tile panel by default. Reveal a
+        // surface when (gamepad/keyboard) the focus-zone rests on it — a sticky reveal that survives momentary
+        // focus loss while navigating inside it, so a directional press no longer insta-hides the panel — or
+        // when (mouse) the pointer is in its edge band or a child of it holds focus. Everything hides while a
+        // radial is open.
         void UpdateReveals() {
             if (topBar == null || leftPanel == null)
                 return;
@@ -274,8 +281,10 @@ namespace Uberkarl {
             Vector2 mouse = GetViewport().GetMousePosition();
             Control focus = GetViewport().GuiGetFocusOwner();
 
-            topBar.Visible = !menuOpen && (FocusInside(topBar, focus) || mouse.Y <= TopBarHeight);
-            leftPanel.Visible = !menuOpen && (FocusInside(leftPanel, focus) || mouse.X <= LeftPanelWidth);
+            topBar.Visible = !menuOpen &&
+                (focusZone == FocusZone.Toolbar || FocusInside(topBar, focus) || mouse.Y <= TopBarHeight);
+            leftPanel.Visible = !menuOpen &&
+                (focusZone == FocusZone.Panel || FocusInside(leftPanel, focus) || mouse.X <= LeftPanelWidth);
         }
 
         static bool FocusInside(Control container, Control focus) =>
@@ -374,7 +383,28 @@ namespace Uberkarl {
             statusLabel.AddThemeColorOverride("font_color", EditorTheme.TextDim);
             row.AddChild(statusLabel);
 
+            ContainToolbarFocus(row);
             return bar;
+        }
+
+        // Keep gamepad/keyboard focus inside the toolbar once B lands there: pin each button's vertical
+        // neighbours (and the row-end horizontal ones) to itself so a directional press navigates between the
+        // buttons but can never escape down onto the canvas — the escape that used to insta-hide the toolbar
+        // and hand the grid cursor back its focus. Left/right between the middle buttons stays geometry-driven.
+        static void ContainToolbarFocus(Container row) {
+            NodePath self = new NodePath(".");
+            Button first = null;
+            Button last = null;
+            foreach (Node child in row.GetChildren()) {
+                if (child is not Button button)
+                    continue;
+                button.FocusNeighborTop = self;
+                button.FocusNeighborBottom = self;
+                first ??= button;
+                last = button;
+            }
+            if (first != null) first.FocusNeighborLeft = self;
+            if (last != null) last.FocusNeighborRight = self;
         }
 
         Control BuildLeftPanel() {
@@ -402,6 +432,18 @@ namespace Uberkarl {
             };
             paletteList.ItemSelected += OnPaletteSelected;
             leftColumn.AddChild(paletteList);
+
+            // Contain focus inside the panel the same way the toolbar does: pin the horizontal neighbours of
+            // both lists, plus the panel's outer vertical edges (top of the layer list, bottom of the tile
+            // list), to self. Directional input navigates within/between the two lists but never escapes onto
+            // the canvas — so navigating the revealed panel no longer dismisses it or steals the grid cursor.
+            NodePath self = new NodePath(".");
+            layerList.FocusNeighborLeft = self;
+            layerList.FocusNeighborRight = self;
+            layerList.FocusNeighborTop = self;
+            paletteList.FocusNeighborLeft = self;
+            paletteList.FocusNeighborRight = self;
+            paletteList.FocusNeighborBottom = self;
 
             return panel;
         }
