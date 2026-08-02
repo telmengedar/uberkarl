@@ -347,3 +347,14 @@ Screenshots captured the grid cursor and a gamepad/keyboard-driven paint and era
 project errors** (only the MCP harness's own `mcp_input_service.gd` key-lookup lines, which are not project
 code). Engine-agnostic input logic unit-tested: **Editor 34/34** (was 21 → +13 input tests). `dotnet build`
 0/0.
+
+---
+
+## 17. Next increment — the ratified pop-in paradigm (Phase 2a.2)
+
+Toni **ratified Option A** (pop-in / hold-to-reveal) on 2026-08-02, with the mouse = right-click-radial +
+edge-reveal mapping from §13. That paradigm is built as the additive next increment (DiVoid #7441) over this
+foundation — same `EditorAction` set, no rework of the edit/undo/save spine. Its full design (the radial
+menu core, the three input mappings, the auto-hide/edge-reveal layout, and the resolution of the four
+follow-ups in §14) lives in its own document: **`editor-popin-menus.md`**. This foundation's persistent
+focus-navigable panels remain there as the auto-hidden, edge-revealed discoverable fallback.

@@ -58,4 +58,16 @@ public enum EditorAction
 
     /// <summary>Move keyboard/gamepad focus to the next surface (canvas ⇄ panels ⇄ toolbar).</summary>
     FocusNext,
+
+    /// <summary>Hold to reveal the tile-palette radial (release/confirm to pick a tile).</summary>
+    OpenTileMenu,
+
+    /// <summary>Hold to reveal the layer radial (release/confirm to pick a layer).</summary>
+    OpenLayerMenu,
+
+    /// <summary>Hold to reveal the actions radial (file ops, undo/redo, tool toggle).</summary>
+    OpenActionMenu,
+
+    /// <summary>Hold to reveal the mouse context radial (tap instead erases the cell under the pointer).</summary>
+    OpenContextMenu,
 }
