@@ -20,6 +20,18 @@ public static class CursorInputGate
         => surfaceHasFocus && !directionalCaptured;
 
     /// <summary>
+    /// True only when the canvas's primary action (paint / erase at the grid cursor, the gamepad/keyboard
+    /// confirm) should act: the surface owns focus and no radial menu or non-canvas focus-zone is currently
+    /// capturing input. The gating condition is the same as cursor movement — while a menu or a toolbar/panel
+    /// zone is active, the confirm button belongs to that surface (it activates the focused Control via
+    /// <c>ui_accept</c>), so <c>editor_paint</c> must stay inert on the canvas underneath rather than paint a
+    /// cell nobody is aiming at. This is the "editor_paint is inert off-canvas" half of the classic-Control
+    /// activation fix, pinned down engine-free.
+    /// </summary>
+    public static bool AllowsPrimaryAction(bool surfaceHasFocus, bool directionalCaptured)
+        => surfaceHasFocus && !directionalCaptured;
+
+    /// <summary>
     /// Whether a directional input is currently owned by a menu or a revealed toolbar/panel focus-zone rather
     /// than the grid cursor. True whenever a pop-in radial is open <b>or</b> focus rests on a non-canvas zone
     /// (toolbar / panel). This is the flag the canvas reads (<see cref="AllowsCursorMovement"/>) to freeze its

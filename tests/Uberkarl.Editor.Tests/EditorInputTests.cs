@@ -248,4 +248,44 @@ public sealed class EditorInputTests
         Assert.That((cursor.X, cursor.Y), Is.EqualTo((5, 5)),
             "grid cursor moved while a toolbar/panel zone owned directional input.");
     }
+
+    // ----- primary-action gate (part 1: editor_paint inert off-canvas so confirm activates a focused Control) -----
+
+    [Test]
+    public void PrimaryAction_AllowedOnlyWhenCanvasFocusedAndNothingCapturingInput()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(CursorInputGate.AllowsPrimaryAction(surfaceHasFocus: true, directionalCaptured: false),
+                Is.True, "focused canvas with no radial/zone up: paint acts at the cursor.");
+            Assert.That(CursorInputGate.AllowsPrimaryAction(surfaceHasFocus: false, directionalCaptured: false),
+                Is.False, "an unfocused canvas never paints.");
+            // The activation invariant: while a radial or a non-canvas focus-zone owns input, the confirm
+            // button (gamepad A = editor_paint) must NOT paint — it belongs to the focused Control's ui_accept.
+            Assert.That(CursorInputGate.AllowsPrimaryAction(surfaceHasFocus: true, directionalCaptured: true),
+                Is.False, "a captured direction (radial open / toolbar zone active) makes editor_paint inert.");
+            Assert.That(CursorInputGate.AllowsPrimaryAction(surfaceHasFocus: false, directionalCaptured: true),
+                Is.False);
+        });
+    }
+
+    [Test]
+    public void PrimaryAction_Suppressed_WhileToolbarZoneActive_SoConfirmReachesFocusedControl()
+    {
+        // The classic-Control activation seam. A real gamepad's A fires editor_paint; while the toolbar focus-
+        // zone is active the canvas must leave that confirm untouched (not AcceptEvent) so Godot's ui_accept
+        // reaches the focused Button. This locks the "editor_paint inert off-canvas" half; the ui_accept pad
+        // binding (the other half) is an InputMap change verified in-harness.
+        const bool toolbarZoneActive = true;
+        var captured = CursorInputGate.DirectionCaptured(radialOpen: false, nonCanvasZoneActive: toolbarZoneActive);
+
+        // Even if the confirm event momentarily finds the full-rect canvas focused, the gate refuses the paint.
+        Assert.That(CursorInputGate.AllowsPrimaryAction(surfaceHasFocus: true, directionalCaptured: captured),
+            Is.False, "editor_paint fired on the canvas while the toolbar zone owned the confirm button.");
+
+        // Back on the plain canvas, the same confirm paints again.
+        var free = CursorInputGate.DirectionCaptured(radialOpen: false, nonCanvasZoneActive: false);
+        Assert.That(CursorInputGate.AllowsPrimaryAction(surfaceHasFocus: true, directionalCaptured: free),
+            Is.True, "editor_paint should act once focus returns to the canvas zone.");
+    }
 }

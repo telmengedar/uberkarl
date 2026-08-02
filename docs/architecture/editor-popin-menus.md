@@ -351,3 +351,115 @@ only MCP-harness `gdscript://` / `mcp_game_inspector_service.gd` noise — no pr
 (50 → +2: `DirectionCaptured` truth-table + a panel-zone double-fire that keeps the cursor frozen even when the
 `ui_*` bounce lands focus on the canvas), Content 33/33, Packages 31/31; `dotnet build` 0/0; §6.10 comment-grep
 on the changed files **0**.
+
+## 15. Editor UI v2, Part 1 — Radial-Centric Consolidation (DiVoid #7464)
+
+Toni ratified (2026-08-02) a **radial-centric** direction with one rule: *"whatever is possible with radial we
+don't need as a duplicate."* The custom radials are gamepad-native and just work; the classic Godot `Control`
+panels kept peeling gamepad bug-layers (stay-open → navigate → **can't activate**). Part 1 does three things —
+drop the radial-duplicated side panel, make the remaining classic Controls gamepad-**activatable**, and report
+on whether the Actions radial fully covers the system-menu toolbar. It is additive over the merged pop-in +
+round-2 foundation; the edit/undo/save spine and `LevelEditSession` are untouched.
+
+### 15.1 Drop the persistent side panel
+
+The left panel (a `Layers` `ItemList` + a `Tiles` `ItemList`) duplicated the **Tiles (LB)** and **Layers (RB)**
+radials, which own tile/layer selection. It is removed entirely — not merely auto-hidden — maximising the canvas
+and eliminating an entire classic-Control focus surface (and its round-1/round-2 focus-containment burden). What
+is kept is the **selection state**, not the widgets:
+
+- `paletteTileIds` + `paletteTextures` remain the tile-selection state the **Tiles radial** reads (wedge order
+  and wedge icons). `PopulatePalette` now builds only that state; there is no list to fill.
+- Layer names are read live from the session by the **Layers radial** (`BuildLayersMenu`), so `PopulateLayers`
+  only resets the active layer index.
+- `Dispatch`, `CycleTile`, `CycleLayer` route through the same `OnPaletteSelected` / `OnLayerSelected` state
+  handlers as before — the removed lines were only the now-dead `ItemList.Select` mirror calls.
+- The **focus-zone cycle collapses to Canvas ⇄ Toolbar** (the `Panel` zone is gone). `AdvanceFocus` toggles the
+  two; `DirectionCaptured(radialOpen, focusZone != Canvas)` still freezes the grid cursor while the toolbar owns
+  input.
+
+### 15.2 Gamepad activation of classic Controls — root cause and fix
+
+**Symptom (Toni, real pad):** the toolbar can be navigated, but pressing confirm (A) on a focused item like
+"Open" does nothing.
+
+**Root cause (isolated in-harness):** with a toolbar button focused, injecting a pure `ui_accept` action
+activates it, and a raw keyboard **Enter** activates it — but a raw **gamepad A** does not, and the canvas does
+not paint either. `InputEventJoypadButton(button 0).is_action("ui_accept")` returns **false**:
+
+> `ui_accept = {Enter, KP-Enter, Space}` — **no gamepad button.** `ui_cancel = {Escape}` — none either.
+> Meanwhile `ui_left/right/up/down` **do** carry D-pad + left-stick bindings (why round-2 navigation works).
+> `editor_paint` owns gamepad A, but nothing routes the pad to `ui_accept`.
+
+So a focused classic Control could be *navigated* on the pad but never *confirmed* — the pad had no path to the
+Godot activation action. This is the literal "`ui_accept` doesn't reach the focused Control", and it is why the
+classic panels kept failing where the radials (which never rely on `ui_accept`) succeed.
+
+**Fix — two parts, minimal:**
+
+1. **InputMap (`project.godot`):** define `ui_accept` = {Enter, KP-Enter, Space, **joypad A / button 0**} and
+   `ui_cancel` = {Escape, **joypad B / button 1**}. This is the root-cause fix: focused Buttons, `ItemList`s,
+   **and the Open/Save `FileDialog` windows** now activate/cancel natively on the pad. Choosing the InputMap
+   layer over a bespoke "activate the focus owner" router is deliberate — the router could not reach the
+   `FileDialog` (a separate `Window`), yet those are exactly the "regular browser windows [that] need to react
+   to gamepad buttons" this task is foundational for (the coming package browser + tile list-window).
+2. **`EditorCanvas` (paint gate):** paint/erase in `_GuiInput` are now gated on
+   `CursorInputGate.AllowsPrimaryAction(HasFocus(), DirectionalInputCaptured)` — the same capture flag that
+   already freezes the grid cursor. While a radial is open or a non-canvas zone is active, `editor_paint` is
+   **inert** on the canvas (it does not `AcceptEvent`), so the shared A press can never paint a cell nobody is
+   aiming at while it is confirming a Control. Belt-and-suspenders alongside part 1, and the engine-free half of
+   the invariant (unit-tested).
+
+Shared-binding safety: A = `editor_paint` + `ui_accept`; B = `editor_focus_next` + `ui_cancel`. On the canvas, A
+paints and the focused-Control `ui_accept` is a no-op; in the toolbar/dialogs, A confirms and `editor_paint` is
+inert (canvas unfocused + gated). B still cycles the zone when no dialog is up, and doubles as "back/cancel"
+inside a `FileDialog`. No new physical button is introduced.
+
+### 15.3 Contract touched
+
+`CursorInputGate` gains `AllowsPrimaryAction(surfaceHasFocus, directionalCaptured)` — the canvas primary action
+(paint/erase = the gamepad/keyboard confirm at the cursor) may act **iff** the surface owns focus and nothing
+else is capturing input. Same shape as `AllowsCursorMovement`; distinct name for the distinct concern. Pure and
+engine-agnostic, regression-tested engine-free.
+
+### 15.4 Verification (Godot MCP) — see the DiVoid node for screenshots
+
+- **Side panel gone:** running-tree `ItemList` count **0**, one `PanelContainer` (the toolbar) remains; toolbar
+  buttons intact (New/Open/Save/Save As/Paint/Erase/Undo/Redo). Canvas fills the viewport (screenshot).
+- **Radials still select:** Tiles radial (LB hold → aim → release) changed the active tile **#1 → #4**; Layers
+  radial (RB) changed the active layer **backdrop → terrain** — both through the reroute, with no side panel.
+- **Confirm activates a focused Control:** with focus on "New", an injected raw **`InputEventJoypadButton`
+  (button 0)** now fires the button (`new blank` printed). Before the fix the identical injection did nothing
+  (and a pure `ui_accept` / keyboard Enter did fire — the isolation that pinned the root cause).
+- **Activation-while-a-zone-is-active routing (regression):** in the toolbar zone, D-pad navigation stayed in
+  the toolbar and a raw A confirmed the focused **Erase** toggle (tool `Paint → Erase`) while
+  `DirectionalInputCaptured` stayed **true** (cursor frozen) and the level was **not** dirtied by any stray
+  paint — `editor_paint` proven inert off-canvas.
+- **Actions radial:** Start (button 6) hold opened it rendering New/Open/Save/Save As/Undo/Redo/Tool; committing
+  a wedge on the pad fired the action (Redo dispatched; then the **Tool** wedge toggled `Erase → Paint`).
+- `get_editor_errors`: only the MCP harness's own `gdscript://` `_mcp_error` unused-variable noise from the
+  injected diagnostic scripts — **no project errors**. Tests **Editor 54/54** (52 → +2: `AllowsPrimaryAction`
+  truth-table + a toolbar-zone confirm-inert regression), Content 33/33, Packages 31/31; `dotnet build` 0/0;
+  §6.10 comment-grep on changed files **0**; `project.godot` diff = exactly the `ui_accept`/`ui_cancel`
+  definitions (+14 lines, 0 removed).
+- **Real-pad confirmation is Toni's** — the harness injects `ui_accept` / raw `InputEventJoypadButton`, which
+  reproduced the exact symptom and now shows the fix; final sign-off on physical hardware is his.
+
+### 15.5 Actions-radial report (for Toni — informs whether the toolbar can be dropped next)
+
+**Does the Actions radial cover the system-menu toolbar? Yes, for every actionable command.**
+
+| Toolbar control             | Actions-radial coverage                             |
+|-----------------------------|-----------------------------------------------------|
+| New / Open / Save / Save As | Yes — direct wedges (`FileCommand`)                 |
+| Undo / Redo                 | Yes — direct wedges (`Invoke`)                      |
+| Paint / Erase toggles       | Yes — via the **Tool** wedge (toggles paint <-> erase) |
+| Status label (right)        | No — display-only, not an action; not duplicated    |
+
+Every *command* on the toolbar is reachable from the gamepad-native Actions radial (Start-hold), so by Toni's
+rule the toolbar is radial-duplicated **for its actions** and is a **droppable candidate**. **One caveat before
+dropping it:** the toolbar also hosts the **status readout** (level name · file · active layer · tool) and the
+explicit Paint/Erase pressed-state. Dropping the toolbar means **relocating the status readout** (e.g. a thin
+always-on status line or an on-canvas HUD) and deciding whether the paint/erase state needs a persistent
+indicator. Recommendation: drop the toolbar in a follow-up **once a lightweight status surface exists** — not in
+Part 1. Per the task, the toolbar is **not** dropped here; this is the report so Toni decides.

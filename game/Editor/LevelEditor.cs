@@ -28,9 +28,10 @@ namespace Uberkarl {
         // Which pop-in menu, if any, is currently open. One at a time; the owning trigger commits on release.
         enum Trigger { None, Tiles, Layers, Actions, Context }
 
-        // Where gamepad/keyboard focus rests, so the focus action can cycle canvas ⇄ toolbar ⇄ panel and
-        // reveal the panel it lands on (the mouse reveals by edge-hover instead).
-        enum FocusZone { Canvas, Toolbar, Panel }
+        // Where gamepad/keyboard focus rests, so the focus action can cycle canvas ⇄ toolbar and reveal the
+        // toolbar it lands on (the mouse reveals by edge-hover instead). The tile/layer side panel is gone —
+        // it duplicated the Tiles (LB) / Layers (RB) radials, which own tile/layer selection now.
+        enum FocusZone { Canvas, Toolbar }
 
         const string SamplePackagePath = "res://content/sample.pkg";
         const int NewLevelTileSize = 16;
@@ -39,9 +40,8 @@ namespace Uberkarl {
 
         // Press-vs-hold discriminator: a press shorter than this is a tap; longer opens the radial.
         const float HoldThreshold = 0.22f;
-        // Edge-reveal hot-zone extents; also the auto-hidden panels' sizes.
+        // Edge-reveal hot-zone extent; also the auto-hidden toolbar's height.
         const float TopBarHeight = 48f;
-        const float LeftPanelWidth = 224f;
 
         LevelEditSession session;
         Tool activeTool = Tool.Paint;
@@ -52,10 +52,9 @@ namespace Uberkarl {
 
         EditorCanvas canvas;
         Control topBar;
-        Control leftPanel;
         PopInMenu popIn;
-        ItemList layerList;
-        ItemList paletteList;
+        // Tile/layer selection STATE persists here (the radials read it); the visible side-panel lists that
+        // used to mirror it are gone — the Tiles (LB) / Layers (RB) radials fully cover selection.
         readonly List<int> paletteTileIds = new List<int>();
         readonly List<Texture2D> paletteTextures = new List<Texture2D>();
 
@@ -221,16 +220,12 @@ namespace Uberkarl {
         void Dispatch(MenuOutcome outcome) {
             switch (outcome.Kind) {
                 case MenuOutcomeKind.SelectTile:
-                    if (outcome.Index >= 0 && outcome.Index < paletteTileIds.Count) {
-                        paletteList.Select(outcome.Index);
+                    if (outcome.Index >= 0 && outcome.Index < paletteTileIds.Count)
                         OnPaletteSelected(outcome.Index);
-                    }
                     break;
                 case MenuOutcomeKind.SelectLayer:
-                    if (session != null && outcome.Index >= 0 && outcome.Index < session.Level.Layers.Count) {
-                        layerList.Select(outcome.Index);
+                    if (session != null && outcome.Index >= 0 && outcome.Index < session.Level.Layers.Count)
                         OnLayerSelected(outcome.Index);
-                    }
                     break;
                 case MenuOutcomeKind.InvokeAction:
                     InvokeMenuAction(outcome.Action);
@@ -269,13 +264,12 @@ namespace Uberkarl {
 
         // ----- auto-hide / edge-reveal -----
 
-        // Keep the whole area as canvas: hide the toolbar and the layer/tile panel by default. Reveal a
-        // surface when (gamepad/keyboard) the focus-zone rests on it — a sticky reveal that survives momentary
-        // focus loss while navigating inside it, so a directional press no longer insta-hides the panel — or
-        // when (mouse) the pointer is in its edge band or a child of it holds focus. Everything hides while a
-        // radial is open.
+        // Keep the whole area as canvas: hide the toolbar by default. Reveal it when (gamepad/keyboard) the
+        // focus-zone rests on it — a sticky reveal that survives momentary focus loss while navigating inside
+        // it, so a directional press no longer insta-hides it — or when (mouse) the pointer is in its top-edge
+        // band or a child of it holds focus. It hides while a radial is open.
         void UpdateReveals() {
-            if (topBar == null || leftPanel == null)
+            if (topBar == null)
                 return;
 
             bool menuOpen = popIn.IsOpen;
@@ -284,8 +278,6 @@ namespace Uberkarl {
 
             topBar.Visible = !menuOpen &&
                 (focusZone == FocusZone.Toolbar || FocusInside(topBar, focus) || mouse.Y <= TopBarHeight);
-            leftPanel.Visible = !menuOpen &&
-                (focusZone == FocusZone.Panel || FocusInside(leftPanel, focus) || mouse.X <= LeftPanelWidth);
         }
 
         static bool FocusInside(Control container, Control focus) =>
@@ -324,17 +316,12 @@ namespace Uberkarl {
             background.MouseFilter = MouseFilterEnum.Ignore;
             AddChild(background);
 
-            // The canvas fills the whole area — maximum edit surface; panels overlay it and auto-hide.
+            // The canvas fills the whole area — maximum edit surface; the toolbar overlays it and auto-hides.
             canvas = new EditorCanvas();
             canvas.SetAnchorsPreset(LayoutPreset.FullRect);
             canvas.CellPressed += OnCellPressed;
             canvas.CellErased += OnCellErased;
             AddChild(canvas);
-
-            leftPanel = BuildLeftPanel();
-            leftPanel.SetAnchorsPreset(LayoutPreset.LeftWide);
-            leftPanel.OffsetRight = LeftPanelWidth;
-            AddChild(leftPanel);
 
             topBar = BuildToolbar();
             topBar.SetAnchorsPreset(LayoutPreset.TopWide);
@@ -415,57 +402,6 @@ namespace Uberkarl {
             }
         }
 
-        Control BuildLeftPanel() {
-            PanelContainer panel = new PanelContainer();
-            VBoxContainer leftColumn = new VBoxContainer();
-            panel.AddChild(leftColumn);
-
-            leftColumn.AddChild(MakeHeading("Layers"));
-            layerList = new ItemList {
-                CustomMinimumSize = new Vector2(0, 110),
-                SizeFlagsVertical = SizeFlags.Fill,
-                AllowReselect = true,
-            };
-            layerList.ItemSelected += OnLayerSelected;
-            leftColumn.AddChild(layerList);
-
-            leftColumn.AddChild(MakeHeading("Tiles"));
-            paletteList = new ItemList {
-                SizeFlagsVertical = SizeFlags.ExpandFill,
-                IconMode = ItemList.IconModeEnum.Top,
-                FixedIconSize = new Vector2I(40, 40),
-                MaxColumns = 0,
-                SameColumnWidth = true,
-                AllowReselect = true,
-            };
-            paletteList.ItemSelected += OnPaletteSelected;
-            leftColumn.AddChild(paletteList);
-
-            // Contain focus inside the panel the same way the toolbar does, and completely: pin the
-            // horizontal neighbours and the panel's outer vertical edges (top of the layer list, bottom of the
-            // tile list) to self, AND pin the two INNER vertical edges to each other (layer-list bottom → tile
-            // list, tile-list top → layer list). Round 1 left those two inner edges unset, so on a real pad
-            // the ui_* focus navigation that fires alongside the cursor action fell back to Godot's geometric
-            // search and selected the focusable full-rect canvas underneath — stranding focus there (panel
-            // stayed revealed but unnavigable). With every side pinned to a control inside the panel there is
-            // no geometric side left to reach the canvas. Next/previous pin to self so Tab cannot escape either.
-            NodePath self = new NodePath(".");
-            layerList.FocusNeighborLeft = self;
-            layerList.FocusNeighborRight = self;
-            layerList.FocusNeighborTop = self;
-            layerList.FocusNeighborBottom = layerList.GetPathTo(paletteList);
-            layerList.FocusNext = self;
-            layerList.FocusPrevious = self;
-            paletteList.FocusNeighborLeft = self;
-            paletteList.FocusNeighborRight = self;
-            paletteList.FocusNeighborBottom = self;
-            paletteList.FocusNeighborTop = paletteList.GetPathTo(layerList);
-            paletteList.FocusNext = self;
-            paletteList.FocusPrevious = self;
-
-            return panel;
-        }
-
         void BuildFileDialogs() {
             openDialog = new FileDialog {
                 FileMode = FileDialog.FileModeEnum.OpenFile,
@@ -542,22 +478,17 @@ namespace Uberkarl {
             UpdateState();
         }
 
+        // Rebuild the tile-selection STATE the Tiles radial reads: the ordered tile ids and their textures
+        // (the radial draws these as wedge icons). No visible list any more — the side panel is gone.
         void PopulatePalette(EditableLevel level) {
-            paletteList.Clear();
             paletteTileIds.Clear();
             paletteTextures.Clear();
             foreach (EditableTile tile in level.Tiles) {
-                ImageTexture texture = LoadTexture(tile.Graphic);
-                int index = texture != null
-                    ? paletteList.AddIconItem(texture)
-                    : paletteList.AddItem($"#{tile.Id}");
-                paletteList.SetItemTooltip(index, $"Tile {tile.Id}{(tile.Collides ? " (solid)" : string.Empty)}");
                 paletteTileIds.Add(tile.Id);
-                paletteTextures.Add(texture);
+                paletteTextures.Add(LoadTexture(tile.Graphic));
             }
 
             if (paletteTileIds.Count > 0) {
-                paletteList.Select(0);
                 activePaletteIndex = 0;
                 activeTileId = paletteTileIds[0];
             } else {
@@ -566,17 +497,10 @@ namespace Uberkarl {
             }
         }
 
+        // Reset the active layer to the first. Layer names are read live from the session by the Layers radial
+        // (BuildLayersMenu), so there is no list to populate here — only the selection state.
         void PopulateLayers(EditableLevel level) {
-            layerList.Clear();
-            for (int i = 0; i < level.Layers.Count; i++) {
-                EditableLayer layer = level.Layers[i];
-                string suffix = layer.Collision ? "  [solid]" : string.Empty;
-                layerList.AddItem($"{layer.Name}{suffix}");
-            }
-
             activeLayerIndex = 0;
-            if (level.Layers.Count > 0)
-                layerList.Select(0);
         }
 
         static ImageTexture LoadTexture(byte[] png) {
@@ -619,8 +543,7 @@ namespace Uberkarl {
             int next = direction >= 0
                 ? CyclicSelection.Next(activePaletteIndex, paletteTileIds.Count)
                 : CyclicSelection.Prev(activePaletteIndex, paletteTileIds.Count);
-            paletteList.Select(next);
-            OnPaletteSelected(next); // reuses the mouse path: sets active tile + switches to Paint
+            OnPaletteSelected(next); // sets active tile + switches to Paint (same path the radial pick uses)
         }
 
         void CycleLayer(int direction) {
@@ -629,7 +552,6 @@ namespace Uberkarl {
             int next = direction >= 0
                 ? CyclicSelection.Next(activeLayerIndex, session.Level.Layers.Count)
                 : CyclicSelection.Prev(activeLayerIndex, session.Level.Layers.Count);
-            layerList.Select(next);
             OnLayerSelected(next);
         }
 
@@ -639,27 +561,17 @@ namespace Uberkarl {
             eraseButton.ButtonPressed = activeTool == Tool.Erase;
         }
 
-        // Cycle gamepad/keyboard focus across canvas → toolbar → panel, revealing the surface it lands on so
-        // an auto-hidden panel becomes reachable without a mouse (the mouse reveals by edge-hover instead).
+        // Toggle gamepad/keyboard focus between the canvas and the toolbar, revealing the toolbar when it
+        // lands there so it becomes reachable without a mouse (the mouse reveals by edge-hover instead). Tile
+        // and layer selection are no longer a focus zone — the Tiles (LB) / Layers (RB) radials own them.
         void AdvanceFocus() {
-            focusZone = focusZone switch {
-                FocusZone.Canvas => FocusZone.Toolbar,
-                FocusZone.Toolbar => FocusZone.Panel,
-                _ => FocusZone.Canvas,
-            };
+            focusZone = focusZone == FocusZone.Canvas ? FocusZone.Toolbar : FocusZone.Canvas;
 
-            switch (focusZone) {
-                case FocusZone.Toolbar:
-                    topBar.Visible = true;
-                    firstToolButton?.GrabFocus();
-                    break;
-                case FocusZone.Panel:
-                    leftPanel.Visible = true;
-                    layerList?.GrabFocus();
-                    break;
-                default:
-                    canvas.GrabFocus();
-                    break;
+            if (focusZone == FocusZone.Toolbar) {
+                topBar.Visible = true;
+                firstToolButton?.GrabFocus();
+            } else {
+                canvas.GrabFocus();
             }
         }
 
@@ -776,12 +688,6 @@ namespace Uberkarl {
         static Control MakeSeparator() {
             VSeparator separator = new VSeparator();
             return separator;
-        }
-
-        static Label MakeHeading(string text) {
-            Label label = new Label { Text = text };
-            label.AddThemeColorOverride("font_color", EditorTheme.TextDim);
-            return label;
         }
     }
 }
