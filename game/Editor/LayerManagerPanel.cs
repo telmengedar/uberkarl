@@ -60,7 +60,7 @@ namespace Uberkarl {
             backdrop.MouseFilter = MouseFilterEnum.Stop;
             AddChild(backdrop);
 
-            PanelContainer panel = new PanelContainer { CustomMinimumSize = new Vector2(520f, 420f) };
+            PanelContainer panel = new PanelContainer { CustomMinimumSize = new Vector2(920f, 420f) };
             panel.SetAnchorsPreset(LayoutPreset.Center);
             AddChild(panel);
 
@@ -70,7 +70,7 @@ namespace Uberkarl {
             Label title = new Label { Text = "Manage Layers" };
             root.AddChild(title);
 
-            ScrollContainer scroll = new ScrollContainer { CustomMinimumSize = new Vector2(500f, 360f) };
+            ScrollContainer scroll = new ScrollContainer { CustomMinimumSize = new Vector2(900f, 360f) };
             root.AddChild(scroll);
 
             listBox = new VBoxContainer();
@@ -143,12 +143,18 @@ namespace Uberkarl {
             stepper.Stepped += direction => OnScrollStepped(index, direction);
             chain.Add(stepper);
 
+            // Intentionally NOT Button.Disabled: Godot's default ui_down/ui_up focus navigation cannot
+            // traverse THROUGH a disabled Control — it silently traps focus there instead of advancing to
+            // the next chain member. The real gating already lives server-side (LevelEditSession.SetRepeat
+            // no-ops while collision is on); here we only grey the label so the lock reads visually while
+            // keeping the control a normal, navigable stop in the chain.
             Button repeatToggle = new Button {
                 Text = layer.Repeat ? "Repeat: On" : "Repeat: Off",
                 ToggleMode = true,
                 ButtonPressed = layer.Repeat,
-                Disabled = !editable,
             };
+            if (!editable)
+                repeatToggle.AddThemeColorOverride("font_color", EditorTheme.TextDim);
             repeatToggle.Pressed += () => OnRepeatPressed(index, repeatToggle);
             row.AddChild(repeatToggle);
             chain.Add(repeatToggle);
@@ -178,16 +184,22 @@ namespace Uberkarl {
         // Vertical focus chain, ends and every horizontal side pinned to self — the same technique
         // PackageBrowser.ContainListFocus uses, generalised beyond plain buttons to whatever control kind
         // sits at each step (including the ScrollStepper, which alone wants ui_left/ui_right for itself).
-        static void ContainVerticalFocus(List<Control> chain) {
+        // Also tracks which position last held focus (FocusEntered), so a Rebuild() triggered by a
+        // property edit can restore focus to roughly the same spot instead of always snapping back to
+        // "+ Add Layer" — every mutation rebuilds the whole row list from scratch, which would otherwise
+        // discard focus entirely.
+        void ContainVerticalFocus(List<Control> chain) {
             NodePath self = new NodePath(".");
             for (int i = 0; i < chain.Count; i++) {
                 Control control = chain[i];
+                int capturedIndex = i;
                 control.FocusNeighborLeft = self;
                 control.FocusNeighborRight = self;
                 control.FocusNeighborTop = i > 0 ? control.GetPathTo(chain[i - 1]) : self;
                 control.FocusNeighborBottom = i < chain.Count - 1 ? control.GetPathTo(chain[i + 1]) : self;
                 control.FocusNext = self;
                 control.FocusPrevious = self;
+                control.FocusEntered += () => lastFocusedIndex = capturedIndex;
             }
         }
 
@@ -275,6 +287,23 @@ namespace Uberkarl {
             if (@event.IsActionPressed("ui_cancel")) {
                 AcceptEvent();
                 Close();
+            }
+        }
+
+        // Belt-and-suspenders close path. _GuiInput only ever reaches the exact focused Control — Godot
+        // does not bubble a keyboard/action GUI event up through ancestor Controls the way a mouse event's
+        // hit-test chain does. Since the panel's chain almost always has a Button (not the panel itself)
+        // focused, ui_cancel pressed on that Button never reaches the _GuiInput override above; it falls
+        // through to unhandled input instead, where this catches it and marks it handled before it can
+        // reach LevelEditor's own _UnhandledInput (which would otherwise treat it as a no-op while a modal
+        // is open, per its layerManager.IsOpen guard).
+        public override void _UnhandledInput(InputEvent @event) {
+            if (!Visible || @event.IsEcho())
+                return;
+
+            if (@event.IsActionPressed("ui_cancel")) {
+                Close();
+                GetViewport().SetInputAsHandled();
             }
         }
 
