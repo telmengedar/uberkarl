@@ -162,14 +162,20 @@ namespace Uberkarl {
         }
 
         public override void _GuiInput(InputEvent @event) {
-            // Grid-cursor paint / erase (gamepad button, keyboard) — act at the cursor cell.
-            if (@event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Paint))) {
+            // Grid-cursor paint / erase (gamepad button, keyboard) — act at the cursor cell, but ONLY while the
+            // canvas truly owns input. When a radial is open or a non-canvas focus-zone is active, the same
+            // confirm button (gamepad A = editor_paint) belongs to that surface: it must activate the focused
+            // classic Control via ui_accept, not paint the cell underneath. So editor_paint/erase stays inert
+            // here — we do NOT AcceptEvent, letting the confirm reach the focused Button/ItemList. Mirrors the
+            // cursor-movement gate; both read the controller-set DirectionalInputCaptured flag.
+            bool canvasOwnsInput = CursorInputGate.AllowsPrimaryAction(HasFocus(), DirectionalInputCaptured);
+            if (canvasOwnsInput && @event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Paint))) {
                 if (cursor != null)
                     CellPressed?.Invoke(cursor.X, cursor.Y);
                 AcceptEvent();
                 return;
             }
-            if (@event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Erase))) {
+            if (canvasOwnsInput && @event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Erase))) {
                 if (cursor != null)
                     CellErased?.Invoke(cursor.X, cursor.Y);
                 AcceptEvent();
