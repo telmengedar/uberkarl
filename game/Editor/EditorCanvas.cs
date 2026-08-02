@@ -63,14 +63,19 @@ namespace Uberkarl {
             MouseFilter = MouseFilterEnum.Stop;
             FocusMode = FocusModeEnum.All; // focusable, so gamepad/keyboard can direct input here
             // The cursor-move actions share the arrow keys / D-pad / stick with Godot's ui_up/down/left/
-            // right focus navigation. Pinning the four directional focus neighbours to self keeps focus on
-            // the canvas while those move the grid cursor; leaving the canvas is done deliberately with the
-            // focus-next action (Tab / B) instead of by nudging a direction.
+            // right focus navigation, and Tab/B share the editor focus-next action with Godot's
+            // ui_focus_next. Pinning ALL six focus neighbours (four directional plus next/previous) to self
+            // keeps focus on the canvas while those move the grid cursor; leaving the canvas is done
+            // deliberately with the editor focus-next action (which drives the zone cycle), never as a side
+            // effect of a directional nudge or a Tab. Without the next/previous pins, a keyboard Tab's
+            // ui_focus_next would race the zone cycle and could strand focus on an arbitrary control.
             NodePath self = new NodePath(".");
             FocusNeighborLeft = self;
             FocusNeighborRight = self;
             FocusNeighborTop = self;
             FocusNeighborBottom = self;
+            FocusNext = self;
+            FocusPrevious = self;
             ClipContents = true;
             worldRoot = new Node2D { Name = "World", ShowBehindParent = true };
             AddChild(worldRoot);

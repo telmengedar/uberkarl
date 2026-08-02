@@ -111,7 +111,8 @@ namespace Uberkarl {
             // Freeze the grid cursor whenever a radial owns directional input, OR a toolbar/panel focus-zone
             // is active (gamepad/keyboard is navigating it) — independent of which control momentarily holds
             // focus, so the cursor can never step underneath an open menu or a focused panel.
-            canvas.DirectionalInputCaptured = popIn.IsOpen || focusZone != FocusZone.Canvas;
+            canvas.DirectionalInputCaptured =
+                CursorInputGate.DirectionCaptured(popIn.IsOpen, focusZone != FocusZone.Canvas);
 
             tilesTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenTileMenu)), d);
             layersTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenLayerMenu)), d);
@@ -387,24 +388,31 @@ namespace Uberkarl {
             return bar;
         }
 
-        // Keep gamepad/keyboard focus inside the toolbar once B lands there: pin each button's vertical
-        // neighbours (and the row-end horizontal ones) to itself so a directional press navigates between the
-        // buttons but can never escape down onto the canvas — the escape that used to insta-hide the toolbar
-        // and hand the grid cursor back its focus. Left/right between the middle buttons stays geometry-driven.
+        // Keep gamepad/keyboard focus fully inside the toolbar once B lands there. A real stick/D-pad press
+        // fires Godot's built-in ui_left/right/up/down focus navigation ALONGSIDE the editor cursor action
+        // (both are bound to the same D-pad + left stick), so any focus neighbour left unset falls back to
+        // Godot's geometric search — and because the edit canvas is a focusable full-rect Control underlying
+        // the whole viewport, that search selects the canvas and strands focus there (the round-1 fix pinned
+        // only the vertical + row-end sides and left the middle buttons' left/right geometry-driven, which on
+        // a real pad still escaped). So wire EVERY side of EVERY button to a sibling in the row — the ends pin
+        // to self — leaving no geometric side that can reach the canvas. Next/previous pin to self too so a
+        // keyboard Tab's ui_focus_next cannot escape either; the editor focus-next action still cycles zones.
         static void ContainToolbarFocus(Container row) {
             NodePath self = new NodePath(".");
-            Button first = null;
-            Button last = null;
-            foreach (Node child in row.GetChildren()) {
-                if (child is not Button button)
-                    continue;
+            List<Button> buttons = new List<Button>();
+            foreach (Node child in row.GetChildren())
+                if (child is Button button)
+                    buttons.Add(button);
+
+            for (int i = 0; i < buttons.Count; i++) {
+                Button button = buttons[i];
                 button.FocusNeighborTop = self;
                 button.FocusNeighborBottom = self;
-                first ??= button;
-                last = button;
+                button.FocusNeighborLeft = i > 0 ? button.GetPathTo(buttons[i - 1]) : self;
+                button.FocusNeighborRight = i < buttons.Count - 1 ? button.GetPathTo(buttons[i + 1]) : self;
+                button.FocusNext = self;
+                button.FocusPrevious = self;
             }
-            if (first != null) first.FocusNeighborLeft = self;
-            if (last != null) last.FocusNeighborRight = self;
         }
 
         Control BuildLeftPanel() {
@@ -433,17 +441,27 @@ namespace Uberkarl {
             paletteList.ItemSelected += OnPaletteSelected;
             leftColumn.AddChild(paletteList);
 
-            // Contain focus inside the panel the same way the toolbar does: pin the horizontal neighbours of
-            // both lists, plus the panel's outer vertical edges (top of the layer list, bottom of the tile
-            // list), to self. Directional input navigates within/between the two lists but never escapes onto
-            // the canvas — so navigating the revealed panel no longer dismisses it or steals the grid cursor.
+            // Contain focus inside the panel the same way the toolbar does, and completely: pin the
+            // horizontal neighbours and the panel's outer vertical edges (top of the layer list, bottom of the
+            // tile list) to self, AND pin the two INNER vertical edges to each other (layer-list bottom → tile
+            // list, tile-list top → layer list). Round 1 left those two inner edges unset, so on a real pad
+            // the ui_* focus navigation that fires alongside the cursor action fell back to Godot's geometric
+            // search and selected the focusable full-rect canvas underneath — stranding focus there (panel
+            // stayed revealed but unnavigable). With every side pinned to a control inside the panel there is
+            // no geometric side left to reach the canvas. Next/previous pin to self so Tab cannot escape either.
             NodePath self = new NodePath(".");
             layerList.FocusNeighborLeft = self;
             layerList.FocusNeighborRight = self;
             layerList.FocusNeighborTop = self;
+            layerList.FocusNeighborBottom = layerList.GetPathTo(paletteList);
+            layerList.FocusNext = self;
+            layerList.FocusPrevious = self;
             paletteList.FocusNeighborLeft = self;
             paletteList.FocusNeighborRight = self;
             paletteList.FocusNeighborBottom = self;
+            paletteList.FocusNeighborTop = paletteList.GetPathTo(layerList);
+            paletteList.FocusNext = self;
+            paletteList.FocusPrevious = self;
 
             return panel;
         }
