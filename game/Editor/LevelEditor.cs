@@ -10,20 +10,38 @@ using Uberkarl.Packages;
 namespace Uberkarl {
 
     /// <summary>
-    /// The level editor's composition root and controller. It builds the whole <see cref="Control"/>-based
-    /// UI (toolbar, layer selector, tile palette, canvas), owns the engine-agnostic
-    /// <see cref="LevelEditSession"/>, and translates UI intent into session calls — then reflects the
-    /// returned <see cref="CellChange"/> on the canvas. All edit logic and the load/save round-trip live in
-    /// the session and the <c>Uberkarl.Editor</c> library; this class is glue: input, layout, and file IO.
+    /// The level editor's composition root and controller. It owns the engine-agnostic
+    /// <see cref="LevelEditSession"/> and translates UI intent into session calls — then reflects the
+    /// returned <see cref="CellChange"/> on the canvas. The interaction paradigm is <b>pop-in / hold-to-
+    /// reveal</b>: the whole area is the edit canvas, and the palette/layer/action surfaces appear only
+    /// while a trigger is held (a radial menu on gamepad/keyboard/mouse), while the toolbar and the
+    /// layer/tile panel auto-hide and edge-reveal for the mouse and reveal on focus for gamepad/keyboard.
+    /// Every menu choice is routed as a device-neutral <see cref="MenuOutcome"/> onto the editor's existing
+    /// operations — the pop-in is a new front-end, not new edit logic. All edit logic and the load/save
+    /// round-trip live in the session and the <c>Uberkarl.Editor</c> library; this class is glue: input,
+    /// layout, and file IO.
     /// </summary>
     public partial class LevelEditor : Control {
 
         enum Tool { Paint, Erase }
 
+        // Which pop-in menu, if any, is currently open. One at a time; the owning trigger commits on release.
+        enum Trigger { None, Tiles, Layers, Actions, Context }
+
+        // Where gamepad/keyboard focus rests, so the focus action can cycle canvas ⇄ toolbar ⇄ panel and
+        // reveal the panel it lands on (the mouse reveals by edge-hover instead).
+        enum FocusZone { Canvas, Toolbar, Panel }
+
         const string SamplePackagePath = "res://content/sample.pkg";
         const int NewLevelTileSize = 16;
         const int NewLevelWidth = 24;
         const int NewLevelHeight = 16;
+
+        // Press-vs-hold discriminator: a press shorter than this is a tap; longer opens the radial.
+        const float HoldThreshold = 0.22f;
+        // Edge-reveal hot-zone extents; also the auto-hidden panels' sizes.
+        const float TopBarHeight = 48f;
+        const float LeftPanelWidth = 224f;
 
         LevelEditSession session;
         Tool activeTool = Tool.Paint;
@@ -33,22 +51,41 @@ namespace Uberkarl {
         string currentFilePath;
 
         EditorCanvas canvas;
+        Control topBar;
+        Control leftPanel;
+        PopInMenu popIn;
         ItemList layerList;
         ItemList paletteList;
         readonly List<int> paletteTileIds = new List<int>();
+        readonly List<Texture2D> paletteTextures = new List<Texture2D>();
 
         Button saveButton;
         Button undoButton;
         Button redoButton;
         Button paintButton;
         Button eraseButton;
+        Button firstToolButton;
         Label statusLabel;
         FileDialog openDialog;
         FileDialog saveDialog;
 
+        HoldWatch tilesTrigger;
+        HoldWatch layersTrigger;
+        HoldWatch actionsTrigger;
+        HoldWatch contextTrigger;
+        Trigger activeTrigger = Trigger.None;
+        Vector2 menuCenterGlobal;
+        FocusZone focusZone = FocusZone.Canvas;
+
         public override void _Ready() {
             Theme = EditorTheme.Build();
             SetAnchorsPreset(LayoutPreset.FullRect);
+
+            tilesTrigger = new HoldWatch(HoldThreshold);
+            layersTrigger = new HoldWatch(HoldThreshold);
+            actionsTrigger = new HoldWatch(HoldThreshold);
+            contextTrigger = new HoldWatch(HoldThreshold);
+
             BuildUi();
 
             if (Godot.FileAccess.FileExists(SamplePackagePath))
@@ -61,12 +98,195 @@ namespace Uberkarl {
             canvas.CallDeferred(Control.MethodName.GrabFocus);
         }
 
-        // Global editor actions that work regardless of which surface holds focus. Cursor movement and
-        // paint/erase-at-cursor are consumed by the focused EditorCanvas (see EditorCanvas._GuiInput /
-        // _Process); everything here is device-neutral and reaches _UnhandledInput because no focused
-        // Control claimed it. Guarded against key-repeat echo so a held key fires each action once.
+        // Drives the pop-in triggers (press-vs-hold), feeds the open radial its aim direction, and keeps the
+        // auto-hide panels revealed/hidden. Cursor movement and paint/erase-at-cursor are consumed by the
+        // focused EditorCanvas; global one-shot actions arrive in _UnhandledInput.
+        public override void _Process(double delta) {
+            if (popIn == null)
+                return;
+
+            float d = (float)delta;
+            UpdateReveals();
+
+            tilesTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenTileMenu)), d);
+            layersTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenLayerMenu)), d);
+            actionsTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenActionMenu)), d);
+            contextTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenContextMenu)), d);
+
+            if (activeTrigger != Trigger.None) {
+                popIn.SetAim(CurrentAim());
+                if (WatchFor(activeTrigger).JustReleased)
+                    popIn.Commit();
+                return;
+            }
+
+            if (tilesTrigger.JustCrossedHold) OpenMenu(Trigger.Tiles);
+            else if (layersTrigger.JustCrossedHold) OpenMenu(Trigger.Layers);
+            else if (actionsTrigger.JustCrossedHold) OpenMenu(Trigger.Actions);
+            else if (contextTrigger.JustCrossedHold) OpenMenu(Trigger.Context);
+
+            // Mouse right-click TAP erases the cell under the pointer (right-click HOLD opened the context
+            // radial above instead) — the press-vs-hold split that lets erase and the context menu coexist.
+            if (contextTrigger.ReleasedAsTap)
+                canvas.EraseAtGlobal(GetViewport().GetMousePosition());
+        }
+
+        Vector2 CurrentAim() {
+            if (activeTrigger == Trigger.Context)
+                return GetViewport().GetMousePosition() - menuCenterGlobal;
+
+            // Gamepad stick + D-pad + keyboard arrows all resolve through the cursor-move actions.
+            return Godot.Input.GetVector(
+                ActionName(EditorAction.MoveCursorLeft), ActionName(EditorAction.MoveCursorRight),
+                ActionName(EditorAction.MoveCursorUp), ActionName(EditorAction.MoveCursorDown));
+        }
+
+        HoldWatch WatchFor(Trigger trigger) => trigger switch {
+            Trigger.Tiles => tilesTrigger,
+            Trigger.Layers => layersTrigger,
+            Trigger.Actions => actionsTrigger,
+            Trigger.Context => contextTrigger,
+            _ => tilesTrigger,
+        };
+
+        static string ActionName(EditorAction action) => EditorActionMap.NameOf(action);
+
+        // ----- pop-in menus -----
+
+        void OpenMenu(Trigger trigger) {
+            if (session == null)
+                return;
+
+            activeTrigger = trigger;
+            switch (trigger) {
+                case Trigger.Tiles:
+                    menuCenterGlobal = canvas.CursorGlobalCenter();
+                    popIn.Open(BuildTilesMenu(), menuCenterGlobal, TileIcon);
+                    break;
+                case Trigger.Layers:
+                    menuCenterGlobal = canvas.CursorGlobalCenter();
+                    popIn.Open(BuildLayersMenu(), menuCenterGlobal);
+                    break;
+                case Trigger.Actions:
+                    menuCenterGlobal = canvas.CursorGlobalCenter();
+                    popIn.Open(BuildActionsMenu(), menuCenterGlobal);
+                    break;
+                case Trigger.Context:
+                    menuCenterGlobal = GetViewport().GetMousePosition();
+                    popIn.Open(BuildTilesMenu(), menuCenterGlobal, TileIcon);
+                    break;
+            }
+        }
+
+        RadialMenuModel BuildTilesMenu() {
+            List<RadialMenuItem> items = new List<RadialMenuItem>(paletteTileIds.Count);
+            for (int i = 0; i < paletteTileIds.Count; i++)
+                items.Add(new RadialMenuItem($"#{paletteTileIds[i]}", MenuOutcome.SelectTile(i)));
+            return new RadialMenuModel("Tiles", items);
+        }
+
+        RadialMenuModel BuildLayersMenu() {
+            List<RadialMenuItem> items = new List<RadialMenuItem>();
+            if (session != null) {
+                for (int i = 0; i < session.Level.Layers.Count; i++)
+                    items.Add(new RadialMenuItem(session.Level.Layers[i].Name, MenuOutcome.SelectLayer(i)));
+            }
+            return new RadialMenuModel("Layers", items);
+        }
+
+        RadialMenuModel BuildActionsMenu() {
+            RadialMenuItem[] items = {
+                new RadialMenuItem("New", MenuOutcome.FileOp(EditorFileCommand.New)),
+                new RadialMenuItem("Open", MenuOutcome.FileOp(EditorFileCommand.Open)),
+                new RadialMenuItem("Save", MenuOutcome.FileOp(EditorFileCommand.Save)),
+                new RadialMenuItem("Save As", MenuOutcome.FileOp(EditorFileCommand.SaveAs)),
+                new RadialMenuItem("Undo", MenuOutcome.Invoke(EditorAction.Undo)),
+                new RadialMenuItem("Redo", MenuOutcome.Invoke(EditorAction.Redo)),
+                new RadialMenuItem("Tool", MenuOutcome.Invoke(EditorAction.ToggleTool)),
+            };
+            return new RadialMenuModel("Actions", items);
+        }
+
+        Texture2D TileIcon(int paletteIndex) =>
+            paletteIndex >= 0 && paletteIndex < paletteTextures.Count ? paletteTextures[paletteIndex] : null;
+
+        // The single routing point: a device-neutral menu outcome onto the editor's existing operations —
+        // the same palette/layer selection and undo/redo/save/tool paths the toolbar and hotkeys use.
+        void Dispatch(MenuOutcome outcome) {
+            switch (outcome.Kind) {
+                case MenuOutcomeKind.SelectTile:
+                    if (outcome.Index >= 0 && outcome.Index < paletteTileIds.Count) {
+                        paletteList.Select(outcome.Index);
+                        OnPaletteSelected(outcome.Index);
+                    }
+                    break;
+                case MenuOutcomeKind.SelectLayer:
+                    if (session != null && outcome.Index >= 0 && outcome.Index < session.Level.Layers.Count) {
+                        layerList.Select(outcome.Index);
+                        OnLayerSelected(outcome.Index);
+                    }
+                    break;
+                case MenuOutcomeKind.InvokeAction:
+                    InvokeMenuAction(outcome.Action);
+                    break;
+                case MenuOutcomeKind.FileCommand:
+                    InvokeFileCommand(outcome.File);
+                    break;
+            }
+            EndMenu();
+        }
+
+        void InvokeMenuAction(EditorAction action) {
+            switch (action) {
+                case EditorAction.Undo: Undo(); break;
+                case EditorAction.Redo: Redo(); break;
+                case EditorAction.ToggleTool: ToggleTool(); break;
+            }
+        }
+
+        void InvokeFileCommand(EditorFileCommand command) {
+            switch (command) {
+                case EditorFileCommand.New: NewLevel(); break;
+                case EditorFileCommand.Open: openDialog.PopupCentered(new Vector2I(720, 480)); break;
+                case EditorFileCommand.Save: Save(); break;
+                case EditorFileCommand.SaveAs: saveDialog.PopupCentered(new Vector2I(720, 480)); break;
+            }
+        }
+
+        void OnMenuCancelled() => EndMenu();
+
+        void EndMenu() {
+            activeTrigger = Trigger.None;
+            focusZone = FocusZone.Canvas;
+            canvas?.GrabFocus();
+        }
+
+        // ----- auto-hide / edge-reveal -----
+
+        // Keep the whole area as canvas: hide the toolbar and the layer/tile panel by default, revealing the
+        // toolbar when the pointer is in the top band (or it holds focus) and the panel when the pointer is
+        // in the left band (or it holds focus). Everything hides while a radial is open.
+        void UpdateReveals() {
+            if (topBar == null || leftPanel == null)
+                return;
+
+            bool menuOpen = popIn.IsOpen;
+            Vector2 mouse = GetViewport().GetMousePosition();
+            Control focus = GetViewport().GuiGetFocusOwner();
+
+            topBar.Visible = !menuOpen && (FocusInside(topBar, focus) || mouse.Y <= TopBarHeight);
+            leftPanel.Visible = !menuOpen && (FocusInside(leftPanel, focus) || mouse.X <= LeftPanelWidth);
+        }
+
+        static bool FocusInside(Control container, Control focus) =>
+            focus != null && (focus == container || container.IsAncestorOf(focus));
+
+        // Global editor actions that work regardless of which surface holds focus. Suppressed while a radial
+        // is open (the radial owns input then). Cursor movement and paint/erase-at-cursor are consumed by the
+        // focused EditorCanvas; everything here is device-neutral and reaches _UnhandledInput because no
+        // focused Control claimed it. Guarded against key-repeat echo so a held key fires each action once.
         public override void _UnhandledInput(InputEvent @event) {
-            if (@event.IsEcho())
+            if (@event.IsEcho() || (popIn != null && popIn.IsOpen))
                 return;
 
             if (Fired(@event, EditorAction.CycleTilePrev)) CycleTile(-1);
@@ -91,21 +311,32 @@ namespace Uberkarl {
         void BuildUi() {
             ColorRect background = new ColorRect { Color = EditorTheme.Shell };
             background.SetAnchorsPreset(LayoutPreset.FullRect);
+            background.MouseFilter = MouseFilterEnum.Ignore;
             AddChild(background);
 
-            MarginContainer margin = new MarginContainer();
-            margin.SetAnchorsPreset(LayoutPreset.FullRect);
-            margin.AddThemeConstantOverride("margin_left", 8);
-            margin.AddThemeConstantOverride("margin_top", 8);
-            margin.AddThemeConstantOverride("margin_right", 8);
-            margin.AddThemeConstantOverride("margin_bottom", 8);
-            AddChild(margin);
+            // The canvas fills the whole area — maximum edit surface; panels overlay it and auto-hide.
+            canvas = new EditorCanvas();
+            canvas.SetAnchorsPreset(LayoutPreset.FullRect);
+            canvas.CellPressed += OnCellPressed;
+            canvas.CellErased += OnCellErased;
+            AddChild(canvas);
 
-            VBoxContainer root = new VBoxContainer();
-            margin.AddChild(root);
+            leftPanel = BuildLeftPanel();
+            leftPanel.SetAnchorsPreset(LayoutPreset.LeftWide);
+            leftPanel.OffsetRight = LeftPanelWidth;
+            AddChild(leftPanel);
 
-            root.AddChild(BuildToolbar());
-            root.AddChild(BuildBody());
+            topBar = BuildToolbar();
+            topBar.SetAnchorsPreset(LayoutPreset.TopWide);
+            topBar.OffsetBottom = TopBarHeight;
+            AddChild(topBar);
+
+            popIn = new PopInMenu();
+            popIn.Chosen += Dispatch;
+            popIn.Cancelled += OnMenuCancelled;
+            AddChild(popIn);
+
+            BuildFileDialogs();
         }
 
         Control BuildToolbar() {
@@ -113,7 +344,8 @@ namespace Uberkarl {
             HBoxContainer row = new HBoxContainer();
             bar.AddChild(row);
 
-            row.AddChild(MakeButton("New", NewLevel));
+            firstToolButton = MakeButton("New", NewLevel);
+            row.AddChild(firstToolButton);
             row.AddChild(MakeButton("Open", () => openDialog.PopupCentered(new Vector2I(720, 480))));
             saveButton = MakeButton("Save", Save);
             row.AddChild(saveButton);
@@ -142,19 +374,13 @@ namespace Uberkarl {
             statusLabel.AddThemeColorOverride("font_color", EditorTheme.TextDim);
             row.AddChild(statusLabel);
 
-            BuildFileDialogs();
             return bar;
         }
 
-        Control BuildBody() {
-            HBoxContainer body = new HBoxContainer { SizeFlagsVertical = SizeFlags.ExpandFill };
-
-            PanelContainer leftPanel = new PanelContainer {
-                CustomMinimumSize = new Vector2(220, 0),
-                SizeFlagsVertical = SizeFlags.ExpandFill,
-            };
+        Control BuildLeftPanel() {
+            PanelContainer panel = new PanelContainer();
             VBoxContainer leftColumn = new VBoxContainer();
-            leftPanel.AddChild(leftColumn);
+            panel.AddChild(leftColumn);
 
             leftColumn.AddChild(MakeHeading("Layers"));
             layerList = new ItemList {
@@ -177,17 +403,7 @@ namespace Uberkarl {
             paletteList.ItemSelected += OnPaletteSelected;
             leftColumn.AddChild(paletteList);
 
-            body.AddChild(leftPanel);
-
-            canvas = new EditorCanvas {
-                SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                SizeFlagsVertical = SizeFlags.ExpandFill,
-            };
-            canvas.CellPressed += OnCellPressed;
-            canvas.CellErased += OnCellErased;
-            body.AddChild(canvas);
-
-            return body;
+            return panel;
         }
 
         void BuildFileDialogs() {
@@ -269,6 +485,7 @@ namespace Uberkarl {
         void PopulatePalette(EditableLevel level) {
             paletteList.Clear();
             paletteTileIds.Clear();
+            paletteTextures.Clear();
             foreach (EditableTile tile in level.Tiles) {
                 ImageTexture texture = LoadTexture(tile.Graphic);
                 int index = texture != null
@@ -276,6 +493,7 @@ namespace Uberkarl {
                     : paletteList.AddItem($"#{tile.Id}");
                 paletteList.SetItemTooltip(index, $"Tile {tile.Id}{(tile.Collides ? " (solid)" : string.Empty)}");
                 paletteTileIds.Add(tile.Id);
+                paletteTextures.Add(texture);
             }
 
             if (paletteTileIds.Count > 0) {
@@ -361,13 +579,28 @@ namespace Uberkarl {
             eraseButton.ButtonPressed = activeTool == Tool.Erase;
         }
 
-        // Move focus across the toolbar / panels / canvas so a gamepad or keyboard can reach every
-        // control. Godot's native focus navigation walks the visible controls; from the canvas this steps
-        // into the panels, and Tab / Shift+Tab (ui_focus_next/prev) cover the reverse on keyboard.
+        // Cycle gamepad/keyboard focus across canvas → toolbar → panel, revealing the surface it lands on so
+        // an auto-hidden panel becomes reachable without a mouse (the mouse reveals by edge-hover instead).
         void AdvanceFocus() {
-            Control focused = GetViewport().GuiGetFocusOwner();
-            Control next = focused?.FindNextValidFocus();
-            (next ?? canvas)?.GrabFocus();
+            focusZone = focusZone switch {
+                FocusZone.Canvas => FocusZone.Toolbar,
+                FocusZone.Toolbar => FocusZone.Panel,
+                _ => FocusZone.Canvas,
+            };
+
+            switch (focusZone) {
+                case FocusZone.Toolbar:
+                    topBar.Visible = true;
+                    firstToolButton?.GrabFocus();
+                    break;
+                case FocusZone.Panel:
+                    leftPanel.Visible = true;
+                    layerList?.GrabFocus();
+                    break;
+                default:
+                    canvas.GrabFocus();
+                    break;
+            }
         }
 
         void Undo() {

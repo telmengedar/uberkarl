@@ -28,6 +28,10 @@ public static class EditorActionMap
         [EditorAction.Redo] = "editor_redo",
         [EditorAction.Save] = "editor_save",
         [EditorAction.FocusNext] = "editor_focus_next",
+        [EditorAction.OpenTileMenu] = "editor_menu_tiles",
+        [EditorAction.OpenLayerMenu] = "editor_menu_layers",
+        [EditorAction.OpenActionMenu] = "editor_menu_actions",
+        [EditorAction.OpenContextMenu] = "editor_menu_context",
     };
 
     private static readonly IReadOnlyDictionary<string, EditorAction> ByName =

@@ -186,6 +186,26 @@ namespace Uberkarl {
             }
         }
 
+        /// <summary>The global (viewport-space) centre of the grid-cursor cell — where a pop-in menu opened
+        /// by a gamepad/keyboard trigger should appear, so it frames the cell the action will land on.</summary>
+        public Vector2 CursorGlobalCenter() {
+            if (cursor == null)
+                return GlobalPosition + Size / 2f;
+            Vector2 local = viewOffset + (new Vector2(cursor.X, cursor.Y) + new Vector2(0.5f, 0.5f)) * (tileSize * viewScale);
+            return GlobalPosition + local;
+        }
+
+        /// <summary>Erase the cell under a global (viewport-space) point, if it maps to a cell — the mouse
+        /// right-click-tap erase convenience, resolved by the controller and routed like any other erase.</summary>
+        public void EraseAtGlobal(Vector2 globalPosition) {
+            Vector2 local = globalPosition - GlobalPosition;
+            if (TryCell(local, out int cx, out int cy)) {
+                if (cursor != null && cursor.MoveTo(cx, cy))
+                    QueueRedraw();
+                CellErased?.Invoke(cx, cy);
+            }
+        }
+
         void EmitCellAt(Vector2 localPosition) {
             if (!TryCell(localPosition, out int cx, out int cy))
                 return;
