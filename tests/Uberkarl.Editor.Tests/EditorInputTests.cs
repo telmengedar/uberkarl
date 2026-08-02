@@ -206,4 +206,46 @@ public sealed class EditorInputTests
             cursor.TryMove(1, 0);
         Assert.That((cursor.X, cursor.Y), Is.EqualTo((6, 5)), "cursor should move once the menu closes.");
     }
+
+    // ----- direction ownership (round 2: a revealed toolbar/panel zone owns direction, not just a radial) -----
+
+    [Test]
+    public void DirectionCaptured_WhenARadialIsOpenOrANonCanvasZoneIsActive()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(CursorInputGate.DirectionCaptured(radialOpen: false, nonCanvasZoneActive: false),
+                Is.False, "plain canvas: the grid cursor owns direction.");
+            Assert.That(CursorInputGate.DirectionCaptured(radialOpen: true, nonCanvasZoneActive: false),
+                Is.True, "an open radial owns direction.");
+            Assert.That(CursorInputGate.DirectionCaptured(radialOpen: false, nonCanvasZoneActive: true),
+                Is.True, "a revealed toolbar/panel focus-zone owns direction (the round-2 case).");
+        });
+    }
+
+    [Test]
+    public void PanelZoneActive_DirectionalInput_KeepsCursorFrozen_EvenIfFocusBouncesToCanvas()
+    {
+        // Round-2 regression. On a real gamepad one physical D-pad/stick press fires BOTH the editor cursor
+        // action AND Godot's ui_* focus navigation. With a toolbar/panel focus-zone active, the ui_* half can
+        // bounce focus back onto the full-rect canvas (surfaceHasFocus becomes true). The gate must still
+        // refuse the cursor move, because a non-canvas zone owns direction — the panel stays the input target
+        // and the grid cursor underneath does not creep. (Focus containment itself is pinned by the toolbar/
+        // panel neighbour wiring and verified in-harness; this locks the cursor-freeze half of the seam.)
+        var cursor = new GridCursor(10, 10);
+        cursor.MoveTo(5, 5);
+
+        const bool nonCanvasZoneActive = true; // B revealed the toolbar/panel
+        var captured = CursorInputGate.DirectionCaptured(radialOpen: false, nonCanvasZoneActive);
+
+        // Feed both the ui_ bounce (focus momentarily on the canvas) and the cursor signal, repeatedly.
+        for (var i = 0; i < 5; i++)
+        {
+            if (CursorInputGate.AllowsCursorMovement(surfaceHasFocus: true, directionalCaptured: captured))
+                cursor.TryMove(1, 0);
+        }
+
+        Assert.That((cursor.X, cursor.Y), Is.EqualTo((5, 5)),
+            "grid cursor moved while a toolbar/panel zone owned directional input.");
+    }
 }

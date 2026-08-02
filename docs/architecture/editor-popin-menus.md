@@ -312,3 +312,42 @@ grid cursor **not** hijacked; B cycled back to canvas. `get_editor_errors`: only
 `mcp_input_service.gd` keycode-lookup noise — no project errors. Tests: **Editor 50/50** (48 → +2 gate/freeze),
 Content 33/33, Packages 31/31; `dotnet build` 0 warnings / 0 errors. §6.10 comment-grep (TODO/FIXME/HACK/XXX +
 commented-out code) on the changed files **0**.
+
+### 14.1 Round 2 — directional input still escaped the revealed panel (DiVoid #7449)
+
+Round 1's sticky reveal made the panel **stay open**, but a second real-gamepad playtest found that **any
+D-pad/stick movement snapped focus back to the edit canvas** (menu stayed open but unnavigable). Round 1's
+in-harness check was a false positive for the same reason as before: `simulate_action` fires only the editor
+action, never the `ui_*` companion, so the focus escape never reproduced in the sim.
+
+*Root cause — the exact focus-return path.* On a real stick, one physical press fires **both** the
+`editor_cursor_*` action **and** Godot's built-in `ui_left/right/up/down` (both are bound to the same D-pad
+buttons + left stick; `ui_*` keeps its engine defaults). The `editor_cursor_*` half is already inert off-canvas
+(the `DirectionalInputCaptured` gate). The `ui_*` half is the culprit: round 1 pinned only the *outer* focus
+neighbours and left the **middle toolbar buttons' left/right** and the **two panel lists' inner vertical edges**
+unset. An unset neighbour falls back to Godot's **geometric** focus search — and because `EditorCanvas` is a
+**focusable full-rect Control underlying the whole viewport**, that search selects the canvas from essentially
+any side. Focus lands on the canvas (whose own neighbours are self-pinned, so it's a trap); the panel stays
+revealed (sticky reveal keys on `focusZone`, not focus owner) but is now unreachable.
+
+*Fix (containment completed — no `project.godot` change, spine untouched).* Pin **every** side of **every**
+focusable toolbar/panel control to a control **inside** its own surface, leaving **no** geometric side that can
+reach the canvas: toolbar buttons wire left/right into an explicit sibling chain (ends → self, top/bottom →
+self); the panel's two lists wire their inner vertical edges to each other (layer-list bottom → tile list, tile
+list top → layer list) with the outer edges + horizontals → self. `FocusNext`/`FocusPrevious` are pinned to self
+on those controls **and** on the canvas, so a keyboard Tab's `ui_focus_next` (the same double-fire class) cannot
+escape either — only the explicit editor focus-next action changes zones. The "who owns direction" rule was
+lifted into the pure `CursorInputGate.DirectionCaptured(radialOpen, nonCanvasZoneActive)` and the controller now
+routes through it (engine-free regression test added).
+
+*Verification (Godot MCP — double-fire reproduced in-harness this time).* Injected raw `ui_*` **alongside** the
+editor action by parsing real `InputEventJoypadButton` (D-pad 11–14) and `InputEventJoypadMotion` (left stick)
+events — the true one-press-fires-both path. Proof the harness now reproduces `ui_*` nav: a D-pad **right**
+moved focus New→Open **within** the toolbar. Then **32 directional double-fires** (14 across the toolbar
+including past both ends, 18 across the panel lists, plus analog-stick flicks) — after every one,
+`GuiGetFocusOwner` stayed **inside the toolbar/panel and was never the canvas**, and both panels stayed
+revealed. The zone cycle still closes: focus-next Panel→Canvas returned focus to the canvas. `get_editor_errors`:
+only MCP-harness `gdscript://` / `mcp_game_inspector_service.gd` noise — no project errors. Tests **Editor 52/52**
+(50 → +2: `DirectionCaptured` truth-table + a panel-zone double-fire that keeps the cursor frozen even when the
+`ui_*` bounce lands focus on the canvas), Content 33/33, Packages 31/31; `dotnet build` 0/0; §6.10 comment-grep
+on the changed files **0**.

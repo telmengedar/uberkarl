@@ -18,4 +18,16 @@ public static class CursorInputGate
     /// </summary>
     public static bool AllowsCursorMovement(bool surfaceHasFocus, bool directionalCaptured)
         => surfaceHasFocus && !directionalCaptured;
+
+    /// <summary>
+    /// Whether a directional input is currently owned by a menu or a revealed toolbar/panel focus-zone rather
+    /// than the grid cursor. True whenever a pop-in radial is open <b>or</b> focus rests on a non-canvas zone
+    /// (toolbar / panel). This is the flag the canvas reads (<see cref="AllowsCursorMovement"/>) to freeze its
+    /// cursor. It matters because on a real gamepad one physical stick / D-pad press fires <b>both</b> the
+    /// editor cursor action <b>and</b> Godot's built-in <c>ui_*</c> focus navigation from the same event: even
+    /// if that <c>ui_*</c> navigation momentarily bounces focus back onto the full-rect canvas, a captured
+    /// direction keeps the cursor still — the input belongs to the open menu or the navigated panel.
+    /// </summary>
+    public static bool DirectionCaptured(bool radialOpen, bool nonCanvasZoneActive)
+        => radialOpen || nonCanvasZoneActive;
 }
