@@ -28,13 +28,27 @@ public static class EditableLevelReader
         return FromPackage(package);
     }
 
-    /// <summary>Loads an editable level from an already-opened package.</summary>
+    /// <summary>Loads an editable level from an already-opened package, using its first level resource.</summary>
     public static EditableLevel FromPackage(Package package)
     {
         if (package is null)
             throw new ArgumentNullException(nameof(package));
 
-        var levelPath = FindLevelPath(package);
+        return FromPackage(package, FindLevelPath(package));
+    }
+
+    /// <summary>Loads the level at <paramref name="levelPath"/> from an already-opened package.</summary>
+    public static EditableLevel FromPackage(Package package, ResourcePath levelPath)
+    {
+        if (package is null)
+            throw new ArgumentNullException(nameof(package));
+        if (!package.Contains(levelPath))
+            throw new LevelContentException($"Package does not contain a resource at '{levelPath}'.");
+
+        var entry = package.GetEntry(levelPath);
+        if (entry.Kind != ResourceKind.Level)
+            throw new LevelContentException($"Resource '{levelPath}' is not a level resource (kind '{entry.Kind}').");
+
         var levelDefinition = LevelContentSerializer.ReadLevel(package.ReadBytes(levelPath));
 
         var tileSetReference = levelDefinition.TileSet;
