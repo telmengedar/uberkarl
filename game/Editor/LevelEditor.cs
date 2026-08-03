@@ -46,6 +46,12 @@ namespace Uberkarl {
         const float TopBarHeight = 48f;
 
         LevelEditSession session;
+        // The shared tile set currently bound to the level under edit (DiVoid #7551 Phase 1a, design
+        // #7580) — a level no longer owns its tileset, it references one, and this session is what
+        // TileSetEditor drives to add/remove/rename tiles or import a graphic. Always non-null once a
+        // level is adopted (NewLevel mints a fresh default-palette tile set; loading a level resolves
+        // whichever one it is bound to) — never null while `session` is non-null.
+        TileSetEditSession tileSetSession;
         Tool activeTool = Tool.Paint;
         int activeTileId = LayerDefinition.EmptyCell;
         int activePaletteIndex = -1;
@@ -67,6 +73,8 @@ namespace Uberkarl {
         PackageBrowser packageBrowser;
         LayerManagerPanel layerManager;
         LevelResizePanel resizePanel;
+        TileSetEditor tileSetEditor;
+        TileSetBindPanel tileSetBindPanel;
         OnScreenKeyboard textKeyboard;
         PlaytestOverlay playtestOverlay;
         // Tile/layer selection STATE persists here (the radials read it); the visible side-panel lists that
@@ -133,7 +141,7 @@ namespace Uberkarl {
             // control momentarily holds focus, so the cursor can never step underneath an open menu, the
             // browser, or a focused panel.
             canvas.DirectionalInputCaptured =
-                CursorInputGate.DirectionCaptured(popIn.IsOpen || packageBrowser.IsOpen || layerManager.IsOpen || resizePanel.IsOpen || textKeyboard.IsOpen, focusZone != FocusZone.Canvas);
+                CursorInputGate.DirectionCaptured(AnyModalOpen(), focusZone != FocusZone.Canvas);
 
             tilesTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenTileMenu)), d);
             layersTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenLayerMenu)), d);
@@ -167,6 +175,14 @@ namespace Uberkarl {
                 ActionName(EditorAction.MoveCursorLeft), ActionName(EditorAction.MoveCursorRight),
                 ActionName(EditorAction.MoveCursorUp), ActionName(EditorAction.MoveCursorDown));
         }
+
+        // Every summoned full-rect modal, in one place — the guard every input path (canvas cursor
+        // capture, toolbar auto-hide, global hotkeys) needs so a modal always fully owns input while open.
+        bool AnyModalOpen() =>
+            (popIn != null && popIn.IsOpen) || (packageBrowser != null && packageBrowser.IsOpen) ||
+            (layerManager != null && layerManager.IsOpen) || (resizePanel != null && resizePanel.IsOpen) ||
+            (tileSetEditor != null && tileSetEditor.IsOpen) || (tileSetBindPanel != null && tileSetBindPanel.IsOpen) ||
+            (textKeyboard != null && textKeyboard.IsOpen);
 
         HoldWatch WatchFor(Trigger trigger) => trigger switch {
             Trigger.Tiles => tilesTrigger,
@@ -233,6 +249,8 @@ namespace Uberkarl {
                 new RadialMenuItem("Tool", MenuOutcome.Invoke(EditorAction.ToggleTool)),
                 new RadialMenuItem("Play", MenuOutcome.Invoke(EditorAction.Playtest)),
                 new RadialMenuItem("Resize…", MenuOutcome.OpenResizePanel()),
+                new RadialMenuItem("Edit Tileset…", MenuOutcome.OpenTileSetEditor()),
+                new RadialMenuItem("Bind Tileset…", MenuOutcome.OpenTileSetBindPanel()),
             };
             return new RadialMenuModel("Actions", items);
         }
@@ -264,6 +282,12 @@ namespace Uberkarl {
                 case MenuOutcomeKind.OpenResizePanel:
                     SummonResizePanel();
                     break;
+                case MenuOutcomeKind.OpenTileSetEditor:
+                    SummonTileSetEditor();
+                    break;
+                case MenuOutcomeKind.OpenTileSetBindPanel:
+                    SummonTileSetBindPanel();
+                    break;
             }
             EndMenu();
         }
@@ -278,6 +302,22 @@ namespace Uberkarl {
             if (session == null)
                 return;
             resizePanel.Summon(session);
+        }
+
+        void SummonTileSetEditor() {
+            if (tileSetSession == null)
+                return;
+            tileSetEditor.Summon(tileSetSession);
+        }
+
+        // Only offered once the level already lives in a package (design #7580 — Phase 1 keeps binding
+        // scoped to "another tileset resource already in the SAME package", the same restriction the
+        // editor already applies to reading a level's tileset at all). A brand-new, never-saved level has
+        // no package to browse siblings from yet.
+        void SummonTileSetBindPanel() {
+            if (session == null || packageContext == null)
+                return;
+            tileSetBindPanel.Summon(packageSource, packageContext.Handle, session.Level.TileSetReference);
         }
 
         void InvokeMenuAction(EditorAction action) {
@@ -316,7 +356,7 @@ namespace Uberkarl {
             if (topBar == null)
                 return;
 
-            bool menuOpen = popIn.IsOpen || packageBrowser.IsOpen || layerManager.IsOpen || resizePanel.IsOpen || textKeyboard.IsOpen;
+            bool menuOpen = AnyModalOpen();
             Vector2 mouse = GetViewport().GetMousePosition();
             Control focus = GetViewport().GuiGetFocusOwner();
 
@@ -332,8 +372,7 @@ namespace Uberkarl {
         // focused EditorCanvas; everything here is device-neutral and reaches _UnhandledInput because no
         // focused Control claimed it. Guarded against key-repeat echo so a held key fires each action once.
         public override void _UnhandledInput(InputEvent @event) {
-            if (Playtesting || @event.IsEcho() || (popIn != null && popIn.IsOpen) || (packageBrowser != null && packageBrowser.IsOpen) ||
-                (layerManager != null && layerManager.IsOpen) || (resizePanel != null && resizePanel.IsOpen) || (textKeyboard != null && textKeyboard.IsOpen))
+            if (Playtesting || @event.IsEcho() || AnyModalOpen())
                 return;
 
             if (Fired(@event, EditorAction.CycleTilePrev)) CycleTile(-1);
@@ -402,6 +441,17 @@ namespace Uberkarl {
             resizePanel.LevelModelChanged += OnLayerModelChanged; // same "refresh canvas + status from current model truth" refresh the layer panel uses
             resizePanel.Closed += OnResizePanelClosed;
             AddChild(resizePanel);
+
+            tileSetEditor = new TileSetEditor();
+            tileSetEditor.TileSetModelChanged += OnTileSetModelChanged;
+            tileSetEditor.Closed += OnTileSetEditorClosed;
+            tileSetEditor.AttachKeyboard(textKeyboard);
+            AddChild(tileSetEditor);
+
+            tileSetBindPanel = new TileSetBindPanel();
+            tileSetBindPanel.TileSetChosen += OnTileSetBindChosen;
+            tileSetBindPanel.Cancelled += OnTileSetBindPanelClosed;
+            AddChild(tileSetBindPanel);
 
             // Added last so it draws on top of everything else while a run is live.
             playtestOverlay = new PlaytestOverlay();
@@ -526,11 +576,14 @@ namespace Uberkarl {
             try {
                 using Package package = packageSource.Open(handle);
                 EditableLevel level = EditableLevelReader.FromPackage(package, path);
+                EditableTileSet tileSet = EditableTileSetReader.FromPackage(package, level.TileSetReference);
+                tileSetSession = new TileSetEditSession(tileSet);
                 packageContext = PackageContext.FromPackage(package, handle);
                 currentFilePath = null;
                 AdoptSession(level);
                 GD.Print($"LevelEditor: loaded {level.Width}x{level.Height} level '{level.Name}' " +
-                    $"({level.Tiles.Count} tiles, {level.Layers.Count} layers) from package '{packageContext.Name}'.");
+                    $"({level.Tiles.Count} tiles, {level.Layers.Count} layers) from package '{packageContext.Name}', " +
+                    $"tile set '{tileSet.Name}'.");
             } catch (Exception exception) {
                 GD.PrintErr($"LevelEditor: {exception.GetType().Name}: {exception.Message}");
             }
@@ -584,6 +637,42 @@ namespace Uberkarl {
 
         void OnResizePanelClosed() => canvas?.GrabFocus();
 
+        // ----- tile set editor / bind lifecycle -----
+
+        // The panel mutated tileSetSession directly (add/remove/rename/set-collides a tile, or a graphic
+        // import). Re-sync the level's palette CACHE from the tile set's current live truth (the level
+        // does not own the tiles, but it caches them for painting — DiVoid #7551 Phase 1a) and refresh the
+        // canvas/palette/status the same way any other model change does.
+        void OnTileSetModelChanged() {
+            if (session == null || tileSetSession == null)
+                return;
+            session.Level.RefreshTiles(tileSetSession.TileSet.Tiles);
+            PopulatePalette(session.Level);
+            canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(session.Level));
+            UpdateState();
+        }
+
+        void OnTileSetEditorClosed() => canvas?.GrabFocus();
+
+        // The bind panel resolved a DIFFERENT shared tile set resource in the same package: rebind the
+        // level to it (replacing the palette cache), open a fresh edit session on that tile set so
+        // TileSetEditor/save operate on the newly-bound one, and refresh exactly like any other model
+        // change.
+        void OnTileSetBindChosen(ResourceReference reference, EditableTileSet boundTileSet) {
+            if (session == null)
+                return;
+
+            session.Level.BindTileSet(reference, boundTileSet.Tiles);
+            tileSetSession = new TileSetEditSession(boundTileSet);
+            PopulatePalette(session.Level);
+            canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(session.Level));
+            UpdateState();
+            GD.Print($"LevelEditor: bound tile set '{boundTileSet.Name}' ({boundTileSet.Tiles.Count} tiles).");
+            canvas?.GrabFocus();
+        }
+
+        void OnTileSetBindPanelClosed() => canvas?.GrabFocus();
+
         // ----- playtest -----
 
         // Projects the CURRENT in-memory buffer (not the last-saved file) through the same
@@ -623,9 +712,18 @@ namespace Uberkarl {
 
         // ----- session lifecycle -----
 
+        // A brand-new level needs a paintable palette immediately (no regression from before this
+        // correction, when the level itself owned that palette) — mint a fresh, UNATTACHED
+        // EditableTileSet seeded from DefaultPalette, right alongside the level, and bind the level to it
+        // by reference. Neither has a package slot yet; the first Save attaches both (see
+        // WriteMergedIntoExisting/WriteToNewPackage/WriteToPath).
         void NewLevel() {
+            EditableTileSet tileSet = EditableTileSet.CreateBlank("Untitled Tiles", DefaultPalette.Build(NewLevelTileSize));
+            tileSetSession = new TileSetEditSession(tileSet);
+
             EditableLevel level = EditableLevel.CreateBlank(
-                "Untitled", NewLevelTileSize, NewLevelWidth, NewLevelHeight, DefaultPalette.Build(NewLevelTileSize));
+                "Untitled", NewLevelTileSize, NewLevelWidth, NewLevelHeight,
+                ResourceReference.ToSelf(tileSet.TileSetPath), tileSet.Tiles);
             currentFilePath = null;
             packageContext = null; // unattached — level.IsAttached is false; first Save routes to Save-As
             AdoptSession(level);
@@ -643,7 +741,10 @@ namespace Uberkarl {
 
         void LoadFromBytes(byte[] bytes, string sourcePath) {
             try {
-                EditableLevel level = EditableLevelReader.FromPackageBytes(bytes);
+                using Package package = PackageReader.Open(new MemoryStream(bytes));
+                EditableLevel level = EditableLevelReader.FromPackage(package);
+                EditableTileSet tileSet = EditableTileSetReader.FromPackage(package, level.TileSetReference);
+                tileSetSession = new TileSetEditSession(tileSet);
                 currentFilePath = sourcePath;
                 packageContext = null;
                 AdoptSession(level);
@@ -804,6 +905,27 @@ namespace Uberkarl {
         // `!session.Level.IsAttached` here would wrongly treat "already attached to something" as "nothing
         // to do," silently overwriting the ORIGIN resource instead of creating the new one — the bug this
         // parameter exists to prevent.
+        // Orchestrates a level save alongside its currently-bound tile set (DiVoid #7551 Phase 1a): the
+        // tile set is attached (namespaced for real) only the FIRST time it is ever saved — a shared
+        // tile set that already has a home is never moved just because the level referencing it is being
+        // saved (Save-As of the level must not relocate a resource other levels may also reference). The
+        // level's TileSetReference is then rebound to wherever the tile set actually lives (its
+        // provisional path on a brand-new tile set's first save, or its already-established path on every
+        // later save) so level.json always serializes the reference that is actually true. `save` performs
+        // the actual level-side compose/build-fresh, given the tile set's contributions to fold in.
+        byte[] SaveLevelAndTileSet(IReadOnlyList<ResourceEntry> existingResources, Func<IReadOnlyList<PendingResource>, byte[]> save) {
+            IReadOnlyList<PendingResource> tileSetContributions = Array.Empty<PendingResource>();
+            if (tileSetSession != null) {
+                tileSetSession.EnsureAttached(existingResources);
+                session.Level.BindTileSet(ResourceReference.ToSelf(tileSetSession.TileSet.TileSetPath), tileSetSession.TileSet.Tiles);
+                tileSetContributions = tileSetSession.BuildContributions();
+            }
+
+            byte[] bytes = save(tileSetContributions);
+            tileSetSession?.MarkSaved();
+            return bytes;
+        }
+
         void WriteMergedIntoExisting(PackageHandle handle, ResourcePath? overwriteResourcePath, bool attachAsNew, IWritablePackageSource writable) {
             if (session == null)
                 return;
@@ -819,7 +941,7 @@ namespace Uberkarl {
                     else if (attachAsNew || !session.Level.IsAttached)
                         session.AttachAsNewResource(existing.Manifest.Resources);
 
-                    bytes = session.Save(existing);
+                    bytes = SaveLevelAndTileSet(existing.Manifest.Resources, extra => session.Save(existing, extra));
                 }
 
                 writable.Write(handle, bytes);
@@ -843,7 +965,7 @@ namespace Uberkarl {
                 return;
 
             try {
-                byte[] bytes = session.SaveFresh(proposedName);
+                byte[] bytes = SaveLevelAndTileSet(Array.Empty<ResourceEntry>(), extra => session.SaveFresh(proposedName, extra));
                 PackageHandle handle = writable.Create(proposedName, bytes);
                 using Package reopened = packageSource.Open(handle);
                 packageContext = PackageContext.FromPackage(reopened, handle);
@@ -872,7 +994,7 @@ namespace Uberkarl {
                 using (Package existing = PackageReader.Open(absolutePath)) {
                     if (!session.Level.IsAttached)
                         session.AttachAsNewResource(existing.Manifest.Resources);
-                    bytes = session.Save(existing);
+                    bytes = SaveLevelAndTileSet(existing.Manifest.Resources, extra => session.Save(existing, extra));
                 }
                 File.WriteAllBytes(absolutePath, bytes);
                 currentFilePath = absolutePath;
@@ -937,7 +1059,8 @@ namespace Uberkarl {
             string tile = activeTool == Tool.Erase
                 ? "erase"
                 : activeTileId == LayerDefinition.EmptyCell ? "none" : $"#{activeTileId}";
-            return $"{session.Level.Name}{dirty}  ·  package: {package}  ·  layer: {layer}  ·  tool: {activeTool} ({tile})";
+            string tileSet = tileSetSession != null ? tileSetSession.TileSet.Name : "none";
+            return $"{session.Level.Name}{dirty}  ·  package: {package}  ·  tileset: {tileSet}  ·  layer: {layer}  ·  tool: {activeTool} ({tile})";
         }
 
         // ----- small factory helpers -----

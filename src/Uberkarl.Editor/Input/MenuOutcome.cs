@@ -20,6 +20,12 @@ public enum MenuOutcomeKind
 
     /// <summary>Summon the level-resize panel (set width/height — DiVoid #7550).</summary>
     OpenResizePanel,
+
+    /// <summary>Summon the tile set editor (add/remove/rename tiles, import graphics — DiVoid #7551).</summary>
+    OpenTileSetEditor,
+
+    /// <summary>Summon the "bind a different shared tile set" panel (DiVoid #7551).</summary>
+    OpenTileSetBindPanel,
 }
 
 /// <summary>The file-lifecycle commands a menu can request; the controller maps these to its file IO.</summary>
@@ -86,4 +92,12 @@ public readonly struct MenuOutcome
     /// introduced for this either — the "Resize…" wedge rides the existing Actions radial trigger.</summary>
     public static MenuOutcome OpenResizePanel() =>
         new(MenuOutcomeKind.OpenResizePanel, -1, default, default);
+
+    /// <summary>An outcome that summons the tile set editor. Rides the existing Actions radial trigger.</summary>
+    public static MenuOutcome OpenTileSetEditor() =>
+        new(MenuOutcomeKind.OpenTileSetEditor, -1, default, default);
+
+    /// <summary>An outcome that summons the tile-set bind panel. Rides the existing Actions radial trigger.</summary>
+    public static MenuOutcome OpenTileSetBindPanel() =>
+        new(MenuOutcomeKind.OpenTileSetBindPanel, -1, default, default);
 }

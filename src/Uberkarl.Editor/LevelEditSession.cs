@@ -84,14 +84,18 @@ public sealed class LevelEditSession
     /// <summary>
     /// Merges this level's contributions onto <paramref name="existingPackage"/> — every sibling resource
     /// and the archive's own identity are carried forward unchanged (DiVoid #7571/#7572's package-as-VFS
-    /// correction: a level save must never clobber a package's other contents). The caller opens the
-    /// package (file IO stays outside this engine-agnostic core) and writes the returned bytes back to
-    /// storage. The dirty flag clears on the assumption the write succeeds; a failed write should
-    /// re-mark dirty via <see cref="MarkDirty"/>.
+    /// correction: a level save must never clobber a package's other contents). <paramref name="extraContributions"/>
+    /// lets the caller (the Godot glue, <c>LevelEditor</c>) fold a bound-but-not-yet-saved tile set's own
+    /// contributions (<see cref="TileSetEditSession.BuildContributions"/>) into the SAME archive write —
+    /// under the shared-tileset correction (DiVoid #7551 Phase 1a) a level's own contribution is just its
+    /// <c>level.json</c>, so this is how a level and its tile set land in one save when the tile set is
+    /// not yet persisted anywhere else. The caller opens the package (file IO stays outside this
+    /// engine-agnostic core) and writes the returned bytes back to storage. The dirty flag clears on the
+    /// assumption the write succeeds; a failed write should re-mark dirty via <see cref="MarkDirty"/>.
     /// </summary>
-    public byte[] Save(Package existingPackage)
+    public byte[] Save(Package existingPackage, IReadOnlyList<PendingResource>? extraContributions = null)
     {
-        var bytes = LevelMergeWriter.Compose(existingPackage, BuildContributions());
+        var bytes = LevelMergeWriter.Compose(existingPackage, Combine(extraContributions));
         IsDirty = false;
         return bytes;
     }
@@ -99,13 +103,20 @@ public sealed class LevelEditSession
     /// <summary>
     /// Mints a brand-new archive containing only this level (Save-As's "＋ New package" outcome, or a
     /// never-before-saved level's first save). <paramref name="newPackageName"/> is the archive's own
-    /// display name — independent of this level's <see cref="EditableLevel.Name"/>.
+    /// display name — independent of this level's <see cref="EditableLevel.Name"/>. See <see cref="Save"/>
+    /// for <paramref name="extraContributions"/>.
     /// </summary>
-    public byte[] SaveFresh(string newPackageName)
+    public byte[] SaveFresh(string newPackageName, IReadOnlyList<PendingResource>? extraContributions = null)
     {
-        var bytes = LevelMergeWriter.BuildFresh(newPackageName, BuildContributions());
+        var bytes = LevelMergeWriter.BuildFresh(newPackageName, Combine(extraContributions));
         IsDirty = false;
         return bytes;
+    }
+
+    private IReadOnlyList<PendingResource> Combine(IReadOnlyList<PendingResource>? extraContributions)
+    {
+        var own = BuildContributions();
+        return extraContributions is { Count: > 0 } extra ? own.Concat(extra).ToList() : own;
     }
 
     /// <summary>Re-marks the session dirty (used if a save write fails after <see cref="Save"/> returned bytes).</summary>

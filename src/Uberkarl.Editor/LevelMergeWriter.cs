@@ -1,4 +1,3 @@
-using System.IO;
 using Uberkarl.Content;
 using Uberkarl.Content.Json;
 using Uberkarl.Packages;
@@ -6,51 +5,38 @@ using Uberkarl.Packages;
 namespace Uberkarl.Editor;
 
 /// <summary>
-/// Replaces <c>EditableLevelWriter</c>'s "fabricate a whole package around one level" with the
-/// package-as-VFS merge (DiVoid #7571/#7572): a level's save turns into a set of resource
-/// <b>contributions</b> — the paths it owns and the bytes for them — which are then either
-/// <see cref="Compose"/>d onto an existing archive (identity + every sibling resource carried forward
-/// unchanged, contribution paths added-or-replaced) or used to <see cref="BuildFresh"/> a brand-new
-/// archive (the one path that legitimately fabricates a package — because the archive really is new).
+/// Builds the resource contribution(s) a level owns on save. Historically (pre-DiVoid #7551 Phase 1a)
+/// this also fabricated a fresh <c>tileset.json</c> + every tile graphic from <c>EditableLevel.Tiles</c> on
+/// EVERY save, namespaced under the level's own slug — the per-level tileset redundancy Toni flagged: N
+/// levels saved via the editor meant N private tileset copies, even when identical.
+///
+/// <b>Under the shared-tileset correction, a level REFERENCES its tile set — it does not own it</b> (design
+/// #7580, directly extending #7572's "a level references (not owns) the tileset, so it drops out of the
+/// level's contributions"). A level's own contribution is now just its <c>level.json</c>, carrying whatever
+/// <see cref="EditableLevel.TileSetReference"/> it is currently bound to; the tile set's own resource
+/// (definition + graphics) is <see cref="TileSetMergeWriter"/>'s job, saved (or not) independently. The
+/// Godot glue (<c>game/Editor/LevelEditor.cs</c>) is what decides whether to also compose a tile set's
+/// contributions into the same save — this writer only ever speaks for the level.
 /// </summary>
 public static class LevelMergeWriter
 {
     /// <summary>
-    /// The set of resource contributions this level owns: its tile graphics, its tile set, and its level
-    /// definition, each at the level's own namespaced paths. Pure — no IO, no knowledge of any archive
-    /// this might be merged into.
+    /// The level's own resource contribution: just its <c>level.json</c>, at its own namespaced path,
+    /// carrying the currently-bound <see cref="EditableLevel.TileSetReference"/> as a reference (never a
+    /// contribution the level fabricates). Pure — no IO, no knowledge of any archive this might be merged
+    /// into.
     /// </summary>
     public static IReadOnlyList<PendingResource> BuildContributions(EditableLevel level)
     {
         if (level is null)
             throw new ArgumentNullException(nameof(level));
 
-        var contributions = new List<PendingResource>(level.Tiles.Count + 2);
-
-        foreach (var tile in level.Tiles)
-            contributions.Add(new PendingResource(tile.GraphicPath, ResourceKind.TileGraphic, "image/png", tile.Graphic, attribution: null));
-
-        var tileSetDefinition = new TileSetDefinition
-        {
-            Tiles = level.Tiles
-                .Select(tile => new TileDefinition
-                {
-                    Id = tile.Id,
-                    Graphic = ResourceReference.ToSelf(tile.GraphicPath),
-                    Collides = tile.Collides,
-                })
-                .ToArray(),
-        };
-        contributions.Add(new PendingResource(
-            level.TileSetPath, ResourceKind.TileSet, PackageFormat.DefaultMediaType,
-            LevelContentSerializer.WriteTileSet(tileSetDefinition), attribution: null));
-
         var levelDefinition = new LevelDefinition
         {
             TileSize = level.TileSize,
             Width = level.Width,
             Height = level.Height,
-            TileSet = ResourceReference.ToSelf(level.TileSetPath),
+            TileSet = level.TileSetReference,
             BackgroundColor = level.BackgroundColor,
             Spawns = new Dictionary<string, GridPosition>(level.Spawns),
             DefaultSpawn = level.DefaultSpawn,
@@ -65,61 +51,20 @@ public static class LevelMergeWriter
                 })
                 .ToArray(),
         };
-        contributions.Add(new PendingResource(
-            level.LevelPath, ResourceKind.Level, PackageFormat.DefaultMediaType,
-            LevelContentSerializer.WriteLevel(levelDefinition), attribution: null));
 
-        return contributions;
+        return new[]
+        {
+            new PendingResource(
+                level.LevelPath, ResourceKind.Level, PackageFormat.DefaultMediaType,
+                LevelContentSerializer.WriteLevel(levelDefinition), attribution: null),
+        };
     }
 
-    /// <summary>
-    /// Merges <paramref name="contributions"/> onto <paramref name="existingPackage"/>: the result's
-    /// identity (id/name/version/attribution/forkedFrom/dependencies) is the existing package's,
-    /// unchanged; every existing resource whose path is not among the contributions is carried forward
-    /// byte-for-byte; contribution paths are added if new, replaced if already present. This is the fix
-    /// for the #7570 §16.7 boundary — saving a level into a package that holds other resources must never
-    /// clobber them.
-    /// </summary>
+    /// <summary>Merges <paramref name="contributions"/> onto <paramref name="existingPackage"/>. Delegates to <see cref="PackageMergeWriter.Compose"/> — see that type for the shared contract.</summary>
     public static byte[] Compose(Package existingPackage, IReadOnlyList<PendingResource> contributions)
-    {
-        if (existingPackage is null)
-            throw new ArgumentNullException(nameof(existingPackage));
-        if (contributions is null)
-            throw new ArgumentNullException(nameof(contributions));
+        => PackageMergeWriter.Compose(existingPackage, contributions);
 
-        var builder = new PackageBuilder().SeedFrom(existingPackage);
-        foreach (var contribution in contributions)
-            builder.AddOrReplaceResource(contribution.Kind, contribution.Path, contribution.Payload, contribution.MediaType, contribution.Attribution);
-
-        using var buffer = new MemoryStream();
-        builder.Write(buffer);
-        return buffer.ToArray();
-    }
-
-    /// <summary>
-    /// Mints a brand-new archive containing only <paramref name="contributions"/> — a fresh
-    /// <see cref="PackageId"/>, <paramref name="newPackageName"/> as the archive's display name (never a
-    /// level's), and the starter attribution the editor has always defaulted a freshly-created package
-    /// to. The only path that legitimately fabricates a package: the archive really is new here.
-    /// </summary>
+    /// <summary>Mints a brand-new archive containing only <paramref name="contributions"/>. Delegates to <see cref="PackageMergeWriter.BuildFresh"/> — see that type for the shared contract.</summary>
     public static byte[] BuildFresh(string newPackageName, IReadOnlyList<PendingResource> contributions)
-    {
-        if (string.IsNullOrWhiteSpace(newPackageName))
-            throw new ArgumentException("Package name must not be empty.", nameof(newPackageName));
-        if (contributions is null)
-            throw new ArgumentNullException(nameof(contributions));
-
-        var builder = new PackageBuilder()
-            .WithId(PackageId.New())
-            .WithName(newPackageName)
-            .WithVersion("0.1.0")
-            .WithAttribution(new Attribution { Author = "Uberkarl", License = "CC0-1.0" });
-
-        foreach (var contribution in contributions)
-            builder.AddResource(contribution.Kind, contribution.Path, contribution.Payload, contribution.MediaType, contribution.Attribution);
-
-        using var buffer = new MemoryStream();
-        builder.Write(buffer);
-        return buffer.ToArray();
-    }
+        => PackageMergeWriter.BuildFresh(newPackageName, contributions);
 }

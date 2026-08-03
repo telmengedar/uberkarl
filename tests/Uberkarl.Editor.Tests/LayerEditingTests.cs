@@ -419,7 +419,7 @@ public sealed class LayerEditingTests
         // The key aliasing-safety case (design §9.4): a property edit replaces the EditableLayer instance
         // but reuses its Cells array, so a cell-undo recorded before the property edit still applies to
         // the same array and reverts correctly.
-        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette()));
+        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, ResourceReference.ToSelf(TileSetPath), Palette()));
         session.PaintCell(0, 1, 1, 1);
         Assert.That(session.Level.GetCell(0, 1, 1), Is.EqualTo(1));
 
@@ -442,7 +442,7 @@ public sealed class LayerEditingTests
     [Test]
     public void Session_SetCollision_On_CoercesScrollAndRepeat_IndexStable_PreservesHistory()
     {
-        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette()));
+        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, ResourceReference.ToSelf(TileSetPath), Palette()));
         session.AddLayer(); // Layer 1: display (collision:false, scroll:1.0, repeat:false)
         session.SetCollision(1, false); // no-op, already false — keep it simple
         session.StepScrollSpeed(1, -1); // 1.0 -> 0.75
@@ -469,7 +469,7 @@ public sealed class LayerEditingTests
         // The layer panel's Scroll-stepper edit-mode commit path (DiVoid #7512): the panel steps a LOCAL
         // pending value through ScrollSpeedLadder without touching the session, then applies the final
         // value here in one absolute call on commit — unlike StepScrollSpeed's relative ladder step.
-        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette()));
+        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, ResourceReference.ToSelf(TileSetPath), Palette()));
         session.AddLayer(); // Layer 1: display (collision:false, scroll:1.0, repeat:false)
         session.PaintCell(0, 0, 0, 1);
         Assert.That(session.CanUndo, Is.True);
@@ -504,7 +504,7 @@ public sealed class LayerEditingTests
     [Test]
     public void Session_SetScrollSpeed_SameValue_IsNoOp()
     {
-        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette()));
+        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, ResourceReference.ToSelf(TileSetPath), Palette()));
         session.AddLayer(); // scroll defaults to 1.0
 
         var result = session.SetScrollSpeed(1, 1.0f);
@@ -636,7 +636,7 @@ public sealed class LayerEditingTests
         Array.Fill(cells, LayerDefinition.EmptyCell);
         var layer = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
         return new EditableLevel(
-            "Sample", LevelPath, TileSetPath,
+            "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
             Palette(), new[] { layer });

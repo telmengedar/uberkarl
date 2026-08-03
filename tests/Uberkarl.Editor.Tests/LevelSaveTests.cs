@@ -141,11 +141,18 @@ public sealed class LevelSaveTests
         // name (like the browser's existing resource list) is derived from ITS resource path, so it comes
         // back slug-shaped rather than the exact typed string — that is the new, honest contract, not a
         // round-trip bug: package identity no longer carries a level's display name at all.
+        // Shared-tileset correction (DiVoid #7551 Phase 1a): SampleLevel() binds a tile set reference that
+        // must itself land in the saved package too, or the level's reference dangles — mirrors
+        // LevelEditor.SaveLevelAndTileSet's combined save.
+        var tileSet = EditableTileSet.CreateBlank("Sample Tiles", Palette());
+        var tileSetSession = new TileSetEditSession(tileSet);
+        tileSetSession.AttachToExistingResource(TileSetPath); // SampleLevel()'s reference is fixed to this exact path
+
         var session = new LevelEditSession(SampleLevel());
         session.RenameLevel("Saved Under New Name");
         session.AttachAsNewResource(Array.Empty<ResourceEntry>());
 
-        var reloaded = EditableLevelReader.FromPackageBytes(session.SaveFresh("Some Package"));
+        var reloaded = EditableLevelReader.FromPackageBytes(session.SaveFresh("Some Package", tileSetSession.BuildContributions()));
 
         Assert.Multiple(() =>
         {
@@ -167,7 +174,7 @@ public sealed class LevelSaveTests
         Array.Fill(cells, LayerDefinition.EmptyCell);
         var layer = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
         return new EditableLevel(
-            "Sample", LevelPath, TileSetPath,
+            "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
             Palette(), new[] { layer });

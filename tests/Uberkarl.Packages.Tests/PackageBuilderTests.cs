@@ -170,6 +170,58 @@ public sealed class PackageBuilderTests
         });
     }
 
+    // ----- RemoveResource (DiVoid #7551 Phase 1a — the migration-tool primitive) -----
+
+    [Test]
+    public void RemoveResource_DropsAStagedResource_AndFreesItsPathForReuse()
+    {
+        var path = ResourcePath.Create("tilesets/duplicate.json");
+        var builder = new PackageBuilder().WithName("Pack");
+        builder.AddResource(ResourceKind.TileSet, path, Encoding.UTF8.GetBytes("first"));
+
+        builder.RemoveResource(path);
+        // The path is free again — re-adding it (rather than replacing) must not throw a duplicate error.
+        builder.AddResource(ResourceKind.TileSet, path, Encoding.UTF8.GetBytes("second"));
+        using var package = Open(builder);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(package.Manifest.Resources, Has.Count.EqualTo(1));
+            Assert.That(package.ReadBytes(path), Is.EqualTo(Encoding.UTF8.GetBytes("second")));
+        });
+    }
+
+    [Test]
+    public void RemoveResource_ForAPathNotStaged_IsANoOp()
+    {
+        var builder = new PackageBuilder().WithName("Pack");
+        builder.AddResource(ResourceKind.Script, ResourcePath.Create("scripts/x"), Encoding.UTF8.GetBytes("x"));
+
+        builder.RemoveResource(ResourcePath.Create("scripts/does-not-exist"));
+        using var package = Open(builder);
+
+        Assert.That(package.Manifest.Resources, Has.Count.EqualTo(1));
+    }
+
+    [Test]
+    public void SeedFrom_ThenRemoveResource_DropsExactlyThatSiblingAndKeepsTheRest()
+    {
+        var original = new PackageBuilder().WithName("Pack");
+        original.AddResource(ResourceKind.TileSet, ResourcePath.Create("tilesets/a.json"), Encoding.UTF8.GetBytes("A"));
+        original.AddResource(ResourceKind.TileSet, ResourcePath.Create("tilesets/b.json"), Encoding.UTF8.GetBytes("B"));
+        using var package = Open(original);
+
+        var merged = new PackageBuilder().SeedFrom(package);
+        merged.RemoveResource(ResourcePath.Create("tilesets/b.json"));
+        using var mergedPackage = Open(merged);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(mergedPackage.Contains(ResourcePath.Create("tilesets/a.json")), Is.True);
+            Assert.That(mergedPackage.Contains(ResourcePath.Create("tilesets/b.json")), Is.False);
+        });
+    }
+
     private static Package Open(PackageBuilder builder)
     {
         using var buffer = new MemoryStream();

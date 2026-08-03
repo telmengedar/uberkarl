@@ -4,13 +4,18 @@ using Uberkarl.Packages;
 namespace Uberkarl.Editor;
 
 /// <summary>
-/// Derives the per-resource, namespaced in-package paths the package-as-VFS save model requires
-/// (DiVoid #7571/#7572). Before this correction, <c>EditableLevel.DefaultLevelPath</c> ("levels/level.json")
-/// and <c>DefaultTileSetPath</c> ("tileset.json") were fixed constants — a second level saved into the
-/// same package would collide with the first, silently destroying it. Every resource a level owns is now
-/// addressed under a path derived from a sanitized slug of the level's resource name: <c>levels/&lt;slug&gt;.json</c>,
-/// <c>tilesets/&lt;slug&gt;.json</c>, <c>graphics/&lt;slug&gt;/&lt;tileId&gt;.png</c> — two distinctly-named levels in one
+/// Derives the per-resource, namespaced in-package path a level owns (the package-as-VFS save model,
+/// DiVoid #7571/#7572). Before that correction, <c>EditableLevel.DefaultLevelPath</c> ("levels/level.json")
+/// was a fixed constant — a second level saved into the same package would collide with the first,
+/// silently destroying it. A level's own resource is now addressed under a path derived from a sanitized
+/// slug of the level's resource name: <c>levels/&lt;slug&gt;.json</c> — two distinctly-named levels in one
 /// package can never collide.
+///
+/// <b>Shared-tileset correction (DiVoid #7551 Phase 1a):</b> this class used to ALSO derive a level-owned
+/// tile set/graphic path scheme (<c>tilesets/&lt;slug&gt;.json</c>, <c>graphics/&lt;slug&gt;/&lt;tileId&gt;.png</c>) —
+/// removed here, because a tile set is no longer a level-owned resource. The equivalent scheme for a
+/// standalone SHARED tile set now lives on <see cref="TileSetResourcePaths"/>, addressed by the tile
+/// set's OWN name, independent of any level.
 /// </summary>
 public static class LevelResourcePaths
 {
@@ -53,11 +58,9 @@ public static class LevelResourcePaths
     /// <summary>The in-package path a level definition with this slug is stored at.</summary>
     public static ResourcePath LevelPath(string slug) => ResourcePath.Create($"{LevelDirectory}{slug}{LevelSuffix}");
 
-    /// <summary>The in-package path a tile set with this slug is stored at.</summary>
-    public static ResourcePath TileSetPath(string slug) => ResourcePath.Create($"tilesets/{slug}{LevelSuffix}");
-
-    /// <summary>The in-package path a tile graphic with this slug and tile id is stored at.</summary>
-    public static ResourcePath GraphicPath(string slug, int tileId) => ResourcePath.Create($"graphics/{slug}/{tileId}.png");
+    // TileSetPath/GraphicPath used to live here too — removed under the shared-tileset correction (DiVoid
+    // #7551 Phase 1a): a tile set is no longer a level-owned, level-namespaced resource, so its path
+    // scheme moved to its own type, TileSetResourcePaths (mirrors this class's shape exactly).
 
     /// <summary>
     /// Extracts the slug back out of a <c>levels/&lt;slug&gt;.json</c> path (the inverse of
