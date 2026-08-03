@@ -395,5 +395,168 @@ unit-tested, before any Godot glue.**
 
 ---
 
+## 16. Part 2 — Save Flow + File-Browser UI (DiVoid #7552, 2026-08-03)
+
+Status: implemented on branch `feat/package-browser-v2` by John (backend dev). Closes out the deferred
+Save-As naming item from §2/§8.2/§14 Q2 and the browser-polish backlog **#7500** (back-navigation, visual
+theming, Save-As naming) in the same increment. Depends on the on-screen keyboard (**#7513**, merged) for
+gamepad-friendly text entry.
+
+Toni (verbatim, task #7552): *"package browser for save... package browser in general should look more
+like a file browser - list of entries, for save specify filename and so on."*
+
+### 16.1 What changed vs. Part 1
+
+- **`PackageBrowser` is no longer load-only.** It gained a `Mode` (`Load`/`Save`) alongside its existing
+  `Step` (`Packages`/`Resources`), plus a third step, `ConfirmOverwrite`, for the save flow's
+  collision safety net. Public surface: `SummonLoad(source)` (unchanged behaviour) and the new
+  `SummonSave(source, currentLevelName)`; the load path still raises `ResourceChosen`, the save path
+  raises the new `SaveRequested(PackageSaveTarget)`.
+- **File-browser look.** Each list row is now an `HBoxContainer` of a primary, expand-fill `Button` (the
+  focus/selection target — the single-column `FocusGrid`-style chain from Part 1 is unchanged) plus a
+  dim, non-focusable secondary `Label` showing light metadata (`v{Version} · N items` for packages,
+  a byte-size for resources) — "name + light metadata," no thumbnails, per the anti-complexity brief. A
+  header row carries a breadcrumb-style title (`"{Package} — Select Level"` at the resources step,
+  `"A package named “X” already exists."` at the confirm step) and a mouse-clickable **Back/Close**
+  button that mirrors whatever `ui_cancel` currently does, since a file browser needs an on-screen
+  affordance for a mouse-only user, not just a gamepad B / Esc binding.
+- **Back-navigation, generalized.** `HandleCancel()` is now the single place that decides what "cancel"
+  means for the *current* step: `Resources`/`ConfirmOverwrite` step back to `Packages`; `Packages` itself
+  closes the browser and raises `Cancelled`. Both `_GuiInput` and `_UnhandledInput` route through it
+  (belt-and-suspenders, matching `LayerManagerPanel`/`OnScreenKeyboard`'s existing pattern), each guarded
+  on the attached keyboard being closed.
+- **Theming.** No new theme code was needed: `LevelEditor.Theme = EditorTheme.Build()` (already set) is a
+  Godot `Theme` property that cascades to every descendant `Control`, so `PanelContainer`/`Button`/`Label`
+  styleboxes already applied automatically once the panel's structure and metadata labels were rebuilt to
+  actually use them (dim `TextDim` for metadata/breadcrumbs, `Accent` for the title) — the "grey window"
+  complaint in #7500 was about the *content* (a bare list, one string per row, no header) more than a
+  missing Theme.
+
+### 16.2 The save flow (state machine)
+
+```
+SummonSave(source, currentLevelName)
+   │
+   ▼
+ShowPackages()  — Step.Packages, Mode.Save
+   rows: [ "+ New package…" , existing package #1, existing package #2, … ]
+   │
+   ├─ pick an existing package ──────────────────────────────────────────┐
+   │                                                                     │
+   └─ pick "+ New package…"                                              │
+        │                                                                │
+        ▼ keyboard: "New package name" (seed: empty)                    │
+      OnNewPackageNameCommitted(name)                                    │
+        │                                                                │
+        ├─ blank ─────────────────► ShowPackages() (bounce back)         │
+        │                                                                │
+        ├─ PackageSaveTargetResolver.FindCollision(packages, name)       │
+        │    finds a match ──► ShowConfirmOverwrite()                    │
+        │                        │  rows: "Overwrite it" / "Choose a     │
+        │                        │  different name"                     │
+        │                        ├─ Overwrite ───────────────────────────┤
+        │                        └─ Choose different ──► ShowPackages()  │
+        │                                                                │
+        └─ no collision ─► pendingNewPackageName = name                  │
+                              │                                          │
+                              ▼                                          ▼
+                     keyboard: "Level name — saving into “{target}”" (seed: currentLevelName)
+                              │
+                              ▼
+                     OnLevelNameCommitted(name)
+                        │
+                        ├─ blank ─► ShowPackages() (bounce back)
+                        │
+                        └─ Close(); SaveRequested(new PackageSaveTarget(
+                               existingHandle-or-null, pendingNewPackageName-or-null, name))
+```
+
+`PackageSaveTarget` (new, `game/Editor/PackageSaveTarget.cs`) is a small POCO carrying exactly one of
+`ExistingHandle`/`NewPackageName` plus the always-set `LevelName`. It is deliberately dumb — no logic, no
+Godot dependency — so the browser's job stops at "what did the author pick," and `LevelEditor` alone
+decides what to *do* with it.
+
+### 16.3 The collision safety net — `PackageSaveTargetResolver`
+
+New, pure, engine-agnostic type in `src/Uberkarl.Packages/PackageSaveTargetResolver.cs`:
+`FindCollision(IReadOnlyList<PackageSummary> packages, string proposedName)` → `PackageHandle?`. Without
+it, typing a "+ New package…" name that happens to match an existing package's display name would silently
+land on `FolderPackageSource.Create`'s own uniquifying suffix (`name-1.pkg`) — a confusing duplicate next
+to the package the author probably meant to overwrite. The resolver folds that into the browser's own
+`ConfirmOverwrite` step instead, entirely as a UI decision over data the browser already has from
+`ListPackages()` — no additional I/O. Unit-tested in isolation
+(`tests/Uberkarl.Packages.Tests/PackageSaveTargetResolverTests.cs`): no match, exact match, case-
+insensitive match, whitespace-trimmed match, empty list, blank proposed name, null-list guard.
+
+### 16.4 Level naming — `EditableLevel.Rename` / `LevelEditSession.RenameLevel`
+
+A package built by this editor holds exactly one level (`EditableLevelWriter.ToPackageBytes` writes
+`level.Name` straight through as the package manifest's `Name`), so "specify the level name" *is*
+"rename the level," and that name is what a future `ListPackages()` will display for the saved package.
+`EditableLevel.Name` gained a private setter and a `Rename(string)` mutator (throws on
+null/empty, no-ops on an unchanged name — mirrors the existing `RenameLayer` shape exactly).
+`LevelEditSession.RenameLevel(string)` wraps it with the same blank-or-whitespace-is-a-no-op guard
+`RenameLayer` already uses (the browser passes whatever the keyboard committed straight through) and
+marks the session dirty on a real change. `LevelEditor.OnBrowserSaveRequested` calls
+`session.RenameLevel(target.LevelName)` *before* serializing, so both the in-package manifest name and
+(for a new package) the on-disk file's uniquifying base name reflect the typed name. Unit-tested in
+`tests/Uberkarl.Editor.Tests/LevelSaveTests.cs`: rename/no-op/throw at both the model and session layers,
+history preservation, and a save→reload round-trip asserting the new name lands in the reloaded manifest.
+
+### 16.5 `LevelEditor` wiring — the FileDialog is gone
+
+- `saveDialog` (`FileDialog`), `BuildFileDialogs()`, and `OnSaveFileSelected` are deleted outright — no
+  `FileDialog` remains anywhere in the editor.
+- **New** (`InvokeFileCommand(New)` / toolbar **New**): unchanged — `NewLevel()` never touched a dialog.
+- **Save** (`Save()`): same branching as before (current package-source handle → overwrite; else a
+  legacy direct `currentFilePath` → overwrite that path, unchanged pre-existing behaviour for the
+  boot-loaded sample; else …), only the final fallback changed from popping `saveDialog` to
+  `SummonSaveBrowser()`.
+- **Save As** (`InvokeFileCommand(SaveAs)` / toolbar **Save As**): now unconditionally
+  `SummonSaveBrowser()`, which guards on having a session and a writable source, then calls
+  `packageBrowser.SummonSave(packageSource, session.Level.Name)`.
+- `OnBrowserSaveRequested(PackageSaveTarget)` is the new single landing point for the save flow's result:
+  rename the level, then either `WriteToSource` (existing package — reusing the same helper Save's
+  overwrite path already uses) or the new `WriteToNewPackage` (calls
+  `IWritablePackageSource.Create(target.NewPackageName, bytes)` and adopts the returned handle as the new
+  `sourceHandle`, so a subsequent plain Save overwrites it directly without reopening the browser).
+- `packageBrowser.AttachKeyboard(textKeyboard)` wires the same shared `OnScreenKeyboard` instance
+  `LayerManagerPanel` already uses — one keyboard, summoned by whichever panel currently needs text
+  entry, exactly per #7513's reusability goal.
+
+### 16.6 Verification
+
+Driven live via Godot MCP (screenshots + `get_editor_errors`) against a `user://packages` folder seeded
+with 2+ multi-level packages:
+- **Load:** file-browser-style package list (name + version/item-count) → select → level list (name +
+  size) → `ui_cancel`/Back steps from the level list back to the package list, and from there closes;
+  select a level → it opens.
+- **Save:** edit the loaded level → Save-As → `+ New package…` → type a package name + level name on the
+  on-screen keyboard → package is created in `user://packages`; reopen the browser (Load) → the new
+  package appears with the typed name → load it back → the edits are present. Save-As into an *existing*
+  package overwrites it (reload confirms). Typing a new-package name that collides with an existing
+  package's name surfaces the confirm-overwrite step.
+- Gamepad (injected `ui_accept`/`ui_cancel` + joypad button events, part-1's method), keyboard, and mouse
+  all drive every step. `dotnet build Uberkarl.csproj` 0 warnings / 0 errors; `Uberkarl.Packages.Tests`
+  and `Uberkarl.Editor.Tests` green; comment-grep (`TODO`/`FIXME`/`XXX`/`HACK`) 0 across every changed file.
+- **Real hardware-pad confirmation remains Toni's** — the harness injects `ui_*` actions and raw
+  `InputEventJoypadButton`s; nothing here claims verification on physical hardware.
+
+### 16.7 Still open (unchanged from §14, not addressed by this increment)
+
+- **Q1 — folder location.** `user://packages/` remains the source dir; "a folder next to the executable
+  for shareability" is still an open question for Toni, out of scope here (no folder-location code
+  changed).
+- **Q3/Q4 — resource filter / multi-level packages.** Step 2 still filters to `level`-kind only; a
+  package saved by this editor is still exactly one level per package (`EditableLevelWriter` is
+  unchanged) — Save/Save-As overwrite the *entire* target package with that single level, same as Part
+  1's Save. Building "add a level into an existing multi-level package without clobbering its other
+  levels" was explicitly out of scope for this increment (anti-complexity: no tileset/dimensions/
+  online-source, and this is the same shape of scope expansion) and is noted here as a candidate
+  follow-up if packages are found to routinely hold several levels in practice.
+
+---
+
 *Design authored by Sarah (software architect). Implementation to follow per §15. Part 2 of the Editor
-UI v2 arc; additive over the merged part-1 foundation (#7466).*
+UI v2 arc; additive over the merged part-1 foundation (#7466). §16 (save flow + file-browser UI, #7552)
+implemented by John (backend dev), 2026-08-03.*

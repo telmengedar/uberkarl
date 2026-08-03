@@ -74,7 +74,7 @@ public sealed class EditableLevel
 
     public PackageId PackageId { get; }
 
-    public string Name { get; }
+    public string Name { get; private set; }
 
     public string Version { get; }
 
@@ -232,6 +232,24 @@ public sealed class EditableLevel
             return false;
 
         layers[index] = new EditableLayer(current.Name, coerced.Collision, coerced.ScrollSpeed, coerced.Repeat, current.Cells);
+        return true;
+    }
+
+    /// <summary>
+    /// Renames the level (DiVoid #7552 — Save-As level naming via the on-screen keyboard). A package
+    /// built by this editor holds exactly one level, and <see cref="EditableLevelWriter"/> writes
+    /// <see cref="Name"/> straight through as the package's manifest name, so renaming the level is
+    /// exactly renaming the package it will be saved into. Returns <c>false</c> (no-op) when
+    /// <paramref name="name"/> equals the current name (ordinal comparison) — mirrors <see cref="RenameLayer"/>.
+    /// </summary>
+    public bool Rename(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+            throw new ArgumentException("Level name must not be empty.", nameof(name));
+        if (string.Equals(Name, name, StringComparison.Ordinal))
+            return false;
+
+        Name = name;
         return true;
     }
 

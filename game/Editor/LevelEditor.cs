@@ -75,7 +75,6 @@ namespace Uberkarl {
         Button eraseButton;
         Button firstToolButton;
         Label statusLabel;
-        FileDialog saveDialog;
 
         HoldWatch tilesTrigger;
         HoldWatch layersTrigger;
@@ -279,7 +278,7 @@ namespace Uberkarl {
                 case EditorFileCommand.New: NewLevel(); break;
                 case EditorFileCommand.Open: SummonBrowser(); break;
                 case EditorFileCommand.Save: Save(); break;
-                case EditorFileCommand.SaveAs: saveDialog.PopupCentered(new Vector2I(720, 480)); break;
+                case EditorFileCommand.SaveAs: SummonSaveBrowser(); break;
             }
         }
 
@@ -366,11 +365,13 @@ namespace Uberkarl {
 
             packageBrowser = new PackageBrowser();
             packageBrowser.ResourceChosen += OnBrowserResourceChosen;
+            packageBrowser.SaveRequested += OnBrowserSaveRequested;
             packageBrowser.Cancelled += OnBrowserCancelled;
             AddChild(packageBrowser);
 
             textKeyboard = new OnScreenKeyboard();
             AddChild(textKeyboard);
+            packageBrowser.AttachKeyboard(textKeyboard);
 
             layerManager = new LayerManagerPanel();
             layerManager.LayerModelChanged += OnLayerModelChanged;
@@ -383,8 +384,6 @@ namespace Uberkarl {
             playtestOverlay = new PlaytestOverlay();
             playtestOverlay.ExitRequested += StopPlaytest;
             AddChild(playtestOverlay);
-
-            BuildFileDialogs();
         }
 
         Control BuildToolbar() {
@@ -397,7 +396,7 @@ namespace Uberkarl {
             row.AddChild(MakeButton("Open", SummonBrowser));
             saveButton = MakeButton("Save", Save);
             row.AddChild(saveButton);
-            row.AddChild(MakeButton("Save As", () => saveDialog.PopupCentered(new Vector2I(720, 480))));
+            row.AddChild(MakeButton("Save As", SummonSaveBrowser));
 
             row.AddChild(MakeSeparator());
 
@@ -457,21 +456,6 @@ namespace Uberkarl {
             }
         }
 
-        void BuildFileDialogs() {
-            saveDialog = new FileDialog {
-                FileMode = FileDialog.FileModeEnum.SaveFile,
-                Access = FileDialog.AccessEnum.Filesystem,
-                Title = "Save level package",
-                Filters = new[] { "*.pkg ; Uberkarl package" },
-            };
-            saveDialog.FileSelected += OnSaveFileSelected;
-            AddChild(saveDialog);
-
-            string contentDir = ProjectSettings.GlobalizePath(SeedContentDir);
-            if (DirAccess.DirExistsAbsolute(contentDir))
-                saveDialog.CurrentDir = contentDir;
-        }
-
         // ----- package source -----
 
         // The canonical, system-agnostic package source folder (design §12): user:// is writable and
@@ -504,7 +488,16 @@ namespace Uberkarl {
             return false;
         }
 
-        void SummonBrowser() => packageBrowser.Summon(packageSource);
+        void SummonBrowser() => packageBrowser.SummonLoad(packageSource);
+
+        // Save-As always goes through the browser's save flow (DiVoid #7552) — even when there is no
+        // current session yet or the source cannot be written to, in which case it is simply a no-op,
+        // same defensiveness as every other file command here.
+        void SummonSaveBrowser() {
+            if (session == null || packageSource is not IWritablePackageSource)
+                return;
+            packageBrowser.SummonSave(packageSource, session.Level.Name);
+        }
 
         void OnBrowserResourceChosen(PackageHandle handle, ResourcePath path) {
             try {
@@ -523,6 +516,29 @@ namespace Uberkarl {
         }
 
         void OnBrowserCancelled() => canvas?.GrabFocus();
+
+        // The browser's save flow (DiVoid #7552) has already settled a target — an existing package's
+        // handle to overwrite, or a brand-new package name to create — and a level name. Apply the rename
+        // first (so the serialized bytes and, for a new package, the manifest name carry it), then reuse
+        // the same write paths Save/Save-As-to-current already use.
+        void OnBrowserSaveRequested(PackageSaveTarget target) {
+            if (session == null || packageSource is not IWritablePackageSource writable) {
+                canvas?.GrabFocus();
+                return;
+            }
+
+            session.RenameLevel(target.LevelName);
+
+            if (target.ExistingHandle is { } existing) {
+                sourceHandle = existing;
+                currentFilePath = null;
+                WriteToSource(existing, writable);
+            } else {
+                WriteToNewPackage(target.NewPackageName, writable);
+            }
+
+            canvas?.GrabFocus();
+        }
 
         // ----- layer manager lifecycle -----
 
@@ -732,10 +748,10 @@ namespace Uberkarl {
         void Save() {
             if (sourceHandle is { } handle && packageSource is IWritablePackageSource writable)
                 WriteToSource(handle, writable);
-            else if (currentFilePath == null)
-                saveDialog.PopupCentered(new Vector2I(720, 480));
-            else
+            else if (currentFilePath != null)
                 WriteToPath(currentFilePath);
+            else
+                SummonSaveBrowser();
         }
 
         void WriteToSource(PackageHandle handle, IWritablePackageSource writable) {
@@ -746,6 +762,25 @@ namespace Uberkarl {
                 byte[] bytes = session.Save();
                 writable.Write(handle, bytes);
                 GD.Print($"LevelEditor: saved {bytes.Length} bytes to '{session.Level.Name}' in the package source.");
+            } catch (Exception exception) {
+                session.MarkDirty();
+                GD.PrintErr($"LevelEditor: save failed: {exception.GetType().Name}: {exception.Message}");
+            }
+
+            UpdateState();
+        }
+
+        // Creates a brand-new package for a "+ New package…" Save-As target (no prior handle to overwrite).
+        void WriteToNewPackage(string proposedName, IWritablePackageSource writable) {
+            if (session == null)
+                return;
+
+            try {
+                byte[] bytes = session.Save();
+                PackageHandle handle = writable.Create(proposedName, bytes);
+                sourceHandle = handle;
+                currentFilePath = null;
+                GD.Print($"LevelEditor: created a new package for '{session.Level.Name}' ({bytes.Length} bytes).");
             } catch (Exception exception) {
                 session.MarkDirty();
                 GD.PrintErr($"LevelEditor: save failed: {exception.GetType().Name}: {exception.Message}");
@@ -789,12 +824,6 @@ namespace Uberkarl {
         void OnLayerSelected(long index) {
             activeLayerIndex = (int)index;
             UpdateState();
-        }
-
-        void OnSaveFileSelected(string path) {
-            if (!path.EndsWith(".pkg", StringComparison.OrdinalIgnoreCase))
-                path += ".pkg";
-            WriteToPath(path);
         }
 
         void SetTool(Tool tool) {

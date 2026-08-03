@@ -87,6 +87,23 @@ public sealed class LevelEditSession
     /// <summary>Re-marks the session dirty (used if a save write fails after <see cref="Save"/> returned bytes).</summary>
     public void MarkDirty() => IsDirty = true;
 
+    /// <summary>
+    /// Renames the level under edit (DiVoid #7552 — Save-As level naming via the on-screen keyboard).
+    /// Blank/whitespace-only input is treated as a no-op (mirrors <see cref="RenameLayer"/>) rather than
+    /// throwing across the UI boundary — the browser's Save-As flow passes whatever the keyboard commits
+    /// straight through. The name is trimmed before being applied.
+    /// </summary>
+    public bool RenameLevel(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        var happened = Level.Rename(name.Trim());
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
     // ----- layer management intents -----
     //
     // History policy (the layer-index aliasing hazard, design §9.3): recorded SetCellCommands store an
