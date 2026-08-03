@@ -252,37 +252,55 @@ public sealed class OnScreenKeyboardTests
     }
 
     // ----- OnScreenKeyboardKeyRouter (PR #19 playtest feedback: physical Enter commits, physical Escape
-    // cancels, regardless of which grid key has focus — see game/Editor/OnScreenKeyboard._Input) -----
+    // cancels; DiVoid #7513 follow-up: physical Space inserts a literal space — all regardless of which grid
+    // key has focus — see game/Editor/OnScreenKeyboard._Input) -----
 
     [Test]
     public void Router_Enter_ResolvesToCommit()
     {
-        var command = OnScreenKeyboardKeyRouter.Resolve(isEnter: true, isEscape: false);
+        var command = OnScreenKeyboardKeyRouter.Resolve(isEnter: true, isEscape: false, isSpace: false);
         Assert.That(command, Is.EqualTo(OnScreenKeyboardCommand.Commit));
     }
 
     [Test]
     public void Router_Escape_ResolvesToCancel()
     {
-        var command = OnScreenKeyboardKeyRouter.Resolve(isEnter: false, isEscape: true);
+        var command = OnScreenKeyboardKeyRouter.Resolve(isEnter: false, isEscape: true, isSpace: false);
         Assert.That(command, Is.EqualTo(OnScreenKeyboardCommand.Cancel));
     }
 
     [Test]
-    public void Router_NeitherEnterNorEscape_ResolvesToNone()
+    public void Router_Space_ResolvesToInsertSpace()
     {
-        // The catch-all for every other physical key (letters, backspace, shift, space, arrows...) — those
-        // stay on the normal grid/typing dispatch untouched by this router.
-        var command = OnScreenKeyboardKeyRouter.Resolve(isEnter: false, isEscape: false);
+        // The bug this covers: physical Space is bound to ui_accept, so without this routed resolution it
+        // both typed a space AND activated whatever grid key currently had focus (double action).
+        var command = OnScreenKeyboardKeyRouter.Resolve(isEnter: false, isEscape: false, isSpace: true);
+        Assert.That(command, Is.EqualTo(OnScreenKeyboardCommand.InsertSpace));
+    }
+
+    [Test]
+    public void Router_NoFlagsSet_ResolvesToNone()
+    {
+        // The catch-all for every other physical key (letters, backspace, shift, arrows...) — those stay on
+        // the normal grid/typing dispatch untouched by this router.
+        var command = OnScreenKeyboardKeyRouter.Resolve(isEnter: false, isEscape: false, isSpace: false);
         Assert.That(command, Is.EqualTo(OnScreenKeyboardCommand.None));
     }
 
     [Test]
-    public void Router_BothFlagsSet_EnterTakesPriority()
+    public void Router_EnterAndEscapeBothSet_EnterTakesPriority()
     {
         // Defensive only — a single real key press can never set both, since the caller derives each flag
         // from one Keycode comparison. Pins the tie-break so it's a deliberate choice, not accidental.
-        var command = OnScreenKeyboardKeyRouter.Resolve(isEnter: true, isEscape: true);
+        var command = OnScreenKeyboardKeyRouter.Resolve(isEnter: true, isEscape: true, isSpace: false);
         Assert.That(command, Is.EqualTo(OnScreenKeyboardCommand.Commit));
+    }
+
+    [Test]
+    public void Router_EscapeAndSpaceBothSet_EscapeTakesPriority()
+    {
+        // Defensive only — same reasoning as the Enter/Escape tie-break above.
+        var command = OnScreenKeyboardKeyRouter.Resolve(isEnter: false, isEscape: true, isSpace: true);
+        Assert.That(command, Is.EqualTo(OnScreenKeyboardCommand.Cancel));
     }
 }

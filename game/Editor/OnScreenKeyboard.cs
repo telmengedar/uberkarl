@@ -31,14 +31,15 @@ namespace Uberkarl {
     /// correctly cased by the OS, so this bypasses <see cref="TextEntryEditor.Type"/>/<see cref="TextEntryEditor.CapsActive"/>
     /// entirely — those exist only for the on-screen Shift key.</item>
     /// </list>
-    /// <b>Physical Enter/Return and Escape (PR #19 playtest feedback)</b> are the one exception routed
-    /// ahead of all three paths above, in <see cref="_Input"/>: Enter/Return always <b>commits</b> the whole
-    /// buffer and Escape always <b>cancels</b> it, regardless of which grid key currently has focus — not
-    /// "activate whatever's focused," the way gamepad A/mouse click on a grid key correctly still behaves.
-    /// Godot's own <c>ui_accept</c> binding includes Enter (so a focused Button would otherwise consume it
+    /// <b>Physical Enter/Return, Escape, and Space</b> (PR #19 playtest feedback, plus a Space follow-up) are
+    /// the exceptions routed ahead of all three paths above, in <see cref="_Input"/>: Enter/Return always
+    /// <b>commits</b> the whole buffer, Escape always <b>cancels</b> it, and Space always <b>inserts a literal
+    /// space</b> into the buffer, regardless of which grid key currently has focus — not "activate whatever's
+    /// focused," the way gamepad A/mouse click on a grid key correctly still behaves. Godot's own
+    /// <c>ui_accept</c> binding includes both Enter and Space (so a focused Button would otherwise consume it
     /// first and merely activate itself); <see cref="_Input"/> runs before Godot's GUI dispatch, so
     /// intercepting the raw <c>InputEventKey</c> there and marking it handled pre-empts that. The
-    /// commit/cancel decision itself is <see cref="OnScreenKeyboardKeyRouter.Resolve"/>, a pure,
+    /// commit/cancel/insert-space decision itself is <see cref="OnScreenKeyboardKeyRouter.Resolve"/>, a pure,
     /// engine-agnostic function unit-tested without Godot.
     /// </summary>
     public partial class OnScreenKeyboard : Control {
@@ -201,25 +202,31 @@ namespace Uberkarl {
             focusToRestore = null;
         }
 
-        // Physical Enter/Return → commit, physical Escape → cancel (PR #19 playtest feedback), regardless of
-        // which grid key currently has focus. Must run in _Input, NOT _UnhandledInput: Godot's GUI dispatch
-        // (which happens between _Input and _UnhandledInput) lets a focused Button consume ui_accept itself
-        // first — Enter is bound to ui_accept project-wide, so by the time _UnhandledInput would see it, the
-        // focused Button has already "activated" (typed/toggled/etc.) instead of committing. Intercepting the
-        // raw InputEventKey here, before that GUI dispatch, and marking it handled pre-empts the Button
-        // entirely. Only InputEventKey is inspected, so this can never fire for a gamepad A-button (an
+        // Physical Enter/Return → commit, physical Escape → cancel (PR #19 playtest feedback), physical
+        // Space → insert a literal space (DiVoid #7513 follow-up) — all regardless of which grid key
+        // currently has focus. Must run in _Input, NOT _UnhandledInput: Godot's GUI dispatch (which happens
+        // between _Input and _UnhandledInput) lets a focused Button consume ui_accept itself first — Enter
+        // AND Space are both bound to ui_accept project-wide, so by the time _UnhandledInput would see them,
+        // the focused Button has already "activated" (typed/toggled/etc.) instead of committing/inserting a
+        // space. Without this interception, physical Space both typed a space (via _UnhandledInput's Unicode
+        // path below) AND activated the focused grid key — Godot's GUI dispatch consuming ui_accept does not
+        // set the viewport's "handled" flag that _UnhandledInput checks, so both fired. Intercepting the raw
+        // InputEventKey here, before that GUI dispatch, and marking it handled pre-empts the Button entirely.
+        // Only InputEventKey is inspected, so this can never fire for a gamepad A-button (an
         // InputEventJoypadButton) or a mouse click (an InputEventMouseButton) — both of those still
-        // correctly TYPE the focused grid key via OnKeyPressed, unaffected. Escape is routed the same way,
-        // through the same OnScreenKeyboardKeyRouter decision, even though it also happens to fall through to
-        // _UnhandledInput's own ui_cancel check below (Buttons never consume ui_cancel) — handling it here
-        // keeps both routed physical keys next to each other and behind one engine-agnostic, unit-tested rule.
+        // correctly TYPE the focused grid key via OnKeyPressed (including the on-screen Space key), unaffected.
+        // Escape is routed the same way, through the same OnScreenKeyboardKeyRouter decision, even though it
+        // also happens to fall through to _UnhandledInput's own ui_cancel check below (Buttons never consume
+        // ui_cancel) — handling it here keeps all three routed physical keys next to each other and behind
+        // one engine-agnostic, unit-tested rule.
         public override void _Input(InputEvent @event) {
             if (!Visible || @event.IsEcho() || @event is not InputEventKey key || !key.Pressed)
                 return;
 
             OnScreenKeyboardCommand command = OnScreenKeyboardKeyRouter.Resolve(
                 isEnter: key.Keycode == Key.Enter || key.Keycode == Key.KpEnter,
-                isEscape: key.Keycode == Key.Escape);
+                isEscape: key.Keycode == Key.Escape,
+                isSpace: key.Keycode == Key.Space);
 
             switch (command) {
                 case OnScreenKeyboardCommand.Commit:
@@ -228,6 +235,11 @@ namespace Uberkarl {
                     break;
                 case OnScreenKeyboardCommand.Cancel:
                     CancelEntry();
+                    GetViewport().SetInputAsHandled();
+                    break;
+                case OnScreenKeyboardCommand.InsertSpace:
+                    editor.Insert(' ');
+                    RefreshBuffer();
                     GetViewport().SetInputAsHandled();
                     break;
             }
