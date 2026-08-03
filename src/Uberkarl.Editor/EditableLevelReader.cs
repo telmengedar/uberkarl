@@ -78,13 +78,17 @@ public static class EditableLevelReader
                 layer.Cells.ToArray()));
         }
 
-        var manifest = package.Manifest;
+        // Loaded from a real package resource, so this level already occupies a stable slot: isAttached
+        // is true and levelPath/tileSetPath are preserved verbatim, even if they predate the per-resource
+        // namespacing scheme (a legacy fixed-constant path like "tileset.json" still round-trips fine —
+        // this correction does not force a migration of already-saved content).
+        //
+        // The level's own display name comes from ITS resource path, never the package's manifest name
+        // (DiVoid #7571/#7572 — package identity is independent of level naming; a package can hold many
+        // levels, none of which "is" the package). Mirrors FolderPackageSource's DisplayNameFor so a
+        // level's name matches exactly what the browser's resource list already shows for it.
         return new EditableLevel(
-            manifest.Id,
-            manifest.Name,
-            manifest.Version,
-            manifest.Attribution,
-            manifest.ForkedFrom,
+            DisplayNameFromPath(levelPath),
             levelPath,
             tileSetPath,
             levelDefinition.TileSize,
@@ -94,7 +98,8 @@ public static class EditableLevelReader
             new Dictionary<string, GridPosition>(levelDefinition.Spawns),
             levelDefinition.DefaultSpawn,
             tiles,
-            layers);
+            layers,
+            isAttached: true);
     }
 
     private static ResourcePath FindLevelPath(Package package)
@@ -106,5 +111,14 @@ public static class EditableLevelReader
         }
 
         throw new LevelContentException("Package does not contain a level resource.");
+    }
+
+    private static string DisplayNameFromPath(ResourcePath path)
+    {
+        var value = path.Value;
+        var slash = value.LastIndexOf('/');
+        var fileName = slash >= 0 ? value[(slash + 1)..] : value;
+        var dot = fileName.LastIndexOf('.');
+        return dot > 0 ? fileName[..dot] : fileName;
     }
 }

@@ -576,14 +576,15 @@ public sealed class LayerEditingTests
     [Test]
     public void Session_LayerOps_SaveLoadRoundTrip_PreservesLayersPropsAndOrder()
     {
-        var session = new LevelEditSession(EditableLevelReader.FromPackageBytes(BuildSamplePackageBytes()));
+        using var package = PackageReader.Open(new MemoryStream(BuildSamplePackageBytes()));
+        var session = new LevelEditSession(EditableLevelReader.FromPackage(package));
         session.AddLayer();
         session.SetCollision(1, false);
         session.StepScrollSpeed(1, -1); // 1.0 -> 0.75
         session.SetRepeat(1, true);
         session.MoveLayer(1, -1); // backdrop now drawn first (back)
 
-        var reloaded = EditableLevelReader.FromPackageBytes(session.Save());
+        var reloaded = EditableLevelReader.FromPackageBytes(session.Save(package));
 
         Assert.Multiple(() =>
         {
@@ -635,7 +636,7 @@ public sealed class LayerEditingTests
         Array.Fill(cells, LayerDefinition.EmptyCell);
         var layer = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
         return new EditableLevel(
-            PackageId.New(), "Sample", "0.1.0", null, null, LevelPath, TileSetPath,
+            "Sample", LevelPath, TileSetPath,
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
             Palette(), new[] { layer });

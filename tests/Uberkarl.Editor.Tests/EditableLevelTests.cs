@@ -172,7 +172,10 @@ public sealed class EditableLevelTests
             Assert.That(level.Layers[0].Cells, Has.Length.EqualTo(20));
             Assert.That(level.Layers[0].Cells, Is.All.EqualTo(LayerDefinition.EmptyCell));
             Assert.That(level.Tiles, Has.Count.EqualTo(2));
-            Assert.That(level.PackageId.IsSelf, Is.False);
+            // Package-as-VFS correction (DiVoid #7571/#7572): a blank level starts unattached — it has
+            // provisional, slug-derived paths but no stable package slot until it goes through Save-As.
+            Assert.That(level.IsAttached, Is.False);
+            Assert.That(level.LevelPath, Is.EqualTo(LevelResourcePaths.LevelPath("untitled")));
         });
     }
 
@@ -181,7 +184,10 @@ public sealed class EditableLevelTests
     [Test]
     public void EditSaveLoad_RoundTripsEditedCells()
     {
-        var original = EditableLevelReader.FromPackageBytes(BuildSamplePackageBytes());
+        var packageBytes = BuildSamplePackageBytes();
+        using var package = PackageReader.Open(new MemoryStream(packageBytes));
+        var originalPackageId = package.Id;
+        var original = EditableLevelReader.FromPackage(package);
         var session = new LevelEditSession(original);
 
         // Paint a grass tile, paint a water tile, then erase a pre-existing cell.
@@ -189,10 +195,14 @@ public sealed class EditableLevelTests
         session.PaintCell(0, 3, 2, 5);
         session.EraseCell(0, 1, 1); // (1,1) held grass id 1 in the sample
 
-        var savedBytes = session.Save();
+        // Package-as-VFS correction (DiVoid #7571/#7572): a plain re-save merges into the ALREADY-OPEN
+        // source package rather than fabricating a fresh one — this level is attached (loaded from a real
+        // resource), so Save reuses its own paths and the archive's identity is carried forward untouched.
+        var savedBytes = session.Save(package);
         Assert.That(session.IsDirty, Is.False);
 
         var reloaded = EditableLevelReader.FromPackageBytes(savedBytes);
+        using var reloadedPackage = PackageReader.Open(new MemoryStream(savedBytes));
 
         Assert.Multiple(() =>
         {
@@ -208,7 +218,7 @@ public sealed class EditableLevelTests
             Assert.That(reloaded.Width, Is.EqualTo(Width));
             Assert.That(reloaded.Height, Is.EqualTo(Height));
             Assert.That(reloaded.TileSize, Is.EqualTo(TileSize));
-            Assert.That(reloaded.PackageId, Is.EqualTo(original.PackageId));
+            Assert.That(reloadedPackage.Id, Is.EqualTo(originalPackageId));
             Assert.That(reloaded.Name, Is.EqualTo(original.Name));
             Assert.That(reloaded.Tiles, Has.Count.EqualTo(original.Tiles.Count));
             Assert.That(reloaded.Spawns.ContainsKey("start"), Is.True);
@@ -221,9 +231,11 @@ public sealed class EditableLevelTests
     public void Save_LoadsThroughTheRuntimeLoaderToo()
     {
         // The saved package must also be readable by the play-time LevelLoader, not just the editor.
-        var session = new LevelEditSession(EditableLevelReader.FromPackageBytes(BuildSamplePackageBytes()));
+        var packageBytes = BuildSamplePackageBytes();
+        using var package = PackageReader.Open(new MemoryStream(packageBytes));
+        var session = new LevelEditSession(EditableLevelReader.FromPackage(package));
         session.PaintCell(0, 0, 0, 5);
-        var savedBytes = session.Save();
+        var savedBytes = session.Save(package);
 
         using var registry = new PackageRegistry(PackageReader.Open(new MemoryStream(savedBytes)));
         var resolved = LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath));
@@ -300,26 +312,22 @@ public sealed class EditableLevelTests
     }
 
     [Test]
-    public void RoundTrip_PreservesBackgroundForkedFromAndAttribution()
+    public void RoundTrip_PreservesBackgroundColor()
     {
-        var origin = EditableLevelReader.FromPackageBytes(BuildSamplePackageBytes());
-        var forked = PackageId.New();
-        // Rebuild an editable level that carries background, a fork provenance, and attribution.
-        var withMeta = new EditableLevel(
-            origin.PackageId, origin.Name, origin.Version,
-            new Attribution { Author = "Toni", License = "CC-BY-4.0" }, forked,
-            origin.LevelPath, origin.TileSetPath, origin.TileSize, origin.Width, origin.Height,
-            "#3A5A8C", origin.Spawns, origin.DefaultSpawn, origin.Tiles, origin.Layers);
+        // Package-as-VFS correction (DiVoid #7571/#7572): ForkedFrom/Attribution moved OFF EditableLevel
+        // onto PackageContext (archive identity) — their round-trip-through-a-merge is covered by
+        // LevelMergeWriterTests instead. BackgroundColor stays level content, so it still belongs here.
+        var packageBytes = BuildSamplePackageBytes();
+        using var package = PackageReader.Open(new MemoryStream(packageBytes));
+        var origin = EditableLevelReader.FromPackage(package);
+        var withBackground = new EditableLevel(
+            origin.Name, origin.LevelPath, origin.TileSetPath, origin.TileSize, origin.Width, origin.Height,
+            "#3A5A8C", origin.Spawns, origin.DefaultSpawn, origin.Tiles, origin.Layers, isAttached: true);
+        var session = new LevelEditSession(withBackground);
 
-        var reloaded = EditableLevelReader.FromPackageBytes(EditableLevelWriter.ToPackageBytes(withMeta));
+        var reloaded = EditableLevelReader.FromPackageBytes(session.Save(package));
 
-        Assert.Multiple(() =>
-        {
-            Assert.That(reloaded.BackgroundColor, Is.EqualTo("#3A5A8C"));
-            Assert.That(reloaded.ForkedFrom, Is.EqualTo(forked));
-            Assert.That(reloaded.Attribution!.Author, Is.EqualTo("Toni"));
-            Assert.That(reloaded.Attribution!.License, Is.EqualTo("CC-BY-4.0"));
-        });
+        Assert.That(reloaded.BackgroundColor, Is.EqualTo("#3A5A8C"));
     }
 
     [Test]
@@ -327,9 +335,8 @@ public sealed class EditableLevelTests
     {
         var origin = EditableLevelReader.FromPackageBytes(BuildSamplePackageBytes());
         var withBackground = new EditableLevel(
-            origin.PackageId, origin.Name, origin.Version, origin.Attribution, origin.ForkedFrom,
-            origin.LevelPath, origin.TileSetPath, origin.TileSize, origin.Width, origin.Height,
-            "#204080", origin.Spawns, origin.DefaultSpawn, origin.Tiles, origin.Layers);
+            origin.Name, origin.LevelPath, origin.TileSetPath, origin.TileSize, origin.Width, origin.Height,
+            "#204080", origin.Spawns, origin.DefaultSpawn, origin.Tiles, origin.Layers, isAttached: true);
 
         var resolved = EditableLevelSnapshot.ToResolvedLevel(withBackground);
 
@@ -341,7 +348,7 @@ public sealed class EditableLevelTests
     {
         var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, 3, 3, Palette()));
         session.PaintCell(0, 1, 1, 1);
-        var reloaded = EditableLevelReader.FromPackageBytes(session.Save());
+        var reloaded = EditableLevelReader.FromPackageBytes(session.SaveFresh("Untitled Package"));
 
         Assert.That(reloaded.GetCell(0, 1, 1), Is.EqualTo(1));
         Assert.That(reloaded.Layers[0].Cells, Has.Length.EqualTo(9));
@@ -352,7 +359,7 @@ public sealed class EditableLevelTests
     {
         var session = new LevelEditSession(SampleLevel());
         session.PaintCell(0, 0, 0, 1);
-        session.Save();
+        session.SaveFresh("Sample Package");
         Assert.That(session.IsDirty, Is.False);
 
         session.MarkDirty();
@@ -374,7 +381,7 @@ public sealed class EditableLevelTests
         Array.Fill(cells, LayerDefinition.EmptyCell);
         var layer = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
         return new EditableLevel(
-            PackageId.New(), "Sample", "0.1.0", null, null, LevelPath, TileSetPath,
+            "Sample", LevelPath, TileSetPath,
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
             Palette(), new[] { layer });

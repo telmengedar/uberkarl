@@ -56,6 +56,12 @@ public sealed class FolderPackageSource : IPackageSource, IWritablePackageSource
 
     public Package Open(PackageHandle handle) => OpenInternal(handle);
 
+    // Atomic replace (write a temp file alongside the target, then rename over it) rather than a direct
+    // File.WriteAllBytes: under the package-as-VFS merge (DiVoid #7572), a save's bytes now carry every
+    // sibling resource forward too, so a write torn by a crash/power loss mid-write would corrupt the
+    // whole archive, not just the one level being edited. The temp file lives in the same directory so
+    // the rename is same-volume (atomic on the filesystems this targets); a failed write leaves the
+    // original file completely untouched.
     public void Write(PackageHandle handle, byte[] packageBytes)
     {
         if (packageBytes is null)
@@ -65,7 +71,19 @@ public sealed class FolderPackageSource : IPackageSource, IWritablePackageSource
         if (!File.Exists(path))
             throw new PackageUnavailableException(path);
 
-        File.WriteAllBytes(path, packageBytes);
+        var tempPath = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            File.WriteAllBytes(tempPath, packageBytes);
+            File.Move(tempPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try { File.Delete(tempPath); } catch (IOException) { /* best-effort cleanup */ }
+            }
+        }
     }
 
     public PackageHandle Create(string proposedName, byte[] packageBytes)

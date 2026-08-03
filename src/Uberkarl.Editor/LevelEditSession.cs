@@ -1,4 +1,5 @@
 using Uberkarl.Content;
+using Uberkarl.Packages;
 
 namespace Uberkarl.Editor;
 
@@ -73,19 +74,103 @@ public sealed class LevelEditSession
     }
 
     /// <summary>
-    /// Serializes the current level to package bytes and marks the session clean. The caller writes the
-    /// bytes to the chosen file (file IO stays outside this engine-agnostic core). The dirty flag clears
-    /// on the assumption the write succeeds; a failed write should re-mark dirty via <see cref="MarkDirty"/>.
+    /// The set of resource contributions (level.json + tileset.json + tile graphics, at this level's own
+    /// namespaced paths) this level owns — the merge unit <see cref="Save"/>/<see cref="SaveFresh"/>
+    /// compose onto an archive. Exposed so a caller (or a test) can inspect exactly what a save will
+    /// touch without also needing an existing package to merge onto.
     /// </summary>
-    public byte[] Save()
+    public IReadOnlyList<PendingResource> BuildContributions() => LevelMergeWriter.BuildContributions(Level);
+
+    /// <summary>
+    /// Merges this level's contributions onto <paramref name="existingPackage"/> — every sibling resource
+    /// and the archive's own identity are carried forward unchanged (DiVoid #7571/#7572's package-as-VFS
+    /// correction: a level save must never clobber a package's other contents). The caller opens the
+    /// package (file IO stays outside this engine-agnostic core) and writes the returned bytes back to
+    /// storage. The dirty flag clears on the assumption the write succeeds; a failed write should
+    /// re-mark dirty via <see cref="MarkDirty"/>.
+    /// </summary>
+    public byte[] Save(Package existingPackage)
     {
-        var bytes = EditableLevelWriter.ToPackageBytes(Level);
+        var bytes = LevelMergeWriter.Compose(existingPackage, BuildContributions());
+        IsDirty = false;
+        return bytes;
+    }
+
+    /// <summary>
+    /// Mints a brand-new archive containing only this level (Save-As's "＋ New package" outcome, or a
+    /// never-before-saved level's first save). <paramref name="newPackageName"/> is the archive's own
+    /// display name — independent of this level's <see cref="EditableLevel.Name"/>.
+    /// </summary>
+    public byte[] SaveFresh(string newPackageName)
+    {
+        var bytes = LevelMergeWriter.BuildFresh(newPackageName, BuildContributions());
         IsDirty = false;
         return bytes;
     }
 
     /// <summary>Re-marks the session dirty (used if a save write fails after <see cref="Save"/> returned bytes).</summary>
     public void MarkDirty() => IsDirty = true;
+
+    /// <summary>
+    /// Establishes this level as a brand-new resource in its target package (Save-As's "＋ New level…"
+    /// outcome): derives a slug from the level's current (already-renamed) display name, uniquified
+    /// against <paramref name="existingResources"/> so it can never collide with a sibling level already
+    /// in that package, and attaches the level to the namespaced paths that slug produces.
+    /// </summary>
+    public void AttachAsNewResource(IReadOnlyList<ResourceEntry> existingResources)
+    {
+        if (existingResources is null)
+            throw new ArgumentNullException(nameof(existingResources));
+
+        var baseSlug = LevelResourcePaths.Slugify(Level.Name);
+        var slug = LevelResourcePaths.UniqueSlug(baseSlug, candidate => Contains(existingResources, LevelResourcePaths.LevelPath(candidate)));
+        Level.Attach(slug, overwriteLevelPath: null);
+        IsDirty = true;
+    }
+
+    /// <summary>
+    /// Establishes this level as the (explicitly-picked) replacement for an existing level resource
+    /// (Save-As's "pick existing level to overwrite" outcome): reuses <paramref name="levelPath"/>
+    /// verbatim — the author's pick IS the slot — and derives the tile-set/graphics slug from that same
+    /// path when it follows the namespaced convention (<see cref="LevelResourcePaths.SlugFromLevelPath"/>),
+    /// so re-saving into the same slot is idempotent rather than drifting to a fresh slug on every save.
+    /// Falls back to slugifying the level's current display name only for a legacy path that predates the
+    /// namespacing scheme.
+    /// </summary>
+    public void AttachToExistingResource(ResourcePath levelPath)
+    {
+        var slug = LevelResourcePaths.SlugFromLevelPath(levelPath) ?? LevelResourcePaths.Slugify(Level.Name);
+        Level.Attach(slug, overwriteLevelPath: levelPath);
+        IsDirty = true;
+    }
+
+    private static bool Contains(IReadOnlyList<ResourceEntry> resources, ResourcePath path)
+    {
+        foreach (var entry in resources)
+        {
+            if (entry.Path == path)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Renames the level under edit (DiVoid #7552 — Save-As level naming via the on-screen keyboard).
+    /// Blank/whitespace-only input is treated as a no-op (mirrors <see cref="RenameLayer"/>) rather than
+    /// throwing across the UI boundary — the browser's Save-As flow passes whatever the keyboard commits
+    /// straight through. The name is trimmed before being applied.
+    /// </summary>
+    public bool RenameLevel(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        var happened = Level.Rename(name.Trim());
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
 
     // ----- layer management intents -----
     //

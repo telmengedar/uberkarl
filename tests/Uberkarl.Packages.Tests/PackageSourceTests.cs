@@ -194,6 +194,26 @@ public sealed class PackageSourceTests
     }
 
     [Test]
+    public void Write_LeavesNoTempFileBehindAfterASuccessfulAtomicReplace()
+    {
+        // DiVoid #7571/#7572 step 7: Write is now temp-then-rename (a merged save now carries every
+        // sibling resource, so a torn write would corrupt the whole archive, not just one level).
+        WritePackage("pack.pkg", "Pack", "1.0.0", ("sprites/hero.png", ResourceKind.Sprite));
+        var source = new FolderPackageSource(tempDir);
+        var handle = source.ListPackages().Single().Handle;
+
+        var builder = new PackageBuilder().WithName("Pack").WithVersion("2.0.0");
+        builder.AddResource(ResourceKind.Sprite, ResourcePath.Create("sprites/hero.png"), Encoding.UTF8.GetBytes("NEWPAYLOAD"));
+        using var buffer = new MemoryStream();
+        builder.Write(buffer);
+
+        ((IWritablePackageSource)source).Write(handle, buffer.ToArray());
+
+        var leftoverTempFiles = Directory.GetFiles(tempDir, "*.tmp-*");
+        Assert.That(leftoverTempFiles, Is.Empty, "a successful write must not leave its temp file behind.");
+    }
+
+    [Test]
     public void Create_WritesANewPackageAndReturnsAResolvableHandle()
     {
         var source = new FolderPackageSource(tempDir);

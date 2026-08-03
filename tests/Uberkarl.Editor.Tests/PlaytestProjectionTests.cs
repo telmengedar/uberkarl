@@ -58,7 +58,7 @@ public sealed class PlaytestProjectionTests
         var terrain = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
         var backdrop = new EditableLayer("backdrop", collision: false, scrollSpeed: 0.5f, repeat: true, (int[])cells.Clone());
         var level = new EditableLevel(
-            PackageId.New(), "Sample", "0.1.0", null, null, LevelPath, TileSetPath,
+            "Sample", LevelPath, TileSetPath,
             TileSize, Width, Height, backgroundColor: null,
             new System.Collections.Generic.Dictionary<string, GridPosition>(), defaultSpawn: null,
             Palette(), new[] { terrain, backdrop });
@@ -156,7 +156,7 @@ public sealed class PlaytestProjectionTests
         Array.Fill(cells, LayerDefinition.EmptyCell);
         var layer = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
         return new EditableLevel(
-            PackageId.New(), "Sample", "0.1.0", null, null, LevelPath, TileSetPath,
+            "Sample", LevelPath, TileSetPath,
             TileSize, Width, Height, backgroundColor: null,
             new System.Collections.Generic.Dictionary<string, GridPosition>(), defaultSpawn: null,
             Palette(), new[] { layer });

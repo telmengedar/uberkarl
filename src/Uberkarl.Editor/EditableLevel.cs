@@ -5,30 +5,32 @@ namespace Uberkarl.Editor;
 
 /// <summary>
 /// The editor's single source of truth for a level being authored: dimensions, the tile palette, the
-/// layer grids, spawns, and the package metadata/paths needed to re-save it. It is engine-agnostic
-/// (no Godot types) so the apply-edit and save/load round-trip logic can be unit-tested outside the
-/// engine. Edit commands mutate a layer's cells in place; structural changes (resize, add/remove
-/// layers or tiles, edit spawns) are deferred increments — for this increment the geometry, palette,
-/// and spawns are fixed at load/create time and only cell contents change.
+/// layer grids, and spawns. It is engine-agnostic (no Godot types) so the apply-edit and save/load
+/// round-trip logic can be unit-tested outside the engine.
+///
+/// <b>Package-as-VFS correction (DiVoid #7571/#7572):</b> a level is pure <b>content</b> — one resource
+/// living inside a package (an archive of many typed resources), not the package itself. Archive
+/// identity (<c>PackageId</c>/Name/Version/Attribution/ForkedFrom) has moved OUT of this class and lives
+/// on <see cref="PackageContext"/> instead; <see cref="Rename"/> here changes only this level's own
+/// display name, never a package's. <see cref="LevelPath"/>/<see cref="TileSetPath"/> are this level's
+/// own in-package addresses — namespaced per level (<see cref="LevelResourcePaths"/>) so two distinctly-
+/// named levels in the same package never collide — and stay fixed once <see cref="IsAttached"/>
+/// (renaming the level does not move its VFS entry); see <see cref="Attach"/>.
+///
+/// Edit commands mutate a layer's cells in place; structural changes (resize, add/remove layers or
+/// tiles, edit spawns) are deferred increments — for this increment the geometry and palette are fixed
+/// at load/create time and only cell contents (and the layer stack, via the structural mutations below)
+/// change.
 /// </summary>
 public sealed class EditableLevel
 {
-    /// <summary>Default in-package path a newly created level's definition is written to.</summary>
-    public static readonly ResourcePath DefaultLevelPath = ResourcePath.Create("levels/level.json");
-
-    /// <summary>Default in-package path a newly created level's tile set is written to.</summary>
-    public static readonly ResourcePath DefaultTileSetPath = ResourcePath.Create("tileset.json");
-
     // The layer stack is mutable in the authoring model (create/delete/reorder/property-set); Layers
     // exposes the same list as IReadOnlyList so every existing reader keeps working unchanged.
     private readonly List<EditableLayer> layers;
+    private IReadOnlyList<EditableTile> tiles;
 
     public EditableLevel(
-        PackageId packageId,
         string name,
-        string version,
-        Attribution? attribution,
-        PackageId? forkedFrom,
         ResourcePath levelPath,
         ResourcePath tileSetPath,
         int tileSize,
@@ -38,18 +40,15 @@ public sealed class EditableLevel
         IReadOnlyDictionary<string, GridPosition> spawns,
         string? defaultSpawn,
         IReadOnlyList<EditableTile> tiles,
-        IReadOnlyList<EditableLayer> layers)
+        IReadOnlyList<EditableLayer> layers,
+        bool isAttached = false)
     {
         if (tileSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(tileSize));
         if (width <= 0 || height <= 0)
             throw new ArgumentOutOfRangeException(nameof(width));
 
-        PackageId = packageId;
         Name = name ?? throw new ArgumentNullException(nameof(name));
-        Version = version ?? throw new ArgumentNullException(nameof(version));
-        Attribution = attribution;
-        ForkedFrom = forkedFrom;
         LevelPath = levelPath;
         TileSetPath = tileSetPath;
         TileSize = tileSize;
@@ -58,10 +57,11 @@ public sealed class EditableLevel
         BackgroundColor = backgroundColor;
         Spawns = spawns ?? throw new ArgumentNullException(nameof(spawns));
         DefaultSpawn = defaultSpawn;
-        Tiles = tiles ?? throw new ArgumentNullException(nameof(tiles));
+        this.tiles = tiles ?? throw new ArgumentNullException(nameof(tiles));
         if (layers is null)
             throw new ArgumentNullException(nameof(layers));
         this.layers = new List<EditableLayer>(layers);
+        IsAttached = isAttached;
 
         var expected = width * height;
         foreach (var layer in this.layers)
@@ -72,19 +72,14 @@ public sealed class EditableLevel
         }
     }
 
-    public PackageId PackageId { get; }
+    public string Name { get; private set; }
 
-    public string Name { get; }
+    /// <summary>This level's own in-package path (levels/&lt;slug&gt;.json once attached). Fixed once
+    /// <see cref="IsAttached"/> — see <see cref="Attach"/>.</summary>
+    public ResourcePath LevelPath { get; private set; }
 
-    public string Version { get; }
-
-    public Attribution? Attribution { get; }
-
-    public PackageId? ForkedFrom { get; }
-
-    public ResourcePath LevelPath { get; }
-
-    public ResourcePath TileSetPath { get; }
+    /// <summary>This level's own tile-set path (tilesets/&lt;slug&gt;.json once attached).</summary>
+    public ResourcePath TileSetPath { get; private set; }
 
     public int TileSize { get; }
 
@@ -98,7 +93,16 @@ public sealed class EditableLevel
 
     public string? DefaultSpawn { get; }
 
-    public IReadOnlyList<EditableTile> Tiles { get; }
+    public IReadOnlyList<EditableTile> Tiles => tiles;
+
+    /// <summary>
+    /// Whether this level already occupies a stable, namespaced resource slot in some package — true for
+    /// a level just loaded via <see cref="EditableLevelReader"/>, or one that has completed at least one
+    /// merge-save via <see cref="Attach"/>. False for a freshly <see cref="CreateBlank"/> level: it has
+    /// provisional paths that are never persisted, and must go through Save-As (which calls
+    /// <see cref="Attach"/>) before its resources are namespaced for real.
+    /// </summary>
+    public bool IsAttached { get; private set; }
 
     /// <summary>The layer stack, back→front (array order is draw order). Mutated via
     /// <see cref="AppendLayer"/>/<see cref="RemoveLayerAt"/>/<see cref="MoveLayer"/>/<see cref="SetLayerProperties"/>.</summary>
@@ -236,10 +240,56 @@ public sealed class EditableLevel
     }
 
     /// <summary>
-    /// Creates an empty level: a fresh package id, one collision layer of the given size filled with
-    /// empty cells, and the supplied palette (the caller provides the tile graphics — the model never
-    /// encodes images). Used by the editor's "New" action; the palette is fixed because tile-set
-    /// editing is a later increment.
+    /// Renames the level's own display name (DiVoid #7552 — Save-As level naming via the on-screen
+    /// keyboard). Under the package-as-VFS correction this is <b>content-only</b>: it never touches a
+    /// package's identity, and once <see cref="IsAttached"/> it does not move <see cref="LevelPath"/>/
+    /// <see cref="TileSetPath"/> either (design #7572 open question 3 — renaming content must not move a
+    /// VFS entry or break references into it; see <see cref="Attach"/> for the one path that does
+    /// (re)namespace a level's resources). Returns <c>false</c> (no-op) when <paramref name="name"/>
+    /// equals the current name (ordinal comparison) — mirrors <see cref="RenameLayer"/>.
+    /// </summary>
+    public bool Rename(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+            throw new ArgumentException("Level name must not be empty.", nameof(name));
+        if (string.Equals(Name, name, StringComparison.Ordinal))
+            return false;
+
+        Name = name;
+        return true;
+    }
+
+    /// <summary>
+    /// Establishes (or re-establishes) this level's namespaced resource slot in a package: derives
+    /// <see cref="LevelPath"/>/<see cref="TileSetPath"/> from <paramref name="slug"/>
+    /// (<see cref="LevelResourcePaths"/>), or reuses <paramref name="overwriteLevelPath"/> verbatim when
+    /// the author explicitly picked an existing level resource to overwrite, and remaps every tile's
+    /// graphic to <c>graphics/&lt;slug&gt;/&lt;tileId&gt;.png</c> so this level's whole resource set is
+    /// self-namespaced and cannot collide with any sibling. Marks <see cref="IsAttached"/> so a later
+    /// plain Save reuses these exact paths without re-deriving them from whatever the level is renamed to
+    /// next (design #7572 open question 3). Called by <see cref="LevelEditSession.AttachAsNewResource"/>/
+    /// <see cref="LevelEditSession.AttachToExistingResource"/> — the two Save-As outcomes that establish
+    /// or confirm a level's slot; a plain re-save into an already-attached level never calls this.
+    /// </summary>
+    public void Attach(string slug, ResourcePath? overwriteLevelPath)
+    {
+        if (string.IsNullOrWhiteSpace(slug))
+            throw new ArgumentException("Slug must not be empty.", nameof(slug));
+
+        LevelPath = overwriteLevelPath ?? LevelResourcePaths.LevelPath(slug);
+        TileSetPath = LevelResourcePaths.TileSetPath(slug);
+        tiles = tiles.Select(tile => new EditableTile(tile.Id, LevelResourcePaths.GraphicPath(slug, tile.Id), tile.Graphic, tile.Collides)).ToList();
+        IsAttached = true;
+    }
+
+    /// <summary>
+    /// Creates an empty level: one collision layer of the given size filled with empty cells, and the
+    /// supplied palette (the caller provides the tile graphics — the model never encodes images). Used by
+    /// the editor's "New" action; the palette is fixed because tile-set editing is a later increment. The
+    /// level starts <b>unattached</b> (<see cref="IsAttached"/> is <c>false</c>) with provisional paths
+    /// derived from <paramref name="name"/> — never persisted as-is; the first Save routes through
+    /// Save-As, which calls <see cref="Attach"/> to establish the level's real namespaced slot from
+    /// whatever name is actually typed there.
     /// </summary>
     public static EditableLevel CreateBlank(
         string name,
@@ -255,14 +305,11 @@ public sealed class EditableLevel
         Array.Fill(cells, LayerDefinition.EmptyCell);
         var layer = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
 
+        var slug = LevelResourcePaths.Slugify(name);
         return new EditableLevel(
-            PackageId.New(),
             name,
-            "0.1.0",
-            new Attribution { Author = "Uberkarl", License = "CC0-1.0" },
-            forkedFrom: null,
-            DefaultLevelPath,
-            DefaultTileSetPath,
+            LevelResourcePaths.LevelPath(slug),
+            LevelResourcePaths.TileSetPath(slug),
             tileSize,
             width,
             height,
@@ -270,6 +317,7 @@ public sealed class EditableLevel
             new Dictionary<string, GridPosition>(),
             defaultSpawn: null,
             palette,
-            new[] { layer });
+            new[] { layer },
+            isAttached: false);
     }
 }
