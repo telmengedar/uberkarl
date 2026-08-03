@@ -83,9 +83,11 @@ public sealed class EditableLevel
 
     public int TileSize { get; }
 
-    public int Width { get; }
+    /// <summary>The grid's width in cells. Mutated only by <see cref="Resize"/> (DiVoid #7550).</summary>
+    public int Width { get; private set; }
 
-    public int Height { get; }
+    /// <summary>The grid's height in cells. Mutated only by <see cref="Resize"/> (DiVoid #7550).</summary>
+    public int Height { get; private set; }
 
     public string? BackgroundColor { get; }
 
@@ -236,6 +238,77 @@ public sealed class EditableLevel
             return false;
 
         layers[index] = new EditableLayer(current.Name, coerced.Collision, coerced.ScrollSpeed, coerced.Repeat, current.Cells);
+        return true;
+    }
+
+    // ----- grid resize (DiVoid #7550) -----
+
+    /// <summary>
+    /// True when resizing to <paramref name="width"/>x<paramref name="height"/> would crop away at least
+    /// one painted (non-empty) cell on any layer. Pure query — never mutates the level. This is the seam
+    /// the UI reads to decide whether <see cref="Resize"/> needs a confirm press first (the same shape as
+    /// the layer-manager's delete confirm, since a resize that crops painted tiles is not undoable — see
+    /// <see cref="LevelEditSession.Resize"/>). Always <c>false</c> when neither dimension shrinks — growing
+    /// never crops anything.
+    /// </summary>
+    public bool WouldDropPaintedCells(int width, int height)
+    {
+        if (width >= Width && height >= Height)
+            return false;
+
+        foreach (var layer in layers)
+        {
+            for (var y = 0; y < Height; y++)
+            {
+                for (var x = 0; x < Width; x++)
+                {
+                    if ((x >= width || y >= height) && layer.Cells[y * Width + x] != LayerDefinition.EmptyCell)
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Resizes the grid to <paramref name="width"/>x<paramref name="height"/>, applied identically across
+    /// every layer — levels share one W×H across their whole layer stack (DiVoid #7420). Growing preserves
+    /// every existing cell at its original (x,y) coordinate and fills the newly-added cells empty;
+    /// shrinking crops away whatever falls outside the new bounds. <see cref="TileSize"/> is untouched —
+    /// this is purely a grid-dimension change, never a re-scale. Each layer's <see cref="EditableLayer"/>
+    /// instance is replaced (a resize necessarily reallocates the <c>Cells</c> array — unlike
+    /// <see cref="SetLayerProperties"/> there is no existing array of the right length to reuse). Returns
+    /// <c>false</c> (no-op) when <paramref name="width"/>/<paramref name="height"/> already equal the
+    /// level's current size. This method does not itself ask for confirmation — see
+    /// <see cref="WouldDropPaintedCells"/> for the query the caller should make first.
+    /// </summary>
+    public bool Resize(int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+        if (width == Width && height == Height)
+            return false;
+
+        var copyWidth = Math.Min(Width, width);
+        var copyHeight = Math.Min(Height, height);
+
+        for (var i = 0; i < layers.Count; i++)
+        {
+            var layer = layers[i];
+            var cells = new int[width * height];
+            Array.Fill(cells, LayerDefinition.EmptyCell);
+            for (var y = 0; y < copyHeight; y++)
+            {
+                for (var x = 0; x < copyWidth; x++)
+                    cells[y * width + x] = layer.Cells[y * Width + x];
+            }
+
+            layers[i] = new EditableLayer(layer.Name, layer.Collision, layer.ScrollSpeed, layer.Repeat, cells);
+        }
+
+        Width = width;
+        Height = height;
         return true;
     }
 

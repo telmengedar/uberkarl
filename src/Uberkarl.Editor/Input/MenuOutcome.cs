@@ -17,6 +17,9 @@ public enum MenuOutcomeKind
 
     /// <summary>Summon the layer-management panel (create/delete/reorder/property-edit layers).</summary>
     OpenLayerManager,
+
+    /// <summary>Summon the level-resize panel (set width/height — DiVoid #7550).</summary>
+    OpenResizePanel,
 }
 
 /// <summary>The file-lifecycle commands a menu can request; the controller maps these to its file IO.</summary>
@@ -78,4 +81,9 @@ public readonly struct MenuOutcome
     /// introduced for this — the "Manage…" wedge rides the existing Layers radial trigger.</summary>
     public static MenuOutcome OpenLayerManager() =>
         new(MenuOutcomeKind.OpenLayerManager, -1, default, default);
+
+    /// <summary>An outcome that summons the level-resize panel. No new <see cref="EditorAction"/> is
+    /// introduced for this either — the "Resize…" wedge rides the existing Actions radial trigger.</summary>
+    public static MenuOutcome OpenResizePanel() =>
+        new(MenuOutcomeKind.OpenResizePanel, -1, default, default);
 }

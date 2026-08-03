@@ -66,6 +66,7 @@ namespace Uberkarl {
         PopInMenu popIn;
         PackageBrowser packageBrowser;
         LayerManagerPanel layerManager;
+        LevelResizePanel resizePanel;
         OnScreenKeyboard textKeyboard;
         PlaytestOverlay playtestOverlay;
         // Tile/layer selection STATE persists here (the radials read it); the visible side-panel lists that
@@ -132,7 +133,7 @@ namespace Uberkarl {
             // control momentarily holds focus, so the cursor can never step underneath an open menu, the
             // browser, or a focused panel.
             canvas.DirectionalInputCaptured =
-                CursorInputGate.DirectionCaptured(popIn.IsOpen || packageBrowser.IsOpen || layerManager.IsOpen || textKeyboard.IsOpen, focusZone != FocusZone.Canvas);
+                CursorInputGate.DirectionCaptured(popIn.IsOpen || packageBrowser.IsOpen || layerManager.IsOpen || resizePanel.IsOpen || textKeyboard.IsOpen, focusZone != FocusZone.Canvas);
 
             tilesTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenTileMenu)), d);
             layersTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenLayerMenu)), d);
@@ -231,6 +232,7 @@ namespace Uberkarl {
                 new RadialMenuItem("Redo", MenuOutcome.Invoke(EditorAction.Redo)),
                 new RadialMenuItem("Tool", MenuOutcome.Invoke(EditorAction.ToggleTool)),
                 new RadialMenuItem("Play", MenuOutcome.Invoke(EditorAction.Playtest)),
+                new RadialMenuItem("Resize…", MenuOutcome.OpenResizePanel()),
             };
             return new RadialMenuModel("Actions", items);
         }
@@ -259,6 +261,9 @@ namespace Uberkarl {
                 case MenuOutcomeKind.OpenLayerManager:
                     SummonLayerManager();
                     break;
+                case MenuOutcomeKind.OpenResizePanel:
+                    SummonResizePanel();
+                    break;
             }
             EndMenu();
         }
@@ -267,6 +272,12 @@ namespace Uberkarl {
             if (session == null)
                 return;
             layerManager.Summon(session, activeLayerIndex);
+        }
+
+        void SummonResizePanel() {
+            if (session == null)
+                return;
+            resizePanel.Summon(session);
         }
 
         void InvokeMenuAction(EditorAction action) {
@@ -305,7 +316,7 @@ namespace Uberkarl {
             if (topBar == null)
                 return;
 
-            bool menuOpen = popIn.IsOpen || packageBrowser.IsOpen || layerManager.IsOpen || textKeyboard.IsOpen;
+            bool menuOpen = popIn.IsOpen || packageBrowser.IsOpen || layerManager.IsOpen || resizePanel.IsOpen || textKeyboard.IsOpen;
             Vector2 mouse = GetViewport().GetMousePosition();
             Control focus = GetViewport().GuiGetFocusOwner();
 
@@ -322,7 +333,7 @@ namespace Uberkarl {
         // focused Control claimed it. Guarded against key-repeat echo so a held key fires each action once.
         public override void _UnhandledInput(InputEvent @event) {
             if (Playtesting || @event.IsEcho() || (popIn != null && popIn.IsOpen) || (packageBrowser != null && packageBrowser.IsOpen) ||
-                (layerManager != null && layerManager.IsOpen) || (textKeyboard != null && textKeyboard.IsOpen))
+                (layerManager != null && layerManager.IsOpen) || (resizePanel != null && resizePanel.IsOpen) || (textKeyboard != null && textKeyboard.IsOpen))
                 return;
 
             if (Fired(@event, EditorAction.CycleTilePrev)) CycleTile(-1);
@@ -384,6 +395,11 @@ namespace Uberkarl {
             layerManager.Closed += OnLayerManagerClosed;
             layerManager.AttachKeyboard(textKeyboard);
             AddChild(layerManager);
+
+            resizePanel = new LevelResizePanel();
+            resizePanel.LevelModelChanged += OnLayerModelChanged; // same "refresh canvas + status from current model truth" refresh the layer panel uses
+            resizePanel.Closed += OnResizePanelClosed;
+            AddChild(resizePanel);
 
             // Added last so it draws on top of everything else while a run is live.
             playtestOverlay = new PlaytestOverlay();
@@ -563,6 +579,8 @@ namespace Uberkarl {
         }
 
         void OnLayerManagerClosed() => canvas?.GrabFocus();
+
+        void OnResizePanelClosed() => canvas?.GrabFocus();
 
         // ----- playtest -----
 
