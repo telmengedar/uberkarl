@@ -11,9 +11,10 @@ namespace Uberkarl {
     /// layer's collision flag, so a non-collision layer never blocks the player even when it places a
     /// solid tile. Draw order is the layer array order (back to front), independent of collision.
     /// A layer whose <c>ScrollSpeed != 1.0</c> or that opts into <c>Repeat</c> is wrapped in a
-    /// <see cref="Parallax2D"/> so it scrolls at that factor relative to the camera and, when
-    /// repeating, tiles across the scroll extent (repeat period = the layer's content size);
-    /// finite world-locked layers are added directly and move with the camera naturally.
+    /// <see cref="Parallax2D"/> so it scrolls at that factor relative to the camera on the X axis only
+    /// (Y stays world-locked — see <see cref="ScrollScaleFor"/>) and, when repeating, tiles across the
+    /// scroll extent (repeat period = the layer's content size); finite world-locked layers are added
+    /// directly and move with the camera naturally.
     /// </summary>
     public static class TileMapLevelBuilder {
 
@@ -87,13 +88,20 @@ namespace Uberkarl {
 
             Parallax2D parallax = new Parallax2D {
                 Name = layer.Name,
-                ScrollScale = new Vector2(layer.ScrollSpeed, layer.ScrollSpeed),
+                ScrollScale = ScrollScaleFor(layer.ScrollSpeed),
                 RepeatSize = layer.Repeat ? contentSize : Vector2.Zero,
             };
             mapLayer.Name = layer.Name + "Tiles";
             parallax.AddChild(mapLayer);
             return parallax;
         }
+
+        /// <summary>
+        /// Maps a layer's <c>ScrollSpeed</c> to a <see cref="Parallax2D.ScrollScale"/>: X scrolls at the
+        /// layer's speed, Y is always world-locked (1.0) — this is a side-scroller, so only horizontal
+        /// parallax is wanted (DiVoid #7528).
+        /// </summary>
+        public static Vector2 ScrollScaleFor(float scrollSpeed) => new Vector2(scrollSpeed, 1f);
 
         static BuiltTileSet BuildTileSet(ResolvedLevel level) {
             TileSet tileSet = new TileSet { TileSize = new Vector2I(level.TileSize, level.TileSize) };
