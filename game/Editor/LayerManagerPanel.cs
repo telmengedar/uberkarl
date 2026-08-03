@@ -28,11 +28,17 @@ namespace Uberkarl {
     /// confirm commits or <c>ui_cancel</c> reverts — see <see cref="ScrollStepper"/>. Delete requires a
     /// confirm press (layer ops are not undoable this increment, so an accidental delete would lose a
     /// whole painted layer).
+    ///
+    /// Each row also gets a <b>Rename</b> button (DiVoid #7513 — the proving ground for the reusable
+    /// on-screen keyboard): it summons the shared <see cref="OnScreenKeyboard"/> (attached via
+    /// <see cref="AttachKeyboard"/>) seeded with the layer's current name; Done applies the new name via
+    /// <see cref="LevelEditSession.RenameLayer"/>, Cancel leaves the model untouched.
     /// </summary>
     public partial class LayerManagerPanel : Control {
 
         LevelEditSession session;
         VBoxContainer listBox;
+        OnScreenKeyboard keyboard;
 
         int activeLayerIndex;
         int pendingDeleteIndex = -1;
@@ -82,6 +88,14 @@ namespace Uberkarl {
             listBox = new VBoxContainer();
             scroll.AddChild(listBox);
         }
+
+        /// <summary>
+        /// Attaches the shared <see cref="OnScreenKeyboard"/> the Rename button summons (DiVoid #7513).
+        /// Called once by <see cref="LevelEditor"/> alongside construction, exactly like the panel itself
+        /// is wired — the panel holds the reference and calls <see cref="OnScreenKeyboard.RequestText"/>
+        /// directly, the same way it already holds <c>session</c> and calls it directly.
+        /// </summary>
+        public void AttachKeyboard(OnScreenKeyboard onScreenKeyboard) => keyboard = onScreenKeyboard;
 
         /// <summary>Summon the panel against <paramref name="editSession"/>, highlighting <paramref name="activeLayer"/> as the current paint target.</summary>
         public void Summon(LevelEditSession editSession, int activeLayer) {
@@ -151,6 +165,11 @@ namespace Uberkarl {
             header.Pressed += () => OnHeaderPressed(index);
             row.AddChild(header);
             columns.Add(header);
+
+            Button renameButton = new Button { Text = "Rename" };
+            renameButton.Pressed += () => OnRenamePressed(index);
+            row.AddChild(renameButton);
+            columns.Add(renameButton);
 
             Button collisionToggle = new Button {
                 Text = layer.Collision ? "Collision: On" : "Collision: Off",
@@ -224,6 +243,27 @@ namespace Uberkarl {
             Rebuild();
         }
 
+        // Opens the shared keyboard seeded with the layer's current name (DiVoid #7513 — the proving ground
+        // for the on-screen keyboard). Nothing happens without a keyboard attached (defensive; LevelEditor
+        // always attaches one) or a session. Cancel simply never invokes the callback below — no model call
+        // to undo.
+        void OnRenamePressed(int index) {
+            if (session == null || keyboard == null)
+                return;
+
+            string currentName = session.Level.Layers[index].Name;
+            keyboard.RequestText($"Rename '{currentName}'", currentName, newName => ApplyRename(index, newName));
+        }
+
+        void ApplyRename(int index, string newName) {
+            LayerEditResult result = session.RenameLayer(index, newName);
+            if (result.Happened) {
+                GD.Print($"LayerManagerPanel: renamed layer {index} to '{newName}'.");
+                LayerModelChanged?.Invoke();
+            }
+            Rebuild();
+        }
+
         void OnCollisionPressed(int index, Button toggle) {
             pendingDeleteIndex = -1;
             LayerEditResult result = session.SetCollision(index, toggle.ButtonPressed);
@@ -287,7 +327,7 @@ namespace Uberkarl {
         }
 
         public override void _GuiInput(InputEvent @event) {
-            if (!Visible)
+            if (!Visible || (keyboard != null && keyboard.IsOpen))
                 return;
 
             if (@event.IsActionPressed("ui_cancel")) {
@@ -306,7 +346,7 @@ namespace Uberkarl {
         // it is mid-edit (exit edit mode without closing the panel), so this only ever sees ui_cancel that
         // was NOT claimed by an in-progress edit.
         public override void _UnhandledInput(InputEvent @event) {
-            if (!Visible || @event.IsEcho())
+            if (!Visible || @event.IsEcho() || (keyboard != null && keyboard.IsOpen))
                 return;
 
             if (@event.IsActionPressed("ui_cancel")) {

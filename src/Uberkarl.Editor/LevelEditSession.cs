@@ -145,6 +145,26 @@ public sealed class LevelEditSession
     }
 
     /// <summary>
+    /// Renames the layer at <paramref name="index"/> to <paramref name="name"/> (DiVoid #7513 — the
+    /// on-screen keyboard's proving ground). Blank/whitespace-only input is treated as a no-op (the
+    /// panel's rename affordance passes whatever the keyboard commits straight through — this is the one
+    /// place that guards against an author backing out to an empty buffer without hitting Cancel) rather
+    /// than throwing across the UI boundary, mirroring every other intent here. The name is trimmed before
+    /// being applied. Index-stable, so cell-edit history is preserved.
+    /// </summary>
+    public LayerEditResult RenameLayer(int index, string name)
+    {
+        LayerAt(index); // validates index; the layer itself is not needed — Level.RenameLayer re-resolves it
+        if (string.IsNullOrWhiteSpace(name))
+            return new LayerEditResult(false, index);
+
+        var happened = Level.RenameLayer(index, name.Trim());
+        if (happened)
+            IsDirty = true;
+        return new LayerEditResult(happened, index);
+    }
+
+    /// <summary>
     /// Sets the collision flag on the layer at <paramref name="index"/>. Collision is dominant: turning
     /// it on coerces scroll speed to 1.0 and repeat to off (<see cref="LayerPropertyRules"/>). Always
     /// reachable (this is the control that governs whether scroll/repeat are editable at all).

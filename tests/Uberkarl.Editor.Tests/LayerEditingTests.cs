@@ -269,6 +269,46 @@ public sealed class LayerEditingTests
     }
 
     [Test]
+    public void RenameLayer_ReplacesName_PreservingEveryOtherPropertyAndCellsArray()
+    {
+        var level = SampleLevel();
+        var cellsBefore = level.Layers[0].Cells;
+
+        var happened = level.RenameLayer(0, "backdrop");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(happened, Is.True);
+            Assert.That(level.Layers[0].Name, Is.EqualTo("backdrop"));
+            Assert.That(level.Layers[0].Collision, Is.True);
+            Assert.That(level.Layers[0].ScrollSpeed, Is.EqualTo(1.0f));
+            Assert.That(level.Layers[0].Repeat, Is.False);
+            Assert.That(level.Layers[0].Cells, Is.SameAs(cellsBefore), "the Cells array must be reused, not copied.");
+        });
+    }
+
+    [Test]
+    public void RenameLayer_SameName_IsNoOp()
+    {
+        var level = SampleLevel(); // layer 0 is named "terrain"
+        Assert.That(level.RenameLayer(0, "terrain"), Is.False);
+    }
+
+    [Test]
+    public void RenameLayer_OutOfRangeIndex_Throws()
+    {
+        var level = SampleLevel();
+        Assert.Throws<ArgumentOutOfRangeException>(() => level.RenameLayer(5, "x"));
+    }
+
+    [Test]
+    public void RenameLayer_EmptyName_Throws()
+    {
+        var level = SampleLevel();
+        Assert.Throws<ArgumentException>(() => level.RenameLayer(0, ""));
+    }
+
+    [Test]
     public void SetLayerProperties_CoercesAndReplacesInstance_PreservingCellsArray()
     {
         var level = SampleLevel();
@@ -488,6 +528,49 @@ public sealed class LayerEditingTests
             Assert.That(session.Level.Layers[0].Repeat, Is.False);
             Assert.That(session.IsDirty, Is.False);
         });
+    }
+
+    [Test]
+    public void Session_RenameLayer_AppliesTrimmedName_IndexStable_PreservesHistory_MarksDirty()
+    {
+        var session = new LevelEditSession(SampleLevel());
+        session.PaintCell(0, 0, 0, 1);
+        Assert.That(session.CanUndo, Is.True);
+
+        var result = session.RenameLayer(0, "  backdrop  ");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Happened, Is.True);
+            Assert.That(result.LayerIndex, Is.EqualTo(0));
+            Assert.That(session.Level.Layers[0].Name, Is.EqualTo("backdrop"), "the name must be trimmed.");
+            Assert.That(session.CanUndo, Is.True, "rename is index-stable — cell-edit history must survive.");
+            Assert.That(session.IsDirty, Is.True);
+        });
+    }
+
+    [Test]
+    public void Session_RenameLayer_BlankOrWhitespaceOnly_IsNoOp_DoesNotMarkDirty()
+    {
+        var session = new LevelEditSession(SampleLevel());
+
+        var blankResult = session.RenameLayer(0, "");
+        var whitespaceResult = session.RenameLayer(0, "   ");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(blankResult.Happened, Is.False);
+            Assert.That(whitespaceResult.Happened, Is.False);
+            Assert.That(session.Level.Layers[0].Name, Is.EqualTo("terrain"));
+            Assert.That(session.IsDirty, Is.False);
+        });
+    }
+
+    [Test]
+    public void Session_RenameLayer_OutOfRangeIndex_Throws()
+    {
+        var session = new LevelEditSession(SampleLevel());
+        Assert.Throws<ArgumentOutOfRangeException>(() => session.RenameLayer(5, "x"));
     }
 
     [Test]
