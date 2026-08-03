@@ -192,6 +192,28 @@ public sealed class EditableLevel
     }
 
     /// <summary>
+    /// Renames the layer at <paramref name="index"/> (DiVoid #7513 — layer rename, the first consumer of
+    /// the on-screen keyboard). Replaces the <see cref="EditableLayer"/> instance but reuses its
+    /// <c>Cells</c> array and every other property unchanged, exactly like <see cref="SetLayerProperties"/>
+    /// — index-stable, so recorded cell-edit history survives a rename. Returns <c>false</c> (no-op) when
+    /// <paramref name="name"/> equals the layer's current name (ordinal comparison).
+    /// </summary>
+    public bool RenameLayer(int index, string name)
+    {
+        if (index < 0 || index >= layers.Count)
+            throw new ArgumentOutOfRangeException(nameof(index));
+        if (string.IsNullOrEmpty(name))
+            throw new ArgumentException("Layer name must not be empty.", nameof(name));
+
+        var current = layers[index];
+        if (string.Equals(current.Name, name, StringComparison.Ordinal))
+            return false;
+
+        layers[index] = new EditableLayer(name, current.Collision, current.ScrollSpeed, current.Repeat, current.Cells);
+        return true;
+    }
+
+    /// <summary>
     /// Sets the layer at <paramref name="index"/>'s properties, coerced through
     /// <see cref="LayerPropertyRules"/>. Replaces the <see cref="EditableLayer"/> instance but reuses its
     /// <c>Cells</c> array unchanged, so recorded cell-edit commands (which re-resolve

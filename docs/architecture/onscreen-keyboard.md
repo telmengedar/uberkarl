@@ -1,0 +1,254 @@
+# Architectural Document: Gamepad On-Screen Keyboard + Layer Rename
+
+Source task: DiVoid #7513 · Project #7396 (Uberkarl) · Depends on: layer editing #7501/#7502 (PR #16, `FocusGrid`/`LayerManagerPanel`), editor input architecture #7440 (PR #9) · Unblocks: Save-As naming #7552, tile naming #7551 · Vision #7407.
+
+Status: implemented on `feat/onscreen-keyboard`. This document is committed alongside the implementation (the "design-doc-as-deliverable" convention this repo already follows for layer editing / package browser / editor input).
+
+---
+
+## 1. Problem Statement
+
+Toni's playtest of the layer manager (DiVoid #7513, verbatim):
+
+> *"renaming a layer per gamepad is also just not possible... We probably need some virtual keyboard or
+> so anyways if godot provides this, else putting in names (level names in package aswell) would be
+> impossible with gamepad."*
+
+Every "author types a name" flow in this editor is gamepad-blocked today: layer rename was explicitly
+deferred at the layer-editing increment for exactly this reason ("rename itself is deferred — it needs
+gamepad text entry, exactly like Save-As naming" — `LayerNaming.cs`), and the same gap blocks Save-As
+naming (#7552) and future tile naming (#7551). Godot's own `DisplayServer.virtual_keyboard_show` is
+**mobile-only** — it does nothing on desktop, which is this project's target platform — so there is no
+OS-provided fallback. The fix has to be a **custom in-engine on-screen keyboard**, built once as a
+reusable primitive, with layer rename as the first real caller (the visible proof it works end to end).
+
+**Success criteria.**
+- A gamepad-navigable on-screen keyboard: a character grid navigated by D-pad/stick, `ui_accept` types
+  the focused key, Backspace/Space/Shift/Done/Cancel all present.
+- Physical keyboard **and** mouse also work — three input paths into the same buffer, not just gamepad.
+- A reusable `RequestText(prompt, initial, onCommit)`-style API any future caller can summon without
+  knowing anything about layers.
+- Layer rename, wired through it, as the proof: open from the layer manager, seeded with the current
+  name, Done applies it and it persists on save, Cancel discards.
+
+## 2. Scope & Non-Scope
+
+**In scope**
+- The on-screen keyboard component (`game/Editor/OnScreenKeyboard.cs`) and its engine-agnostic core
+  (`src/Uberkarl.Editor/Input`: `TextEntryEditor`, `KeyboardKey`, `OnScreenKeyboardLayout`).
+- A **Rename** affordance on each layer row in `LayerManagerPanel`, wired end to end to
+  `LevelEditSession.RenameLayer`/`EditableLevel.RenameLayer`.
+- Gamepad, physical keyboard, and mouse all typing into the same buffer.
+
+**Explicitly out of scope**
+- Wiring the keyboard into Save-As (#7552) or tile naming (#7551) — the task is the reusable primitive
+  plus **one** proof, not every consumer. Both are now unblocked and can adopt it directly.
+- Any layout beyond a simple, reasonable character grid (no configurable layouts, no IME/composition, no
+  clipboard, no interior-cursor/arrow-key text editing — a rename/filename buffer only ever needs
+  insert-at-end + backspace, per the "keep it simple" mandate).
+- Name-uniqueness validation on rename (layer names are plain labels; nothing else keys off them).
+
+## 3. Assumptions & Constraints
+
+| # | Assumption / Constraint | Confidence |
+|---|---|---|
+| A1 | `DisplayServer.virtual_keyboard_show` is mobile-only; desktop needs a custom in-engine keyboard. | Verified against Godot docs. |
+| A2 | The proven summoned-window pattern (dim backdrop, centered panel, focus-contained grid, `ui_accept`/`ui_cancel`, `ZIndex` above the canvas) from `PackageBrowser`/`LayerManagerPanel` is the right vehicle here too. | High — same shape reused verbatim. |
+| A3 | `FocusGrid` (built for the layer panel, DiVoid #7512) generalizes directly to the keyboard's character grid — it already handles ragged row widths, which the keyboard needs (digit/letter/symbol/action rows differ in length). | Verified in code (`FocusGrid.Contain`). |
+| A4 | A physical key's `Unicode` field is already correctly cased/shifted by the OS — the on-screen Shift/Caps toggle is a *separate* input path (mouse/gamepad/keyboard activating a grid key), not something physical typing needs to consult. | Verified against Godot's `InputEventKey`. |
+| C1 | No new `EditorAction`/input-map churn — the keyboard rides the existing `ui_accept`/`ui_cancel` bindings exactly as every other summoned panel does (input-map churn is a known bug magnet per #7449/#7466). | High. |
+
+## 4. Architectural Overview
+
+```
+  LayerManagerPanel "Rename" button (per row)
+        │
+        ▼
+  OnScreenKeyboard.RequestText(prompt, currentName, onCommit)   [game/Editor — Godot Control, summoned]
+        │  grid keys → TextEntryEditor.Type/Insert/Backspace
+        │  Done → editor.Commit() → onCommit(text); Cancel → editor.Cancel() (discarded, no callback)
+        ▼
+  onCommit callback (owned by the caller, here LayerManagerPanel.ApplyRename)
+        │
+        ▼
+  LevelEditSession.RenameLayer(index, name)                      [src/Uberkarl.Editor — engine-agnostic]
+        │
+        ▼
+  EditableLevel.RenameLayer(index, name)  — replaces the EditableLayer instance, reuses Cells array
+        │
+        ▼
+  LayerModelChanged event → LevelEditor re-snapshots canvas + status  (existing refresh path, unchanged)
+        │ on Save (existing path, unchanged)
+        ▼
+  EditableLevelWriter → .pkg → reload reproduces the new name
+```
+
+Below `OnScreenKeyboard`, everything is either pure data/logic (`TextEntryEditor`, `KeyboardKey`,
+`OnScreenKeyboardLayout` in `src/Uberkarl.Editor/Input`, no Godot dependency) or an existing, unchanged
+seam (`LevelEditSession`'s intent pattern, the `LayerModelChanged` refresh path, the save/load round-trip).
+The keyboard itself carries **no domain knowledge** — it does not know it is renaming a layer; it only
+knows a prompt, an initial string, and a callback, exactly per the `RequestText(prompt, initial,
+onCommit)` shape requested.
+
+## 5. Components & Responsibilities
+
+### 5.1 `TextEntryEditor` — pure text buffer + caps state (NEW, `src/Uberkarl.Editor/Input`)
+- **Owns:** a mutable buffer seeded from an initial string, plus a `CapsActive` flag.
+- **Does:** `Insert(char)` (literal append — the physical-keyboard and Space path), `Type(normal,
+  shifted)` (append one or the other per `CapsActive` — the on-screen character-key path, shared by
+  letters and the digit row's symbol variants), `Backspace()` (no-op-safe), `ToggleCaps()`, `Commit()`
+  (returns the buffer) / `Cancel()` (returns the original, untouched string) — mirrors
+  `SteppedValueEditor<T>`'s enter/commit/cancel shape, the established convention for a summoned-panel
+  edit-in-progress value in this codebase.
+- **Does NOT own:** any Godot type, any layout/grid knowledge, any notion of what the text is *for*.
+
+### 5.2 `KeyboardKey` / `OnScreenKeyboardLayout` — pure grid data (NEW, `src/Uberkarl.Editor/Input`)
+- **Owns:** the fixed character grid — a digit row (with shifted symbol variants `!@#$%^&*()`), three
+  QWERTY letter rows, a small punctuation row (`-.,'` / `_:;"`), and the five-key action row (Shift,
+  Space, Backspace, Cancel, Done).
+- **Does:** expose `Rows` as `IReadOnlyList<IReadOnlyList<KeyboardKey>>` — plain data, so the grid shape,
+  the letter coverage, and the shift-display rule are unit-tested without Godot.
+- **Does NOT own:** rendering, input routing, or focus wiring (the Godot glue's job).
+
+### 5.3 `OnScreenKeyboard` — the surface (NEW, `game/Editor`, Godot `Control`)
+- **Owns:** presentation and input routing only; holds no domain logic.
+- **Reuses:** the `PackageBrowser`/`LayerManagerPanel` scaffolding verbatim (full-rect dim backdrop,
+  centered panel, grab-focus-on-summon, `ui_cancel` closes, `ZIndex` above both existing panels since it
+  can be summoned on top of either) and `FocusGrid.Contain` for the character grid's spatial navigation
+  (up/down = same column in the row above/below, left/right = within the row, every edge pinned to
+  itself), exactly as `LayerManagerPanel` already does.
+- **`RequestText(prompt, initialText, onCommit)`:** the entire public surface. Captures whatever control
+  currently holds focus (`GetViewport().GuiGetFocusOwner()`) and restores it on close — so any caller,
+  present or future, gets focus handled for free without wiring a `Closed` event itself.
+- **Three input paths into the same buffer:**
+  1. **Gamepad/keyboard grid navigation:** `FocusGrid` moves focus; `ui_accept` fires the focused key's
+     `Button.Pressed` — identical code path regardless of which device triggered it (mouse click,
+     gamepad A, or a physical Enter/Space), exactly like every other summoned-panel key in this editor.
+  2. **Mouse:** a `Button` click is a `Button` click; no special-casing needed.
+  3. **Physical keyboard, typing directly:** `_UnhandledInput` reads raw `InputEventKey.Unicode` (and
+     `Key.Backspace`) independent of which grid key currently has focus, calling `Insert` directly —
+     bypassing `Type`/`CapsActive` entirely, since a real Shift key already produces the correctly-cased
+     Unicode character at the OS level (A4).
+- **Accepted nuance (documented, not a bug):** Space and Enter are already bound project-wide to
+  `ui_accept` (`project.godot`), so while a grid key holds focus, physically pressing either activates
+  *that* focused key (same as a gamepad A-button or mouse click) rather than unconditionally typing a
+  space or committing. This is consistent with how `ui_accept` already means "activate whatever is
+  focused" everywhere else in this editor (C1 — no new binding, no special-cased override of that
+  convention). Backspace and the printable-character direct-typing path are unaffected and reliable
+  regardless of focus.
+
+### 5.4 `EditableLevel.RenameLayer` / `LevelEditSession.RenameLayer` (MODIFIED, `src/Uberkarl.Editor`)
+- **`EditableLevel.RenameLayer(index, name)`:** replaces the `EditableLayer` instance at `index`, reusing
+  its `Cells` array and every other property — the exact same instance-replacement shape
+  `SetLayerProperties` already uses, for the same reason (recorded cell-edit history re-resolves
+  `Layers[i].Cells` fresh each apply/revert, so reuse keeps it valid). No-op (`false`) when the name is
+  unchanged (ordinal compare); throws on an out-of-range index or an empty name (programmer-error guards,
+  matching `AppendLayer`'s existing contract).
+- **`LevelEditSession.RenameLayer(index, name)`:** the intent-level wrapper. Blank/whitespace-only input
+  is treated as a **no-op**, not an exception — the keyboard's Cancel path never calls this at all, but a
+  determined author backing a Done-committed buffer down to nothing should not crash the panel. The name
+  is trimmed before being applied. Index-stable (like every other property-set intent here), so cell-edit
+  history is preserved, and `IsDirty` is only set on an actual change.
+
+### 5.5 `LayerManagerPanel` (MODIFIED, `game/Editor`)
+- **Change:** each layer row gains a **Rename** button (in the `FocusGrid`, between the header and the
+  Collision toggle). `AttachKeyboard(OnScreenKeyboard)` — called once by `LevelEditor` alongside
+  construction, mirroring how the panel already holds `session` — gives the panel a reference it calls
+  directly (`keyboard.RequestText(...)`), exactly the same "the panel calls the collaborator directly, no
+  extra event" pattern the panel already uses for `session`.
+- **Rename flow:** press Rename → `keyboard.RequestText($"Rename '{currentName}'", currentName, name =>
+  ApplyRename(index, name))` → Done → `session.RenameLayer(index, name)` → on success, raise
+  `LayerModelChanged` (the existing canvas-refresh signal) and `Rebuild()` (refreshes the row label + the
+  focus-restore bookkeeping the panel already has for every other mutating button).
+- **Modal nesting:** the keyboard can be summoned *on top of* the already-summoned layer manager. The
+  panel's own `ui_cancel` handling (`_GuiInput`/`_UnhandledInput`) is guarded with `keyboard?.IsOpen !=
+  true` so cancelling the keyboard never also closes the panel underneath it — the same "the modal on top
+  owns input" discipline `LevelEditor` already applies to `popIn`/`packageBrowser`/`layerManager`.
+
+### 5.6 `LevelEditor` (MODIFIED, `game/Editor`)
+- **Change (minimal):** construct `OnScreenKeyboard`, attach it to `layerManager`, and OR
+  `textKeyboard.IsOpen` into the three existing modal guards (`CursorInputGate.DirectionCaptured(...)` in
+  `_Process`, the `menuOpen` check in `UpdateReveals`, the early-out in `_UnhandledInput`) — the exact same
+  three sites `layerManager.IsOpen` was added to when the layer manager itself shipped.
+
+## 6. Contracts & Interfaces (Abstract)
+
+### 6.1 `TextEntryEditor` (pure)
+| Member | Effect |
+|---|---|
+| `Insert(char)` | Appends the literal character (physical typing, Space). |
+| `Type(normal, shifted)` | Appends `shifted` if `CapsActive` else `normal` (on-screen character keys). |
+| `Backspace()` | Removes the last character; `false` no-op on empty. |
+| `ToggleCaps()` | Flips `CapsActive`. |
+| `Commit()` | Returns the current buffer. |
+| `Cancel()` | Returns the original (pre-edit) text, unchanged. |
+
+### 6.2 `OnScreenKeyboard` (Godot glue)
+| Member | Effect |
+|---|---|
+| `RequestText(prompt, initialText, onCommit)` | Summons the keyboard; `onCommit(finalText)` fires only on Done. |
+| `IsOpen` | True while summoned — the same modal-guard shape `PackageBrowser`/`LayerManagerPanel` expose. |
+
+### 6.3 `LevelEditSession.RenameLayer`
+| Input | Effect | History | Returns |
+|---|---|---|---|
+| `(index, name)` | Trims `name`; renames if changed | preserved (index-stable) | `LayerEditResult(happened, index)` |
+| blank/whitespace `name` | no-op | preserved | `Happened:false` |
+| out-of-range `index` | throws `ArgumentOutOfRangeException` | — | — |
+
+## 7. Cross-Cutting Concerns
+
+- **Focus containment.** The keyboard's grid uses the same `FocusGrid.Contain` + "every edge pins to
+  self" technique as the layer panel, so a stick/D-pad aim can never bounce focus off the keyboard onto
+  the layer panel or canvas underneath it.
+- **Modal stacking.** Three layers can now be open at once in the worst case (radial → layer manager →
+  keyboard). Each guards the one below it via the same `IsOpen` check pattern; `LevelEditor`'s three
+  guard sites gate on the topmost (`textKeyboard.IsOpen` is OR-ed in alongside the other two), so the
+  canvas cursor stays frozen and global hotkeys stay suppressed no matter how many modals are stacked.
+- **Persistence.** No schema change — rename only ever changes `EditableLayer.Name`, already round-tripped
+  by the existing writer/reader. Save → reload reproduces the new name exactly.
+- **Observability.** Rename prints a `GD.Print` line on success, matching every other layer-management
+  mutation's convention; a no-op rename (blank input, or Cancel) prints nothing.
+
+## 8. Verification Strategy
+
+**Authoring plane (editor scene, Godot MCP + gamepad/keyboard injection per #7407 method):**
+1. Summon the Layer Manager; press Rename on a row → keyboard opens seeded with the current name
+   (screenshot).
+2. Navigate the grid on **injected gamepad** (D-pad), type characters, Backspace, Done → the row shows
+   the new name (screenshot); confirm it persists through Save → reload.
+3. Rename again, Cancel this time → the name is unchanged.
+4. Confirm **physical-keyboard** direct typing into the buffer (a real key event, not `ui_accept` grid
+   navigation) also works.
+5. `get_editor_errors` clean.
+
+**Unit tests (`tests/Uberkarl.Editor.Tests`, no Godot):** `TextEntryEditor` (insert/backspace/caps
+toggle/`Type` under both caps states/commit/cancel/a full typing sequence), `KeyboardKey` (display text
+under both caps states, control-key kinds), `OnScreenKeyboardLayout` (row count, digit-row shiftability,
+full unique 26-letter coverage, the action row's exact kind order), and `EditableLevel.RenameLayer` /
+`LevelEditSession.RenameLayer` (rename applies + preserves other properties/Cells array, same-name no-op,
+out-of-range throws, blank/whitespace no-op, index-stable history preservation, dirty tracking).
+
+**Honest gate (per #7407):** the harness injects gamepad input via Godot MCP simulated actions — **real
+hardware-pad confirmation is Toni's**, stated explicitly, never claimed as "verified" by this agent.
+
+## 9. Risks & Mitigations
+
+| Risk | Impact | Mitigation |
+|---|---|---|
+| Modal-on-modal input leakage (keyboard over layer manager) | A cancel/accept meant for the keyboard also affects the panel underneath | `keyboard?.IsOpen` guard on the panel's own `ui_cancel` handling (§5.5); `LevelEditor`'s three existing guards extended with `textKeyboard.IsOpen`. |
+| Space/Enter ambiguity (grid-activate vs. literal space/commit) | Minor UX surprise for a physical-keyboard-only user | Documented as an accepted nuance (§5.3) — consistent with the project-wide `ui_accept` convention; Backspace and printable-character direct typing remain unambiguous and are the primary physical-keyboard path. |
+| Future callers (#7552/#7551) misuse `RequestText` assuming domain knowledge it doesn't have | Coupling creeps back into the primitive | `RequestText` takes only `(prompt, initialText, onCommit)` — no layer/tile/file awareness by construction; any domain logic lives in the caller's `onCommit`, exactly as `LayerManagerPanel.ApplyRename` demonstrates. |
+
+## 10. Open Questions for Toni
+
+1. **Layout shape.** QWERTY-ish with a digit row + small punctuation row was chosen for familiarity and to
+   keep the grid small (per "keep it simple"). Happy to revisit if a different arrangement reads better
+   on a real pad.
+2. **Save-As / tile-naming adoption timing (#7552/#7551).** Both can now call `RequestText` directly —
+   worth scheduling as the next two tasks, or fold in ad hoc as each is picked up?
+
+## 11. Changelog
+- v1.0 (2026-08-03) — initial implementation for #7513: `TextEntryEditor`/`KeyboardKey`/`OnScreenKeyboardLayout`
+  (engine-agnostic), `OnScreenKeyboard` (Godot glue), `EditableLevel.RenameLayer`/`LevelEditSession.RenameLayer`,
+  `LayerManagerPanel` Rename affordance.
