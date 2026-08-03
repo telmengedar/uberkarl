@@ -2,7 +2,36 @@
 
 Source task: DiVoid #7513 · Project #7396 (Uberkarl) · Depends on: layer editing #7501/#7502 (PR #16, `FocusGrid`/`LayerManagerPanel`), editor input architecture #7440 (PR #9) · Unblocks: Save-As naming #7552, tile naming #7551 · Vision #7407.
 
-Status: implemented on `feat/onscreen-keyboard`. This document is committed alongside the implementation (the "design-doc-as-deliverable" convention this repo already follows for layer editing / package browser / editor input).
+Status: initial increment merged via PR #19 (`feat/onscreen-keyboard` → `main`). This document is committed alongside the implementation (the "design-doc-as-deliverable" convention this repo already follows for layer editing / package browser / editor input).
+
+## 0. PR #19 follow-up (2026-08-03) — this branch, `fix/keyboard-rename-ux`
+
+Toni's playtest of PR #19: *"a good base aside from minor design... i expected to just select the name
+and something happening (because selecting the layer in layer management does not really make sense to
+me)."* Also: pressing physical Enter/Escape while the keyboard was open did not commit/cancel — it just
+activated whatever grid key happened to have focus. Two small refinements, no redesign:
+
+1. **Rename via the layer name, not a separate button.** §5.5's "Rename button" is gone. Activating a
+   row's header/name cell (`ui_accept` or a click) now opens the keyboard directly, seeded with the
+   current name. The header no longer sets the active layer — the Layers radial already owns that pick,
+   so inside this management panel the header cell is free to mean one thing only. `ActiveLayerChosen`
+   is now raised only by add/move/delete outcomes, never by a header press. The row's spatial-nav grid
+   shrinks from 8 columns to 7 (header, Collision, Scroll, Repeat, Move↑, Move↓, Delete) — `FocusGrid` is
+   unaffected, it's generic over row width.
+2. **Physical Enter commits, physical Escape cancels — regardless of focus.** New
+   `OnScreenKeyboardKeyRouter.Resolve(isEnter, isEscape)` (`src/Uberkarl.Editor/Input`, pure, unit-tested)
+   returns `Commit`/`Cancel`/`None`. `OnScreenKeyboard` now overrides `_Input` (which runs before Godot's
+   GUI dispatch) to intercept the raw `InputEventKey` for Enter/KpEnter/Escape and mark it handled before
+   a focused Button's own `ui_accept` handling would otherwise consume Enter and merely activate itself.
+   Only `InputEventKey` is inspected, so gamepad A (`InputEventJoypadButton`) and mouse clicks
+   (`InputEventMouseButton`) on a grid key are structurally unaffected — they still correctly TYPE that
+   key via the existing `OnKeyPressed` path. This retires the "accepted nuance" §5.3/§9 previously
+   documented (Space/Enter both activating the focused key) for Enter specifically; Space keeps that
+   behavior (out of scope — not raised by Toni).
+
+Both changes verified live via Godot MCP (§8, updated); `Uberkarl.Editor.Tests` 143 → 147 (+4, the router's
+Commit/Cancel/None/tie-break cases). No other files touched — no save/tileset/dimensions changes, per task
+scope.
 
 ---
 
@@ -61,12 +90,13 @@ reusable primitive, with layer rename as the first real caller (the visible proo
 ## 4. Architectural Overview
 
 ```
-  LayerManagerPanel "Rename" button (per row)
+  LayerManagerPanel row header/name cell (per row — the rename affordance itself, no separate button)
         │
         ▼
   OnScreenKeyboard.RequestText(prompt, currentName, onCommit)   [game/Editor — Godot Control, summoned]
-        │  grid keys → TextEntryEditor.Type/Insert/Backspace
-        │  Done → editor.Commit() → onCommit(text); Cancel → editor.Cancel() (discarded, no callback)
+        │  grid keys (gamepad A / mouse click) → TextEntryEditor.Type/Insert/Backspace
+        │  physical Enter → editor.Commit() → onCommit(text); physical Escape → editor.Cancel() (discarded)
+        │  on-screen Done/Cancel keys → same Commit/Cancel path
         ▼
   onCommit callback (owned by the caller, here LayerManagerPanel.ApplyRename)
         │
@@ -129,13 +159,15 @@ onCommit)` shape requested.
      `Key.Backspace`) independent of which grid key currently has focus, calling `Insert` directly —
      bypassing `Type`/`CapsActive` entirely, since a real Shift key already produces the correctly-cased
      Unicode character at the OS level (A4).
-- **Accepted nuance (documented, not a bug):** Space and Enter are already bound project-wide to
-  `ui_accept` (`project.godot`), so while a grid key holds focus, physically pressing either activates
-  *that* focused key (same as a gamepad A-button or mouse click) rather than unconditionally typing a
-  space or committing. This is consistent with how `ui_accept` already means "activate whatever is
-  focused" everywhere else in this editor (C1 — no new binding, no special-cased override of that
-  convention). Backspace and the printable-character direct-typing path are unaffected and reliable
-  regardless of focus.
+- **Physical Enter/Escape (added in the PR #19 follow-up, §0):** routed ahead of the three paths above,
+  in `_Input` (runs before Godot's GUI dispatch): physical Enter/Return always **commits**, physical
+  Escape always **cancels**, regardless of which grid key currently has focus. The decision is
+  `OnScreenKeyboardKeyRouter.Resolve(isEnter, isEscape)` — pure and unit-tested. This intentionally
+  overrides the "activate whatever is focused" convention for these two physical keys specifically,
+  because Toni's playtest read the old behavior as broken, not as an accepted nuance. Space is
+  unaffected — it still activates the focused grid key (same as a gamepad A-button or mouse click) — since
+  Toni's feedback was about Enter/Escape only and the "keep it simple" mandate rules out broadening scope
+  unasked.
 
 ### 5.4 `EditableLevel.RenameLayer` / `LevelEditSession.RenameLayer` (MODIFIED, `src/Uberkarl.Editor`)
 - **`EditableLevel.RenameLayer(index, name)`:** replaces the `EditableLayer` instance at `index`, reusing
@@ -151,15 +183,18 @@ onCommit)` shape requested.
   history is preserved, and `IsDirty` is only set on an actual change.
 
 ### 5.5 `LayerManagerPanel` (MODIFIED, `game/Editor`)
-- **Change:** each layer row gains a **Rename** button (in the `FocusGrid`, between the header and the
-  Collision toggle). `AttachKeyboard(OnScreenKeyboard)` — called once by `LevelEditor` alongside
-  construction, mirroring how the panel already holds `session` — gives the panel a reference it calls
-  directly (`keyboard.RequestText(...)`), exactly the same "the panel calls the collaborator directly, no
-  extra event" pattern the panel already uses for `session`.
-- **Rename flow:** press Rename → `keyboard.RequestText($"Rename '{currentName}'", currentName, name =>
-  ApplyRename(index, name))` → Done → `session.RenameLayer(index, name)` → on success, raise
-  `LayerModelChanged` (the existing canvas-refresh signal) and `Rebuild()` (refreshes the row label + the
-  focus-restore bookkeeping the panel already has for every other mutating button).
+- **Change (as of the PR #19 follow-up, §0):** the row's header/name cell itself is the rename affordance —
+  there is no separate Rename button. `AttachKeyboard(OnScreenKeyboard)` — called once by `LevelEditor`
+  alongside construction, mirroring how the panel already holds `session` — gives the panel a reference it
+  calls directly (`keyboard.RequestText(...)`), exactly the same "the panel calls the collaborator
+  directly, no extra event" pattern the panel already uses for `session`. Activating the header no longer
+  sets the active layer either — that selection is the Layers radial's job; `ActiveLayerChosen` is now
+  raised only by add/move/delete outcomes.
+- **Rename flow:** activate the header (`ui_accept` or a click) → `keyboard.RequestText($"Rename
+  '{currentName}'", currentName, name => ApplyRename(index, name))` → Done → `session.RenameLayer(index,
+  name)` → on success, raise `LayerModelChanged` (the existing canvas-refresh signal) and `Rebuild()`
+  (refreshes the row label + the focus-restore bookkeeping the panel already has for every other mutating
+  button).
 - **Modal nesting:** the keyboard can be summoned *on top of* the already-summoned layer manager. The
   panel's own `ui_cancel` handling (`_GuiInput`/`_UnhandledInput`) is guarded with `keyboard?.IsOpen !=
   true` so cancelling the keyboard never also closes the panel underneath it — the same "the modal on top
@@ -213,21 +248,24 @@ onCommit)` shape requested.
 ## 8. Verification Strategy
 
 **Authoring plane (editor scene, Godot MCP + gamepad/keyboard injection per #7407 method):**
-1. Summon the Layer Manager; press Rename on a row → keyboard opens seeded with the current name
-   (screenshot).
-2. Navigate the grid on **injected gamepad** (D-pad), type characters, Backspace, Done → the row shows
-   the new name (screenshot); confirm it persists through Save → reload.
-3. Rename again, Cancel this time → the name is unchanged.
-4. Confirm **physical-keyboard** direct typing into the buffer (a real key event, not `ui_accept` grid
-   navigation) also works.
-5. `get_editor_errors` clean.
+1. Summon the Layer Manager; activate a row's header/name (no separate Rename button any more) → keyboard
+   opens seeded with the current name (screenshot).
+2. Type via mouse click on a grid key (still types), Backspace (click), then physical Enter (raw
+   `InputEventKey`, not `ui_accept` grid activation) → commits regardless of which grid key had focus
+   (verified with focus left on the "1" digit key — the old bug would have appended "1"; instead the row
+   showed the typed name and printed the rename line).
+3. Reopen, type again, physical Escape → cancels; name unchanged, no additional rename print line.
+4. Gamepad-A-equivalent (`ui_accept` action) on a focused grid letter key still **types** that key (not
+   commit/cancel) — confirmed the buffer grew by that letter with the keyboard staying open.
+5. `get_editor_errors` clean (only the pre-existing MCP-harness `mcp_input_service.gd` key-lookup noise).
 
 **Unit tests (`tests/Uberkarl.Editor.Tests`, no Godot):** `TextEntryEditor` (insert/backspace/caps
 toggle/`Type` under both caps states/commit/cancel/a full typing sequence), `KeyboardKey` (display text
 under both caps states, control-key kinds), `OnScreenKeyboardLayout` (row count, digit-row shiftability,
-full unique 26-letter coverage, the action row's exact kind order), and `EditableLevel.RenameLayer` /
+full unique 26-letter coverage, the action row's exact kind order), `EditableLevel.RenameLayer` /
 `LevelEditSession.RenameLayer` (rename applies + preserves other properties/Cells array, same-name no-op,
-out-of-range throws, blank/whitespace no-op, index-stable history preservation, dirty tracking).
+out-of-range throws, blank/whitespace no-op, index-stable history preservation, dirty tracking), and (PR
+#19 follow-up) `OnScreenKeyboardKeyRouter` (Enter→Commit, Escape→Cancel, neither→None, both-set tie-break).
 
 **Honest gate (per #7407):** the harness injects gamepad input via Godot MCP simulated actions — **real
 hardware-pad confirmation is Toni's**, stated explicitly, never claimed as "verified" by this agent.
@@ -237,7 +275,8 @@ hardware-pad confirmation is Toni's**, stated explicitly, never claimed as "veri
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Modal-on-modal input leakage (keyboard over layer manager) | A cancel/accept meant for the keyboard also affects the panel underneath | `keyboard?.IsOpen` guard on the panel's own `ui_cancel` handling (§5.5); `LevelEditor`'s three existing guards extended with `textKeyboard.IsOpen`. |
-| Space/Enter ambiguity (grid-activate vs. literal space/commit) | Minor UX surprise for a physical-keyboard-only user | Documented as an accepted nuance (§5.3) — consistent with the project-wide `ui_accept` convention; Backspace and printable-character direct typing remain unambiguous and are the primary physical-keyboard path. |
+| Space ambiguity (grid-activate vs. literal space) | Minor UX surprise for a physical-keyboard-only user | Unchanged from the original increment — Toni's PR #19 feedback was about Enter/Escape only, so Space keeps activating the focused key; not broadened per "keep it simple." |
+| `_Input`-level Enter/Escape interception missing a future summoned-panel case | A later modal stacked on top of the keyboard could see Enter/Escape swallowed before it gets a look | Scoped to `OnScreenKeyboard._Input`, gated on `Visible` (`IsOpen`) — inert whenever the keyboard itself is not summoned, so it cannot affect any other panel's own input handling. |
 | Future callers (#7552/#7551) misuse `RequestText` assuming domain knowledge it doesn't have | Coupling creeps back into the primitive | `RequestText` takes only `(prompt, initialText, onCommit)` — no layer/tile/file awareness by construction; any domain logic lives in the caller's `onCommit`, exactly as `LayerManagerPanel.ApplyRename` demonstrates. |
 
 ## 10. Open Questions for Toni
@@ -249,6 +288,11 @@ hardware-pad confirmation is Toni's**, stated explicitly, never claimed as "veri
    worth scheduling as the next two tasks, or fold in ad hoc as each is picked up?
 
 ## 11. Changelog
-- v1.0 (2026-08-03) — initial implementation for #7513: `TextEntryEditor`/`KeyboardKey`/`OnScreenKeyboardLayout`
+- v1.0 (2026-08-03) — initial implementation for #7513, PR #19: `TextEntryEditor`/`KeyboardKey`/`OnScreenKeyboardLayout`
   (engine-agnostic), `OnScreenKeyboard` (Godot glue), `EditableLevel.RenameLayer`/`LevelEditSession.RenameLayer`,
-  `LayerManagerPanel` Rename affordance.
+  `LayerManagerPanel` Rename button.
+- v1.1 (2026-08-03) — PR #19 playtest follow-up (`fix/keyboard-rename-ux`): rename via the row's header/name
+  cell instead of a separate Rename button (`ActiveLayerChosen` no longer raised by a header press);
+  `OnScreenKeyboardKeyRouter` (new, engine-agnostic) + `OnScreenKeyboard._Input` route physical Enter to
+  commit and physical Escape to cancel regardless of grid-key focus, while gamepad A / mouse click on a
+  grid key still type it.

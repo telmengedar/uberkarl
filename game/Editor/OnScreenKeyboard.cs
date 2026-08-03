@@ -21,19 +21,26 @@ namespace Uberkarl {
     ///
     /// Three input paths, all live simultaneously:
     /// <list type="bullet">
-    /// <item>Gamepad/keyboard: <see cref="FocusGrid"/> navigates the grid, <c>ui_accept</c> activates the
-    /// focused key (mirrors every other summoned panel — Button.Pressed fires identically regardless of
-    /// which device triggered it).</item>
+    /// <item>Gamepad/keyboard grid navigation: <see cref="FocusGrid"/> navigates the grid, <c>ui_accept</c>
+    /// activates the focused key (mirrors every other summoned panel — Button.Pressed fires identically
+    /// regardless of which device triggered it: gamepad A or a mouse click on a grid key both correctly TYPE
+    /// that key).</item>
     /// <item>Mouse: a Button click is a Button click — no special-casing needed.</item>
     /// <item>Physical keyboard, typing directly: <see cref="_UnhandledInput"/> reads raw <c>InputEventKey</c>
     /// Unicode/Backspace, independent of which grid key currently has focus. A real key's Unicode is already
     /// correctly cased by the OS, so this bypasses <see cref="TextEntryEditor.Type"/>/<see cref="TextEntryEditor.CapsActive"/>
-    /// entirely — those exist only for the on-screen Shift key. One accepted nuance: Space and Enter are
-    /// already bound project-wide to <c>ui_accept</c>, so while a grid key has focus, physically pressing
-    /// either activates that focused key (same as a gamepad A-button or a mouse click would) rather than
-    /// unconditionally typing a space/committing — consistent with how every other summoned panel in this
-    /// editor treats <c>ui_accept</c> as "activate whatever is focused."</item>
+    /// entirely — those exist only for the on-screen Shift key.</item>
     /// </list>
+    /// <b>Physical Enter/Return, Escape, and Space</b> (PR #19 playtest feedback, plus a Space follow-up) are
+    /// the exceptions routed ahead of all three paths above, in <see cref="_Input"/>: Enter/Return always
+    /// <b>commits</b> the whole buffer, Escape always <b>cancels</b> it, and Space always <b>inserts a literal
+    /// space</b> into the buffer, regardless of which grid key currently has focus — not "activate whatever's
+    /// focused," the way gamepad A/mouse click on a grid key correctly still behaves. Godot's own
+    /// <c>ui_accept</c> binding includes both Enter and Space (so a focused Button would otherwise consume it
+    /// first and merely activate itself); <see cref="_Input"/> runs before Godot's GUI dispatch, so
+    /// intercepting the raw <c>InputEventKey</c> there and marking it handled pre-empts that. The
+    /// commit/cancel/insert-space decision itself is <see cref="OnScreenKeyboardKeyRouter.Resolve"/>, a pure,
+    /// engine-agnostic function unit-tested without Godot.
     /// </summary>
     public partial class OnScreenKeyboard : Control {
 
@@ -195,12 +202,56 @@ namespace Uberkarl {
             focusToRestore = null;
         }
 
+        // Physical Enter/Return → commit, physical Escape → cancel (PR #19 playtest feedback), physical
+        // Space → insert a literal space (DiVoid #7513 follow-up) — all regardless of which grid key
+        // currently has focus. Must run in _Input, NOT _UnhandledInput: Godot's GUI dispatch (which happens
+        // between _Input and _UnhandledInput) lets a focused Button consume ui_accept itself first — Enter
+        // AND Space are both bound to ui_accept project-wide, so by the time _UnhandledInput would see them,
+        // the focused Button has already "activated" (typed/toggled/etc.) instead of committing/inserting a
+        // space. Without this interception, physical Space both typed a space (via _UnhandledInput's Unicode
+        // path below) AND activated the focused grid key — Godot's GUI dispatch consuming ui_accept does not
+        // set the viewport's "handled" flag that _UnhandledInput checks, so both fired. Intercepting the raw
+        // InputEventKey here, before that GUI dispatch, and marking it handled pre-empts the Button entirely.
+        // Only InputEventKey is inspected, so this can never fire for a gamepad A-button (an
+        // InputEventJoypadButton) or a mouse click (an InputEventMouseButton) — both of those still
+        // correctly TYPE the focused grid key via OnKeyPressed (including the on-screen Space key), unaffected.
+        // Escape is routed the same way, through the same OnScreenKeyboardKeyRouter decision, even though it
+        // also happens to fall through to _UnhandledInput's own ui_cancel check below (Buttons never consume
+        // ui_cancel) — handling it here keeps all three routed physical keys next to each other and behind
+        // one engine-agnostic, unit-tested rule.
+        public override void _Input(InputEvent @event) {
+            if (!Visible || @event.IsEcho() || @event is not InputEventKey key || !key.Pressed)
+                return;
+
+            OnScreenKeyboardCommand command = OnScreenKeyboardKeyRouter.Resolve(
+                isEnter: key.Keycode == Key.Enter || key.Keycode == Key.KpEnter,
+                isEscape: key.Keycode == Key.Escape,
+                isSpace: key.Keycode == Key.Space);
+
+            switch (command) {
+                case OnScreenKeyboardCommand.Commit:
+                    Commit();
+                    GetViewport().SetInputAsHandled();
+                    break;
+                case OnScreenKeyboardCommand.Cancel:
+                    CancelEntry();
+                    GetViewport().SetInputAsHandled();
+                    break;
+                case OnScreenKeyboardCommand.InsertSpace:
+                    editor.Insert(' ');
+                    RefreshBuffer();
+                    GetViewport().SetInputAsHandled();
+                    break;
+            }
+        }
+
         // Physical keyboard: type directly into the buffer, independent of which grid key has focus. Only
         // Backspace and printable Unicode are claimed here — everything else (arrows/ui_accept) is left to
         // the normal focus/Button dispatch so grid navigation keeps working unimpeded. ui_cancel is handled
-        // here too (belt-and-suspenders, same as LayerManagerPanel/PackageBrowser): a Button, not the panel,
-        // almost always holds focus, so a gamepad B / Escape press never reaches _GuiInput below — it falls
-        // through to unhandled input, where this closes the keyboard without committing.
+        // here too (belt-and-suspenders, same as LayerManagerPanel/PackageBrowser): this is the path a
+        // gamepad B press falls through to (Buttons never consume ui_cancel); a physical Escape is normally
+        // already intercepted earlier by _Input above, so by the time it would reach here it is already
+        // marked handled and this branch is effectively gamepad-B-only in practice.
         public override void _UnhandledInput(InputEvent @event) {
             if (!Visible || @event.IsEcho())
                 return;

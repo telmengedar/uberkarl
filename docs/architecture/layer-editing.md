@@ -207,7 +207,7 @@ Invariants of the contract: every method is a **no-op-safe intent** (invalid/blo
 | Direction | Signal | Payload | Semantics |
 |---|---|---|---|
 | panel → controller | LayerModelChanged | (none) | "I mutated the model; refresh canvas + reconcile active layer + status." |
-| panel → controller | ActiveLayerChosen | layer index | author picked a layer to paint on (parity with the Layers radial pick). |
+| panel → controller | ActiveLayerChosen | layer index | a mutation (add/move/delete) left a different layer active (parity with the Layers radial pick). As of the on-screen-keyboard follow-up (DiVoid #7513, PR #19 feedback), a header/name press no longer raises this itself — that press now opens the rename keyboard instead; picking the active layer to paint on stays the Layers radial's job. |
 | panel → controller | Closed | (none) | dismissed; return focus to canvas. |
 
 The panel calls the session directly for mutations (it holds the session reference, as the browser holds the source); it raises `LayerModelChanged` so the controller owns the canvas rebuild — the panel never touches the canvas or the builder.

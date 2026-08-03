@@ -29,10 +29,12 @@ namespace Uberkarl {
     /// confirm press (layer ops are not undoable this increment, so an accidental delete would lose a
     /// whole painted layer).
     ///
-    /// Each row also gets a <b>Rename</b> button (DiVoid #7513 — the proving ground for the reusable
-    /// on-screen keyboard): it summons the shared <see cref="OnScreenKeyboard"/> (attached via
-    /// <see cref="AttachKeyboard"/>) seeded with the layer's current name; Done applies the new name via
-    /// <see cref="LevelEditSession.RenameLayer"/>, Cancel leaves the model untouched.
+    /// Activating a row's header/name cell (<c>ui_accept</c> or a click — DiVoid #7513 for the keyboard,
+    /// Toni's PR #19 playtest feedback for this wiring) summons the shared <see cref="OnScreenKeyboard"/>
+    /// (attached via <see cref="AttachKeyboard"/>) seeded with the layer's current name; Done applies the
+    /// new name via <see cref="LevelEditSession.RenameLayer"/>, Cancel leaves the model untouched. There is
+    /// no separate Rename button: picking the active layer to paint on is already the Layers radial's job,
+    /// so inside this management panel the header/name cell is free to mean exactly one thing.
     /// </summary>
     public partial class LayerManagerPanel : Control {
 
@@ -48,7 +50,7 @@ namespace Uberkarl {
         /// <summary>Raised after any mutation (add/delete/move/property-set): "refresh the canvas + status."</summary>
         public event Action LayerModelChanged;
 
-        /// <summary>Raised when the author picks a layer to paint on (a header press, or the layer a reorder/add/delete leaves active) — parity with the Layers radial pick.</summary>
+        /// <summary>Raised when a mutation (add/move/delete) leaves a different layer active — parity with the Layers radial pick. The header/name cell no longer raises this itself (PR #19 feedback): picking the active layer is the Layers radial's job, not this management panel's.</summary>
         public event Action<int> ActiveLayerChosen;
 
         /// <summary>Raised when the panel is dismissed (<c>ui_cancel</c>).</summary>
@@ -162,14 +164,9 @@ namespace Uberkarl {
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
             };
             header.AddThemeColorOverride("font_color", index == activeLayerIndex ? EditorTheme.Accent : EditorTheme.Text);
-            header.Pressed += () => OnHeaderPressed(index);
+            header.Pressed += () => OnRenamePressed(index);
             row.AddChild(header);
             columns.Add(header);
-
-            Button renameButton = new Button { Text = "Rename" };
-            renameButton.Pressed += () => OnRenamePressed(index);
-            row.AddChild(renameButton);
-            columns.Add(renameButton);
 
             Button collisionToggle = new Button {
                 Text = layer.Collision ? "Collision: On" : "Collision: Off",
@@ -236,21 +233,17 @@ namespace Uberkarl {
             Rebuild();
         }
 
-        void OnHeaderPressed(int index) {
-            pendingDeleteIndex = -1;
-            activeLayerIndex = index;
-            ActiveLayerChosen?.Invoke(index);
-            Rebuild();
-        }
-
-        // Opens the shared keyboard seeded with the layer's current name (DiVoid #7513 — the proving ground
-        // for the on-screen keyboard). Nothing happens without a keyboard attached (defensive; LevelEditor
-        // always attaches one) or a session. Cancel simply never invokes the callback below — no model call
-        // to undo.
+        // The row's header/name cell (DiVoid #7513 for the keyboard itself; PR #19 playtest feedback for
+        // wiring it here instead of a separate Rename button) opens the shared keyboard seeded with the
+        // layer's current name. It intentionally does NOT set the active layer any more — that's the Layers
+        // radial's job, per Toni: "selecting the layer in layer management does not really make sense to
+        // me." Nothing happens without a keyboard attached (defensive; LevelEditor always attaches one) or a
+        // session. Cancel simply never invokes the callback below — no model call to undo.
         void OnRenamePressed(int index) {
             if (session == null || keyboard == null)
                 return;
 
+            pendingDeleteIndex = -1;
             string currentName = session.Level.Layers[index].Name;
             keyboard.RequestText($"Rename '{currentName}'", currentName, newName => ApplyRename(index, newName));
         }
