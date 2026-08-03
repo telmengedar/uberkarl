@@ -320,5 +320,32 @@ Ordered milestones. **No code in this document — these are architectural build
 
 Suggested chain: **john-backend-dev** for M1–M4 (engine-agnostic `src/` core + tests), then M5–M6 (`game/` glue), then M7 (Godot-MCP verify) — or split M5–M6 to a Godot-facing implementer — then **jenny-qa-reviewer**.
 
+## 16. Addendum: gamepad input-model fix (DiVoid #7512)
+
+Toni's playtest of the shipped panel (PR #15) found the focus model unnatural: *"up/down always goes to
+the next element (which is right and left on a row), right and left changes values — the natural way
+would be that direction chooses the element which is in that direction and changing a value i have to
+press a button and then left/right does something, pressing button again confirms value."* Two fixes,
+scoped to `LayerManagerPanel` only (§14's noted package-browser adoption stays future work):
+
+- **Spatial (2D) focus navigation.** The panel's rows are now wired as a real grid (`game/Editor/FocusGrid.cs`,
+  a small reusable static helper): up/down moves to the same column in the row above/below, left/right
+  moves within the row, and every grid edge pins to itself (focus stays contained in the panel — the
+  round-2 fix from §9.6–9.7 is unaffected). This replaces the old flat vertical chain that made up/down
+  walk through every control of a row before advancing.
+- **Enter-edit-mode for the Scroll stepper.** The stepper no longer consumes left/right just because it is
+  focused. `ui_accept` enters edit mode (visually highlighted) starting from the committed value; while
+  editing, left/right step a *local* pending value through `ScrollSpeedLadder` — the session/model is
+  untouched — and a second `ui_accept` commits it via the new `LevelEditSession.SetScrollSpeed(index, value)`
+  absolute setter (`StepScrollSpeed`'s relative ladder step is unchanged and still used elsewhere/by tests).
+  `ui_cancel` while editing discards the pending value and exits with no model call at all — cancel needs no
+  revert precisely because nothing was touched during the edit. Collision/Repeat stay single-press `ui_accept`
+  toggles, unaffected.
+- **Reusable state machine.** The enter/adjust/commit/cancel logic is `SteppedValueEditor<T>`
+  (`src/Uberkarl.Editor/Input/SteppedValueEditor.cs`), engine-agnostic and unit-tested without Godot —
+  generic over the stepped value type and the step function, so a future value-adjusting control (the
+  package browser, #7470) can reuse it without depending on `LayerManagerPanel`.
+
 ## 15. Changelog
+- v1.1 (2026-08-03) — gamepad input-model fix for #7512: spatial focus grid + Scroll-stepper edit mode.
 - v1.0 (2026-08-02) — initial design for #7501.

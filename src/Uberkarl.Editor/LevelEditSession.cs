@@ -179,6 +179,27 @@ public sealed class LevelEditSession
     }
 
     /// <summary>
+    /// Sets the layer at <paramref name="index"/>'s scroll speed to an absolute <paramref name="scrollSpeed"/>
+    /// (as opposed to <see cref="StepScrollSpeed"/>'s relative ladder step). The panel's edit-mode stepper
+    /// (DiVoid #7512) uses this: it steps a local pending value through <see cref="ScrollSpeedLadder"/>
+    /// without touching the model, then applies the final value here on commit only — so a cancelled edit
+    /// never reaches the model and needs no revert. No-op while the layer's collision flag is on (scroll is
+    /// locked to 1.0 then — <see cref="LayerPropertyRules.Editable"/>). Index-stable, so cell-edit history
+    /// is preserved.
+    /// </summary>
+    public LayerEditResult SetScrollSpeed(int index, float scrollSpeed)
+    {
+        var layer = LayerAt(index);
+        if (!LayerPropertyRules.Editable(layer.Collision))
+            return new LayerEditResult(false, index);
+
+        var happened = Level.SetLayerProperties(index, layer.Collision, scrollSpeed, layer.Repeat);
+        if (happened)
+            IsDirty = true;
+        return new LayerEditResult(happened, index);
+    }
+
+    /// <summary>
     /// Sets the repeat flag on the layer at <paramref name="index"/>. No-op while the layer's collision
     /// flag is on (repeat is locked off then). Index-stable, so cell-edit history is preserved.
     /// </summary>

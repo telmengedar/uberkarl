@@ -424,6 +424,55 @@ public sealed class LayerEditingTests
     }
 
     [Test]
+    public void Session_SetScrollSpeed_SetsAbsoluteValue_IndexStable_PreservesHistory()
+    {
+        // The layer panel's Scroll-stepper edit-mode commit path (DiVoid #7512): the panel steps a LOCAL
+        // pending value through ScrollSpeedLadder without touching the session, then applies the final
+        // value here in one absolute call on commit — unlike StepScrollSpeed's relative ladder step.
+        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette()));
+        session.AddLayer(); // Layer 1: display (collision:false, scroll:1.0, repeat:false)
+        session.PaintCell(0, 0, 0, 1);
+        Assert.That(session.CanUndo, Is.True);
+
+        var result = session.SetScrollSpeed(1, 0.5f);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Happened, Is.True);
+            Assert.That(result.LayerIndex, Is.EqualTo(1));
+            Assert.That(session.Level.Layers[1].ScrollSpeed, Is.EqualTo(0.5f));
+            Assert.That(session.CanUndo, Is.True, "property-set is index-stable — cell-edit history must survive.");
+            Assert.That(session.IsDirty, Is.True);
+        });
+    }
+
+    [Test]
+    public void Session_SetScrollSpeed_IsNoOpWhileCollisionIsOn()
+    {
+        var session = new LevelEditSession(SampleLevel()); // terrain: collision true
+
+        var result = session.SetScrollSpeed(0, 0.5f);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Happened, Is.False);
+            Assert.That(session.Level.Layers[0].ScrollSpeed, Is.EqualTo(1.0f));
+            Assert.That(session.IsDirty, Is.False);
+        });
+    }
+
+    [Test]
+    public void Session_SetScrollSpeed_SameValue_IsNoOp()
+    {
+        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette()));
+        session.AddLayer(); // scroll defaults to 1.0
+
+        var result = session.SetScrollSpeed(1, 1.0f);
+
+        Assert.That(result.Happened, Is.False);
+    }
+
+    [Test]
     public void Session_StepScrollSpeedAndSetRepeat_AreNoOpsWhileCollisionIsOn()
     {
         var session = new LevelEditSession(SampleLevel()); // terrain: collision true
