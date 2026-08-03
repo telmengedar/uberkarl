@@ -70,4 +70,9 @@ public enum EditorAction
 
     /// <summary>Hold to reveal the mouse context radial (tap instead erases the cell under the pointer).</summary>
     OpenContextMenu,
+
+    /// <summary>Launch a playtest of the level currently being edited (its in-memory buffer, not the
+    /// last-saved file). Returning to the editor is the engine's <c>ui_cancel</c>, not a named editor
+    /// action — it is not part of the editor's own input surface.</summary>
+    Playtest,
 }

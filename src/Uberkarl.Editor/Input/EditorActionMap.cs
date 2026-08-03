@@ -32,6 +32,7 @@ public static class EditorActionMap
         [EditorAction.OpenLayerMenu] = "editor_menu_layers",
         [EditorAction.OpenActionMenu] = "editor_menu_actions",
         [EditorAction.OpenContextMenu] = "editor_menu_context",
+        [EditorAction.Playtest] = "editor_playtest",
     };
 
     private static readonly IReadOnlyDictionary<string, EditorAction> ByName =

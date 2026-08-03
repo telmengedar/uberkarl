@@ -57,9 +57,11 @@ namespace Uberkarl {
 
         EditorCanvas canvas;
         Control topBar;
+        ColorRect shellBackground;
         PopInMenu popIn;
         PackageBrowser packageBrowser;
         LayerManagerPanel layerManager;
+        PlaytestOverlay playtestOverlay;
         // Tile/layer selection STATE persists here (the radials read it); the visible side-panel lists that
         // used to mirror it are gone — the Tiles (LB) / Layers (RB) radials fully cover selection.
         readonly List<int> paletteTileIds = new List<int>();
@@ -81,6 +83,12 @@ namespace Uberkarl {
         Trigger activeTrigger = Trigger.None;
         Vector2 menuCenterGlobal;
         FocusZone focusZone = FocusZone.Canvas;
+
+        // True while a playtest run is live. Gates _Process/_UnhandledInput so none of the editor's own
+        // hotkeys, radials, or auto-hide logic react to input meant for the player (e.g. Space is bound to
+        // both editor_paint and jump) — the overlay owns input exclusively for the run's duration and is
+        // the only thing that can end it (ui_cancel).
+        bool Playtesting => playtestOverlay != null && playtestOverlay.IsPlaying;
 
         public override void _Ready() {
             Theme = EditorTheme.Build();
@@ -108,7 +116,7 @@ namespace Uberkarl {
         // auto-hide panels revealed/hidden. Cursor movement and paint/erase-at-cursor are consumed by the
         // focused EditorCanvas; global one-shot actions arrive in _UnhandledInput.
         public override void _Process(double delta) {
-            if (popIn == null)
+            if (popIn == null || Playtesting)
                 return;
 
             float d = (float)delta;
@@ -217,6 +225,7 @@ namespace Uberkarl {
                 new RadialMenuItem("Undo", MenuOutcome.Invoke(EditorAction.Undo)),
                 new RadialMenuItem("Redo", MenuOutcome.Invoke(EditorAction.Redo)),
                 new RadialMenuItem("Tool", MenuOutcome.Invoke(EditorAction.ToggleTool)),
+                new RadialMenuItem("Play", MenuOutcome.Invoke(EditorAction.Playtest)),
             };
             return new RadialMenuModel("Actions", items);
         }
@@ -260,6 +269,7 @@ namespace Uberkarl {
                 case EditorAction.Undo: Undo(); break;
                 case EditorAction.Redo: Redo(); break;
                 case EditorAction.ToggleTool: ToggleTool(); break;
+                case EditorAction.Playtest: StartPlaytest(); break;
             }
         }
 
@@ -306,7 +316,7 @@ namespace Uberkarl {
         // focused EditorCanvas; everything here is device-neutral and reaches _UnhandledInput because no
         // focused Control claimed it. Guarded against key-repeat echo so a held key fires each action once.
         public override void _UnhandledInput(InputEvent @event) {
-            if (@event.IsEcho() || (popIn != null && popIn.IsOpen) || (packageBrowser != null && packageBrowser.IsOpen) ||
+            if (Playtesting || @event.IsEcho() || (popIn != null && popIn.IsOpen) || (packageBrowser != null && packageBrowser.IsOpen) ||
                 (layerManager != null && layerManager.IsOpen))
                 return;
 
@@ -319,6 +329,7 @@ namespace Uberkarl {
             else if (Fired(@event, EditorAction.Redo)) Redo();
             else if (Fired(@event, EditorAction.Save)) Save();
             else if (Fired(@event, EditorAction.FocusNext)) AdvanceFocus();
+            else if (Fired(@event, EditorAction.Playtest)) StartPlaytest();
             else return;
 
             GetViewport().SetInputAsHandled();
@@ -330,10 +341,10 @@ namespace Uberkarl {
         // ----- UI construction -----
 
         void BuildUi() {
-            ColorRect background = new ColorRect { Color = EditorTheme.Shell };
-            background.SetAnchorsPreset(LayoutPreset.FullRect);
-            background.MouseFilter = MouseFilterEnum.Ignore;
-            AddChild(background);
+            shellBackground = new ColorRect { Color = EditorTheme.Shell };
+            shellBackground.SetAnchorsPreset(LayoutPreset.FullRect);
+            shellBackground.MouseFilter = MouseFilterEnum.Ignore;
+            AddChild(shellBackground);
 
             // The canvas fills the whole area — maximum edit surface; the toolbar overlays it and auto-hides.
             canvas = new EditorCanvas();
@@ -362,6 +373,11 @@ namespace Uberkarl {
             layerManager.ActiveLayerChosen += (int index) => OnLayerSelected(index);
             layerManager.Closed += OnLayerManagerClosed;
             AddChild(layerManager);
+
+            // Added last so it draws on top of everything else while a run is live.
+            playtestOverlay = new PlaytestOverlay();
+            playtestOverlay.ExitRequested += StopPlaytest;
+            AddChild(playtestOverlay);
 
             BuildFileDialogs();
         }
@@ -393,6 +409,10 @@ namespace Uberkarl {
             redoButton = MakeButton("Redo", Redo);
             row.AddChild(undoButton);
             row.AddChild(redoButton);
+
+            row.AddChild(MakeSeparator());
+
+            row.AddChild(MakeButton("Play", StartPlaytest));
 
             Control spacer = new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill };
             row.AddChild(spacer);
@@ -512,6 +532,43 @@ namespace Uberkarl {
         }
 
         void OnLayerManagerClosed() => canvas?.GrabFocus();
+
+        // ----- playtest -----
+
+        // Projects the CURRENT in-memory buffer (not the last-saved file) through the same
+        // EditableLevelSnapshot -> ResolvedLevel projection the canvas already uses, and runs it through
+        // the shared play runtime. Hiding the editor surfaces (rather than tearing them down) is what makes
+        // the return trip a no-op for the model: nothing here ever calls Save(), reloads from disk, or
+        // otherwise touches `session` — the buffer simply keeps existing, untouched, the whole time.
+        void StartPlaytest() {
+            if (session == null || Playtesting)
+                return;
+
+            try {
+                ResolvedLevel level = EditableLevelSnapshot.ToResolvedLevel(session.Level);
+                playtestOverlay.Start(level);
+                canvas.Visible = false;
+                topBar.Visible = false;
+                shellBackground.Visible = false;
+                GD.Print($"LevelEditor: playtesting {level.Width}x{level.Height} level '{session.Level.Name}'.");
+            } catch (Exception exception) {
+                GD.PrintErr($"LevelEditor: playtest failed to start: {exception.GetType().Name}: {exception.Message}");
+            }
+        }
+
+        // Frees the whole play-world subtree (including its camera, which hands the viewport's default 2D
+        // transform back) and restores the editor surfaces. UpdateReveals() re-derives topBar visibility
+        // from current mouse/focus state on the next _Process tick rather than forcing it — no different
+        // from how it behaves after any other menu closes.
+        void StopPlaytest() {
+            if (!Playtesting)
+                return;
+
+            playtestOverlay.Stop();
+            shellBackground.Visible = true;
+            canvas.Visible = true;
+            canvas.GrabFocus();
+        }
 
         // ----- session lifecycle -----
 
