@@ -33,6 +33,8 @@ public static class EditorActionMap
         [EditorAction.OpenActionMenu] = "editor_menu_actions",
         [EditorAction.OpenContextMenu] = "editor_menu_context",
         [EditorAction.Playtest] = "editor_playtest",
+        [EditorAction.ZoomIn] = "editor_zoom_in",
+        [EditorAction.ZoomOut] = "editor_zoom_out",
     };
 
     private static readonly IReadOnlyDictionary<string, EditorAction> ByName =

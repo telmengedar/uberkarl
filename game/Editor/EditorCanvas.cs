@@ -22,6 +22,15 @@ namespace Uberkarl {
         const float MoveInitialDelay = 0.32f;
         const float MoveRepeatRate = 0.06f;
 
+        // Fixed zoom levels for the editor viewport (DiVoid #7576): the editor no longer auto-fits the
+        // whole level on screen (unusable at realistic sizes — a 100-wide level would shrink to
+        // illegible), it renders at one of these fixed tile scales and the view scrolls to follow the grid
+        // cursor instead, clamped to the level bounds. The default (index 3 = 3x) matches
+        // PlayRuntimeBuilder.CameraZoom — "comparable to the play zoom" per Toni's ask — so authoring and
+        // playtesting read at a similar scale.
+        static readonly float[] ZoomLevels = { 1f, 1.5f, 2f, 3f, 4f, 6f };
+        const int DefaultZoomIndex = 3;
+
         // The tile layers render inside this child; ShowBehindParent pushes the whole subtree behind the
         // Control's own _Draw so the grid and cursor overlay draw on top of the tiles.
         Node2D worldRoot;
@@ -30,7 +39,8 @@ namespace Uberkarl {
         int tileSize = 16;
         int width;
         int height;
-        float viewScale = 1f;
+        int zoomIndex = DefaultZoomIndex;
+        float viewScale = ZoomLevels[DefaultZoomIndex];
         Vector2 viewOffset = Vector2.Zero;
 
         int hoverX = -1;
@@ -98,7 +108,7 @@ namespace Uberkarl {
             else
                 cursor.Resize(width, height);
 
-            Recenter();
+            UpdateView();
             QueueRedraw();
         }
 
@@ -148,8 +158,10 @@ namespace Uberkarl {
         }
 
         void StepCursor(int dx, int dy) {
-            if (cursor.TryMove(dx, dy))
+            if (cursor.TryMove(dx, dy)) {
+                UpdateView(); // scroll to keep the cursor's new cell in view, clamped to the level bounds
                 QueueRedraw();
+            }
         }
 
         static int AxisFor(EditorAction positive, EditorAction negative) {
@@ -190,7 +202,8 @@ namespace Uberkarl {
                     lastCellX = int.MinValue;
                     lastCellY = int.MinValue;
                     if (TryCell(button.Position, out int cx, out int cy) && cursor != null) {
-                        cursor.MoveTo(cx, cy);
+                        if (cursor.MoveTo(cx, cy))
+                            UpdateView();
                         QueueRedraw();
                     }
                     EmitCellAt(button.Position);
@@ -198,11 +211,37 @@ namespace Uberkarl {
                     pointerDown = false;
                 }
                 AcceptEvent();
+            } else if (@event is InputEventMouseButton wheel && wheel.Pressed &&
+                (wheel.ButtonIndex == MouseButton.WheelUp || wheel.ButtonIndex == MouseButton.WheelDown)) {
+                // Mouse-wheel zoom is a direct convenience on the canvas (like the click/hover handling
+                // above), independent of the editor_zoom_in/out actions LevelEditor dispatches for
+                // keyboard/gamepad — the wheel only ever means "zoom" while hovering this surface.
+                if (wheel.ButtonIndex == MouseButton.WheelUp)
+                    ZoomIn();
+                else
+                    ZoomOut();
+                AcceptEvent();
             } else if (@event is InputEventMouseMotion motion) {
                 UpdateHover(motion.Position);
                 if (pointerDown)
                     EmitCellAt(motion.Position);
             }
+        }
+
+        /// <summary>Steps the fixed viewport zoom in one level (never past the last preset). Re-scrolls the
+        /// view so the grid cursor stays the scroll target at the new scale.</summary>
+        public void ZoomIn() => SetZoomIndex(zoomIndex + 1);
+
+        /// <summary>Steps the fixed viewport zoom out one level (never past the first preset).</summary>
+        public void ZoomOut() => SetZoomIndex(zoomIndex - 1);
+
+        void SetZoomIndex(int index) {
+            int clamped = Math.Clamp(index, 0, ZoomLevels.Length - 1);
+            if (clamped == zoomIndex)
+                return;
+            zoomIndex = clamped;
+            UpdateView();
+            QueueRedraw();
         }
 
         /// <summary>The global (viewport-space) centre of the grid-cursor cell — where a pop-in menu opened
@@ -219,8 +258,10 @@ namespace Uberkarl {
         public void EraseAtGlobal(Vector2 globalPosition) {
             Vector2 local = globalPosition - GlobalPosition;
             if (TryCell(local, out int cx, out int cy)) {
-                if (cursor != null && cursor.MoveTo(cx, cy))
+                if (cursor != null && cursor.MoveTo(cx, cy)) {
+                    UpdateView();
                     QueueRedraw();
+                }
                 CellErased?.Invoke(cx, cy);
             }
         }
@@ -265,22 +306,38 @@ namespace Uberkarl {
         }
 
         void OnResized() {
-            Recenter();
+            UpdateView();
             QueueRedraw();
         }
 
-        // Fit the whole level into the panel with a small margin and centre it.
-        void Recenter() {
+        // Fixed zoom + cursor-follow, clamped to the level bounds (DiVoid #7576) — replaces the old
+        // fit-the-whole-level-on-screen behaviour, which zoomed out to illegibility as a level grew (and
+        // absurdly far in for a tiny one). The view now renders at one of the ZoomLevels presets and
+        // scrolls to keep the grid cursor's cell in frame, clamped so it never shows past the level edges —
+        // EditorViewportClamp reimplements the exact "LimitLeft/Top=0, LimitRight/Bottom=size" rule
+        // PlayRuntimeBuilder.AttachCamera gets for free from Camera2D.Limit*, since this Control has no
+        // Camera2D of its own to reuse directly (see the class doc comment).
+        void UpdateView() {
             if (width <= 0 || height <= 0)
                 return;
 
-            Vector2 levelPixels = new Vector2(width * tileSize, height * tileSize);
             Vector2 panel = Size;
             if (panel.X <= 0 || panel.Y <= 0)
                 return;
 
-            viewScale = Mathf.Min(panel.X / levelPixels.X, panel.Y / levelPixels.Y) * 0.95f;
-            viewOffset = (panel - levelPixels * viewScale) / 2f;
+            viewScale = ZoomLevels[zoomIndex];
+            Vector2 levelPixels = new Vector2(width, height) * tileSize;
+
+            // Scroll target: the grid cursor's cell centre, falling back to the level's centre before a
+            // cursor exists (SetLevel always creates one before calling this, so this is only a defensive
+            // fallback).
+            Vector2 targetCenter = cursor != null
+                ? (new Vector2(cursor.X, cursor.Y) + new Vector2(0.5f, 0.5f)) * tileSize
+                : levelPixels / 2f;
+
+            viewOffset = new Vector2(
+                EditorViewportClamp.Offset(targetCenter.X, panel.X, levelPixels.X, viewScale),
+                EditorViewportClamp.Offset(targetCenter.Y, panel.Y, levelPixels.Y, viewScale));
             worldRoot.Position = viewOffset;
             worldRoot.Scale = new Vector2(viewScale, viewScale);
         }

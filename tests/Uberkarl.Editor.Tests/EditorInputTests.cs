@@ -414,4 +414,117 @@ public sealed class EditorInputTests
 
         Assert.That(editor.Cancel(), Is.False);
     }
+
+    // ----- analog-stick edge-trigger gate (DiVoid #7576: discrete stepping + no jump-on-open) -----
+    //
+    // Toni's resize-playtest bug: opening the Resize panel with the stick still deflected from aiming the
+    // radial instantly stepped the width to an arbitrary value, and holding the stick stepped every frame
+    // (fast jump) instead of the D-pad's one-press-one-step feel. This pins the engine-agnostic gate the
+    // Godot ScrollStepper/DimensionStepper controls drive from InputEventJoypadMotion.
+
+    [Test]
+    public void AnalogStepGate_FreshDeflection_StepsOnce_ThenHoldingProducesNoFurtherSteps()
+    {
+        var gate = new AnalogStepGate();
+
+        Assert.That(gate.Poll(negativePressed: true, positivePressed: false), Is.EqualTo(-1),
+            "first deflection is a fresh edge — one discrete step.");
+        Assert.That(gate.Poll(negativePressed: true, positivePressed: false), Is.EqualTo(0),
+            "still deflected, no new edge — holding must not repeat every frame.");
+        Assert.That(gate.Poll(negativePressed: true, positivePressed: false), Is.EqualTo(0));
+    }
+
+    [Test]
+    public void AnalogStepGate_ReturnToNeutral_ThenRedeflect_StepsAgain()
+    {
+        var gate = new AnalogStepGate();
+        gate.Poll(negativePressed: true, positivePressed: false); // consume the first edge
+
+        Assert.That(gate.Poll(negativePressed: false, positivePressed: false), Is.EqualTo(0), "neutral: no step.");
+        Assert.That(gate.Poll(negativePressed: true, positivePressed: false), Is.EqualTo(-1),
+            "released back to neutral and re-deflected: a fresh edge, one more step.");
+    }
+
+    [Test]
+    public void AnalogStepGate_PositiveDirection_StepsIndependentlyOfNegative()
+    {
+        var gate = new AnalogStepGate();
+
+        Assert.That(gate.Poll(negativePressed: false, positivePressed: true), Is.EqualTo(+1));
+        Assert.That(gate.Poll(negativePressed: false, positivePressed: true), Is.EqualTo(0), "held: no repeat.");
+    }
+
+    [Test]
+    public void AnalogStepGate_Prime_SeedsBaseline_SoAnAlreadyDeflectedStickDoesNotStepImmediately()
+    {
+        // The exact bug: the Resize panel opens (or the Scroll stepper enters edit mode) while the stick is
+        // still pushed left from aiming the radial. Priming with that already-deflected state must NOT be
+        // treated as a fresh edge.
+        var gate = new AnalogStepGate();
+
+        gate.Prime(negativePressed: true, positivePressed: false);
+
+        Assert.That(gate.Poll(negativePressed: true, positivePressed: false), Is.EqualTo(0),
+            "primed as already-deflected: the next poll at the same deflection must not step.");
+
+        // Only after the stick is released back to neutral and pushed again does a step fire.
+        Assert.That(gate.Poll(negativePressed: false, positivePressed: false), Is.EqualTo(0));
+        Assert.That(gate.Poll(negativePressed: true, positivePressed: false), Is.EqualTo(-1));
+    }
+
+    [Test]
+    public void AnalogStepGate_Prime_WithNeutralStick_LeavesTheNextDeflectionAsAFreshEdge()
+    {
+        var gate = new AnalogStepGate();
+
+        gate.Prime(negativePressed: false, positivePressed: false);
+
+        Assert.That(gate.Poll(negativePressed: false, positivePressed: true), Is.EqualTo(+1),
+            "priming from neutral does not suppress a genuinely fresh deflection.");
+    }
+
+    // ----- editor viewport clamp (DiVoid #7576: fixed-zoom scrolling instead of fit-to-level) -----
+    //
+    // Mirrors PlayRuntimeBuilder.AttachCamera's Camera2D Limit* clamp (LimitLeft/Top=0,
+    // LimitRight/Bottom=size) for EditorCanvas's own hand-rolled transform, since a Control-hosted render
+    // has no Camera2D of its own to attach.
+
+    [Test]
+    public void ViewportClamp_LevelSmallerThanPanel_Centers()
+    {
+        // A 5-tile-wide level (80px) at 3x zoom (240px scaled) inside an 800px panel: too small to scroll,
+        // so it centers exactly like Camera2D does when its limits sit inside the viewport.
+        float offset = EditorViewportClamp.Offset(targetWorldCenter: 40f, panelExtent: 800f, levelExtentWorld: 80f, scale: 3f);
+
+        Assert.That(offset, Is.EqualTo((800f - 240f) / 2f).Within(0.001f));
+    }
+
+    [Test]
+    public void ViewportClamp_TargetNearLeftEdge_ClampsToShowTheLevelStart_NotPastIt()
+    {
+        // A 100-tile-wide level (1600px) at 3x zoom (4800px scaled) in an 800px panel: cursor near the left
+        // edge (world x=8) would centre past world 0 — clamp to 0 so world 0 sits at the panel's left edge.
+        float offset = EditorViewportClamp.Offset(targetWorldCenter: 8f, panelExtent: 800f, levelExtentWorld: 1600f, scale: 3f);
+
+        Assert.That(offset, Is.EqualTo(0f).Within(0.001f));
+    }
+
+    [Test]
+    public void ViewportClamp_TargetNearRightEdge_ClampsToShowTheLevelEnd_NotPastIt()
+    {
+        float offset = EditorViewportClamp.Offset(targetWorldCenter: 1592f, panelExtent: 800f, levelExtentWorld: 1600f, scale: 3f);
+
+        // panelExtent - levelExtentScaled = 800 - 4800 = -4000: the rightmost clamp (world 1600 lands
+        // exactly at the panel's right edge).
+        Assert.That(offset, Is.EqualTo(-4000f).Within(0.001f));
+    }
+
+    [Test]
+    public void ViewportClamp_TargetWellInsideBounds_CentersExactlyOnTarget()
+    {
+        float offset = EditorViewportClamp.Offset(targetWorldCenter: 800f, panelExtent: 800f, levelExtentWorld: 1600f, scale: 3f);
+
+        // Unclamped centring: panelExtent/2 - target*scale = 400 - 2400 = -2000, well within the clamp range.
+        Assert.That(offset, Is.EqualTo(-2000f).Within(0.001f));
+    }
 }

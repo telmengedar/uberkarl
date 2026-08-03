@@ -371,6 +371,9 @@ namespace Uberkarl {
             public event Action<float> Committed;
 
             readonly SteppedValueEditor<float> edit = new(ScrollSpeedLadder.Step);
+            // Edge-triggers analog-stick left/right while editing so a held stick steps once per
+            // deflection like the D-pad, instead of every motion frame (DiVoid #7576) — see AnalogStepGate.
+            readonly AnalogStepGate analogGate = new();
 
             float committedValue;
             bool locked;
@@ -409,8 +412,23 @@ namespace Uberkarl {
                         Committed?.Invoke(value);
                     } else {
                         edit.Enter(committedValue);
+                        // Re-baseline the analog gate to the stick's CURRENT position right as editing
+                        // starts (the edit-mode boundary is this control's equivalent of the resize panel's
+                        // "just gained focus" moment) — a stick still deflected from navigating here becomes
+                        // the baseline, not a fresh edge, so it steps only once released and re-deflected.
+                        analogGate.Prime(Godot.Input.IsActionPressed("ui_left"), Godot.Input.IsActionPressed("ui_right"));
                     }
                     QueueRedraw();
+                } else if (edit.IsEditing && @event is InputEventJoypadMotion motion && motion.Axis == JoyAxis.LeftX) {
+                    // Analog stick: edge-triggered discrete step via AnalogStepGate — see DimensionStepper
+                    // for why raw ui_left/ui_right pressed-state alone fires every motion frame while a
+                    // D-pad button does not. Other axes fall through unhandled so spatial nav still works.
+                    int step = analogGate.Poll(Godot.Input.IsActionPressed("ui_left"), Godot.Input.IsActionPressed("ui_right"));
+                    AcceptEvent();
+                    if (step != 0) {
+                        edit.Adjust(step);
+                        QueueRedraw();
+                    }
                 } else if (edit.IsEditing && @event.IsActionPressed("ui_left")) {
                     AcceptEvent();
                     edit.Adjust(-1);

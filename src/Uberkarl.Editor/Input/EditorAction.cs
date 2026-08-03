@@ -75,4 +75,11 @@ public enum EditorAction
     /// last-saved file). Returning to the editor is the engine's <c>ui_cancel</c>, not a named editor
     /// action — it is not part of the editor's own input surface.</summary>
     Playtest,
+
+    /// <summary>Step the editor viewport's fixed zoom in one level (DiVoid #7576 — the editor no longer
+    /// auto-fits the level to the screen, so zoom needs its own explicit control).</summary>
+    ZoomIn,
+
+    /// <summary>Step the editor viewport's fixed zoom out one level.</summary>
+    ZoomOut,
 }
