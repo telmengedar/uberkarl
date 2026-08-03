@@ -59,6 +59,7 @@ namespace Uberkarl {
         Control topBar;
         PopInMenu popIn;
         PackageBrowser packageBrowser;
+        LayerManagerPanel layerManager;
         // Tile/layer selection STATE persists here (the radials read it); the visible side-panel lists that
         // used to mirror it are gone — the Tiles (LB) / Layers (RB) radials fully cover selection.
         readonly List<int> paletteTileIds = new List<int>();
@@ -118,7 +119,7 @@ namespace Uberkarl {
             // control momentarily holds focus, so the cursor can never step underneath an open menu, the
             // browser, or a focused panel.
             canvas.DirectionalInputCaptured =
-                CursorInputGate.DirectionCaptured(popIn.IsOpen || packageBrowser.IsOpen, focusZone != FocusZone.Canvas);
+                CursorInputGate.DirectionCaptured(popIn.IsOpen || packageBrowser.IsOpen || layerManager.IsOpen, focusZone != FocusZone.Canvas);
 
             tilesTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenTileMenu)), d);
             layersTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenLayerMenu)), d);
@@ -203,6 +204,7 @@ namespace Uberkarl {
                 for (int i = 0; i < session.Level.Layers.Count; i++)
                     items.Add(new RadialMenuItem(session.Level.Layers[i].Name, MenuOutcome.SelectLayer(i)));
             }
+            items.Add(new RadialMenuItem("Manage…", MenuOutcome.OpenLayerManager()));
             return new RadialMenuModel("Layers", items);
         }
 
@@ -240,8 +242,17 @@ namespace Uberkarl {
                 case MenuOutcomeKind.FileCommand:
                     InvokeFileCommand(outcome.File);
                     break;
+                case MenuOutcomeKind.OpenLayerManager:
+                    SummonLayerManager();
+                    break;
             }
             EndMenu();
+        }
+
+        void SummonLayerManager() {
+            if (session == null)
+                return;
+            layerManager.Summon(session, activeLayerIndex);
         }
 
         void InvokeMenuAction(EditorAction action) {
@@ -279,7 +290,7 @@ namespace Uberkarl {
             if (topBar == null)
                 return;
 
-            bool menuOpen = popIn.IsOpen || packageBrowser.IsOpen;
+            bool menuOpen = popIn.IsOpen || packageBrowser.IsOpen || layerManager.IsOpen;
             Vector2 mouse = GetViewport().GetMousePosition();
             Control focus = GetViewport().GuiGetFocusOwner();
 
@@ -295,7 +306,8 @@ namespace Uberkarl {
         // focused EditorCanvas; everything here is device-neutral and reaches _UnhandledInput because no
         // focused Control claimed it. Guarded against key-repeat echo so a held key fires each action once.
         public override void _UnhandledInput(InputEvent @event) {
-            if (@event.IsEcho() || (popIn != null && popIn.IsOpen) || (packageBrowser != null && packageBrowser.IsOpen))
+            if (@event.IsEcho() || (popIn != null && popIn.IsOpen) || (packageBrowser != null && packageBrowser.IsOpen) ||
+                (layerManager != null && layerManager.IsOpen))
                 return;
 
             if (Fired(@event, EditorAction.CycleTilePrev)) CycleTile(-1);
@@ -344,6 +356,12 @@ namespace Uberkarl {
             packageBrowser.ResourceChosen += OnBrowserResourceChosen;
             packageBrowser.Cancelled += OnBrowserCancelled;
             AddChild(packageBrowser);
+
+            layerManager = new LayerManagerPanel();
+            layerManager.LayerModelChanged += OnLayerModelChanged;
+            layerManager.ActiveLayerChosen += (int index) => OnLayerSelected(index);
+            layerManager.Closed += OnLayerManagerClosed;
+            AddChild(layerManager);
 
             BuildFileDialogs();
         }
@@ -480,6 +498,20 @@ namespace Uberkarl {
         }
 
         void OnBrowserCancelled() => canvas?.GrabFocus();
+
+        // ----- layer manager lifecycle -----
+
+        // The panel mutated the session directly; re-snapshot the canvas from the model's current truth
+        // (the same full-rebuild refresh AdoptSession/OnCellPressed already use) and refresh the status
+        // line. The panel never touches the canvas or the builder itself.
+        void OnLayerModelChanged() {
+            if (session == null)
+                return;
+            canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(session.Level));
+            UpdateState();
+        }
+
+        void OnLayerManagerClosed() => canvas?.GrabFocus();
 
         // ----- session lifecycle -----
 

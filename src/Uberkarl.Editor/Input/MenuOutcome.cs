@@ -14,6 +14,9 @@ public enum MenuOutcomeKind
 
     /// <summary>Run a file-lifecycle command (new/open/save/save-as).</summary>
     FileCommand,
+
+    /// <summary>Summon the layer-management panel (create/delete/reorder/property-edit layers).</summary>
+    OpenLayerManager,
 }
 
 /// <summary>The file-lifecycle commands a menu can request; the controller maps these to its file IO.</summary>
@@ -70,4 +73,9 @@ public readonly struct MenuOutcome
     /// <summary>An outcome that runs file <paramref name="command"/> (new/open/save/save-as).</summary>
     public static MenuOutcome FileOp(EditorFileCommand command) =>
         new(MenuOutcomeKind.FileCommand, -1, default, command);
+
+    /// <summary>An outcome that summons the layer-management panel. No new <see cref="EditorAction"/> is
+    /// introduced for this — the "Manage…" wedge rides the existing Layers radial trigger.</summary>
+    public static MenuOutcome OpenLayerManager() =>
+        new(MenuOutcomeKind.OpenLayerManager, -1, default, default);
 }
