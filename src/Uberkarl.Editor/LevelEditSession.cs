@@ -320,6 +320,32 @@ public sealed class LevelEditSession
         return new LayerEditResult(happened, index);
     }
 
+    // ----- grid resize intent (DiVoid #7550) -----
+
+    /// <summary>
+    /// Resizes the level's grid, applied identically across every layer. Growing preserves every existing
+    /// cell at its original coordinates and fills the new cells empty; shrinking crops. No-op (returns
+    /// <c>false</c>) when the requested size equals the current one. A real resize clears cell-edit
+    /// history — the same layer-index-aliasing hazard as <see cref="DeleteLayer"/>/<see cref="MoveLayer"/>,
+    /// but for coordinates rather than layer indices: <see cref="SetCellCommand"/> re-resolves an absolute
+    /// <c>(x,y)</c> to a cell index via the level's <b>current</b> <see cref="EditableLevel.Width"/> at
+    /// apply/revert time, so a recorded command from before a resize would alias onto the wrong cell (or
+    /// throw, for a coordinate a shrink cropped away) after one. Resize itself is not on the undo stack
+    /// this increment — layer-op parity. Callers should check
+    /// <see cref="EditableLevel.WouldDropPaintedCells"/> before calling this to decide whether to prompt
+    /// the author for confirmation (mirrors the layer-manager's delete confirm) — this method performs the
+    /// resize unconditionally once called.
+    /// </summary>
+    public bool Resize(int width, int height)
+    {
+        if (!Level.Resize(width, height))
+            return false;
+
+        history.Clear();
+        IsDirty = true;
+        return true;
+    }
+
     private EditableLayer LayerAt(int index)
     {
         if (index < 0 || index >= Level.Layers.Count)
