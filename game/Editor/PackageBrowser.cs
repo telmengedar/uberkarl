@@ -29,11 +29,17 @@ namespace Uberkarl {
     public partial class PackageBrowser : Control {
 
         enum Mode { Load, Save }
-        enum Step { Packages, Resources, ConfirmOverwrite }
+        enum Step { Packages, Resources, ConfirmOverwrite, SaveResources }
+
+        // Which situation the current ConfirmOverwrite step is resolving — a same-name "+ New package…"
+        // collision (confirm folds back into the save-resources step, since the target became an existing
+        // package) or an explicitly-picked existing level resource (confirm proceeds straight to naming).
+        enum ConfirmKind { NewPackageNameCollision, ResourceOverwrite }
 
         IPackageSource source;
         Mode mode;
         Step step;
+        ConfirmKind confirmKind;
         IReadOnlyList<PackageSummary> packages = Array.Empty<PackageSummary>();
         IReadOnlyList<ResourceSummary> resources = Array.Empty<ResourceSummary>();
         PackageHandle selectedPackage;
@@ -41,6 +47,10 @@ namespace Uberkarl {
         string pendingNewPackageName;
         string currentLevelName = string.Empty;
         string collisionName = string.Empty;
+        // Set when the author explicitly picked an existing level resource to overwrite (the save-resources
+        // step's list, not "+ New level…") — carried through to the emitted PackageSaveTarget so the level
+        // attaches to this exact path rather than deriving a fresh one (DiVoid #7571/#7572).
+        ResourcePath? pendingOverwriteResource;
 
         OnScreenKeyboard keyboard;
 
@@ -151,6 +161,7 @@ namespace Uberkarl {
             step = Step.Packages;
             closeButton.Text = "✕ Close";
             titleLabel.Text = mode == Mode.Load ? "Open Package" : "Save To Package";
+            pendingOverwriteResource = null;
 
             int newRowCount = mode == Mode.Save ? 1 : 0;
             string empty = mode == Mode.Load
@@ -190,7 +201,8 @@ namespace Uberkarl {
             selectedPackage = packages[packageIndex].Handle;
             selectedPackageName = packages[packageIndex].Name;
             pendingNewPackageName = null;
-            OpenLevelNameKeyboard();
+            pendingOverwriteResource = null;
+            ShowSaveResources(); // an existing package: pick which level resource to save as (DiVoid #7571/#7572)
         }
 
         // ----- load mode: resources step -----
@@ -235,6 +247,63 @@ namespace Uberkarl {
         static string FormatBytes(long byteLength) =>
             byteLength < 1024 ? $"{byteLength} B" : $"{byteLength / 1024.0:0.#} KB";
 
+        // ----- save mode: pick a level resource within the target package (DiVoid #7571/#7572) -----
+
+        // Mirrors the "+ New package…" pattern already shipped for the package step: once an EXISTING
+        // package is the target, its existing level resources are offered alongside "+ New level…" —
+        // picking one replaces it (one confirm, reusing ConfirmOverwrite below); picking "+ New level…"
+        // names a brand-new resource. A "+ New package…" target skips this step entirely (no resources
+        // exist yet in an archive that has not been created).
+        void ShowSaveResources() {
+            IReadOnlyList<ResourceSummary> contents;
+            try {
+                contents = source.GetContents(selectedPackage);
+            } catch (Exception exception) {
+                GD.PrintErr($"PackageBrowser: {exception.GetType().Name}: {exception.Message}");
+                ShowPackages();
+                return;
+            }
+
+            List<ResourceSummary> levels = new List<ResourceSummary>();
+            foreach (ResourceSummary entry in contents)
+                if (entry.Kind == ResourceKind.Level)
+                    levels.Add(entry);
+            resources = levels;
+
+            step = Step.SaveResources;
+            closeButton.Text = "← Back";
+            titleLabel.Text = $"{selectedPackageName} — Save Level";
+            // Unlike the load-mode resources step, "+ New level…" is always offered — an empty package is
+            // a perfectly normal save target, never a dead end.
+            PopulateList(resources.Count + 1, SaveResourceRow, string.Empty, OnSaveResourceChosen);
+        }
+
+        RowText SaveResourceRow(int index) {
+            if (index == 0)
+                return new RowText("+ New level…", string.Empty);
+
+            ResourceSummary summary = resources[index - 1];
+            return new RowText(summary.DisplayName, FormatBytes(summary.ByteLength));
+        }
+
+        void OnSaveResourceChosen(int index) {
+            if (index == 0) {
+                pendingOverwriteResource = null;
+                OpenLevelNameKeyboard();
+                return;
+            }
+
+            int resourceIndex = index - 1;
+            if (resourceIndex < 0 || resourceIndex >= resources.Count)
+                return;
+
+            ResourceSummary picked = resources[resourceIndex];
+            pendingOverwriteResource = picked.Path;
+            collisionName = picked.DisplayName;
+            confirmKind = ConfirmKind.ResourceOverwrite;
+            ShowConfirmOverwrite();
+        }
+
         // ----- save mode: naming (via the attached keyboard) + confirm-overwrite -----
 
         void OpenNewPackageNameKeyboard() {
@@ -252,11 +321,14 @@ namespace Uberkarl {
             PackageHandle? collision = PackageSaveTargetResolver.FindCollision(packages, name);
             if (collision is { } handle) {
                 selectedPackage = handle;
+                selectedPackageName = name.Trim();
                 pendingNewPackageName = null;
                 collisionName = name.Trim();
+                confirmKind = ConfirmKind.NewPackageNameCollision;
                 ShowConfirmOverwrite();
             } else {
                 pendingNewPackageName = name.Trim();
+                pendingOverwriteResource = null;
                 OpenLevelNameKeyboard();
             }
         }
@@ -264,7 +336,9 @@ namespace Uberkarl {
         void ShowConfirmOverwrite() {
             step = Step.ConfirmOverwrite;
             closeButton.Text = "← Back";
-            titleLabel.Text = $"A package named “{collisionName}” already exists.";
+            titleLabel.Text = confirmKind == ConfirmKind.NewPackageNameCollision
+                ? $"A package named “{collisionName}” already exists."
+                : $"Overwrite the level “{collisionName}”?";
             PopulateList(2, ConfirmOverwriteRow, string.Empty, OnConfirmOverwriteChosen);
         }
 
@@ -273,10 +347,17 @@ namespace Uberkarl {
             : new RowText("Choose a different name", string.Empty);
 
         void OnConfirmOverwriteChosen(int index) {
-            if (index == 0)
-                OpenLevelNameKeyboard(); // selectedPackage already holds the collided handle
-            else
-                ShowPackages();
+            if (index == 0) {
+                if (confirmKind == ConfirmKind.NewPackageNameCollision)
+                    ShowSaveResources(); // selectedPackage now holds the collided handle — pick its level resource
+                else
+                    OpenLevelNameKeyboard(); // resource overwrite confirmed — proceed with pendingOverwriteResource set
+            } else {
+                if (confirmKind == ConfirmKind.NewPackageNameCollision)
+                    ShowPackages();
+                else
+                    ShowSaveResources();
+            }
         }
 
         void OpenLevelNameKeyboard() {
@@ -284,7 +365,11 @@ namespace Uberkarl {
                 return;
 
             string target = pendingNewPackageName ?? selectedPackageName;
-            keyboard.RequestText($"Level name — saving into “{target}”", currentLevelName, OnLevelNameCommitted);
+            // An explicitly-picked existing resource seeds the keyboard with ITS name (confirming/tweaking
+            // the spelling of the slot just picked), not whatever name the currently-open level happens to
+            // carry — the pick itself is the intent (design #7572 decision 4).
+            string seed = pendingOverwriteResource != null ? collisionName : currentLevelName;
+            keyboard.RequestText($"Level name — saving into “{target}”", seed, OnLevelNameCommitted);
         }
 
         void OnLevelNameCommitted(string name) {
@@ -294,8 +379,8 @@ namespace Uberkarl {
             }
 
             PackageSaveTarget target = pendingNewPackageName != null
-                ? new PackageSaveTarget(null, pendingNewPackageName, name.Trim())
-                : new PackageSaveTarget(selectedPackage, null, name.Trim());
+                ? new PackageSaveTarget(null, pendingNewPackageName, name.Trim(), null)
+                : new PackageSaveTarget(selectedPackage, null, name.Trim(), pendingOverwriteResource);
 
             Close();
             SaveRequested?.Invoke(target);
@@ -363,15 +448,23 @@ namespace Uberkarl {
         // ----- back-navigation / close -----
 
         // The step this browser is on decides what "cancel" (ui_cancel, or the header's Back/Close button)
-        // means: one level back out of Resources/ConfirmOverwrite into Packages, or a full close from
-        // Packages itself. The level-name/new-package-name keyboard prompts are a separate overlay
-        // (OnScreenKeyboard) that owns its own cancel — this browser's step never changes while the
-        // keyboard is open, so its own cancel handling below is guarded on the keyboard being closed.
+        // means: one level back out of Resources/SaveResources/ConfirmOverwrite into Packages (a resource-
+        // overwrite confirm steps back to the save-resources list instead, mirroring its "no" branch
+        // above), or a full close from Packages itself. The level-name/new-package-name keyboard prompts
+        // are a separate overlay (OnScreenKeyboard) that owns its own cancel — this browser's step never
+        // changes while the keyboard is open, so its own cancel handling below is guarded on the keyboard
+        // being closed.
         void HandleCancel() {
             switch (step) {
                 case Step.Resources:
-                case Step.ConfirmOverwrite:
+                case Step.SaveResources:
                     ShowPackages();
+                    break;
+                case Step.ConfirmOverwrite:
+                    if (confirmKind == ConfirmKind.ResourceOverwrite)
+                        ShowSaveResources();
+                    else
+                        ShowPackages();
                     break;
                 default:
                     Close();
@@ -383,6 +476,7 @@ namespace Uberkarl {
         void Close() {
             Visible = false;
             pendingNewPackageName = null;
+            pendingOverwriteResource = null;
         }
 
         public override void _GuiInput(InputEvent @event) {

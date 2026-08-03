@@ -53,7 +53,12 @@ namespace Uberkarl {
         string currentFilePath;
 
         IPackageSource packageSource;
-        PackageHandle? sourceHandle;
+        // The archive the current level resource lives in (DiVoid #7571/#7572's package-as-VFS
+        // correction) — identity + resource inventory, retained across load/save so Save can merge into
+        // it instead of the old writer's "fabricate a whole package around this one level." Null while
+        // the level is unattached (a fresh "New", or one loaded from a bare file path via currentFilePath)
+        // — Save then routes through Save-As.
+        PackageContext packageContext;
 
         EditorCanvas canvas;
         Control topBar;
@@ -503,11 +508,11 @@ namespace Uberkarl {
             try {
                 using Package package = packageSource.Open(handle);
                 EditableLevel level = EditableLevelReader.FromPackage(package, path);
-                sourceHandle = handle;
+                packageContext = PackageContext.FromPackage(package, handle);
                 currentFilePath = null;
                 AdoptSession(level);
                 GD.Print($"LevelEditor: loaded {level.Width}x{level.Height} level '{level.Name}' " +
-                    $"({level.Tiles.Count} tiles, {level.Layers.Count} layers) from the package source.");
+                    $"({level.Tiles.Count} tiles, {level.Layers.Count} layers) from package '{packageContext.Name}'.");
             } catch (Exception exception) {
                 GD.PrintErr($"LevelEditor: {exception.GetType().Name}: {exception.Message}");
             }
@@ -517,10 +522,12 @@ namespace Uberkarl {
 
         void OnBrowserCancelled() => canvas?.GrabFocus();
 
-        // The browser's save flow (DiVoid #7552) has already settled a target — an existing package's
-        // handle to overwrite, or a brand-new package name to create — and a level name. Apply the rename
-        // first (so the serialized bytes and, for a new package, the manifest name carry it), then reuse
-        // the same write paths Save/Save-As-to-current already use.
+        // The browser's save flow (DiVoid #7552, corrected under the package-as-VFS save model #7571/
+        // #7572) has settled a target archive — an existing package to merge into, or a brand-new one to
+        // mint — and a level resource within it: either an explicitly-picked existing resource to
+        // overwrite (OverwriteResourcePath) or a brand-new one derived from the typed name. Apply the
+        // level's display-name rename first, then attach the level to its resolved resource slot (this is
+        // the one place paths are (re)namespaced — see EditableLevel.Attach), then merge-write.
         void OnBrowserSaveRequested(PackageSaveTarget target) {
             if (session == null || packageSource is not IWritablePackageSource writable) {
                 canvas?.GrabFocus();
@@ -530,10 +537,13 @@ namespace Uberkarl {
             session.RenameLevel(target.LevelName);
 
             if (target.ExistingHandle is { } existing) {
-                sourceHandle = existing;
-                currentFilePath = null;
-                WriteToSource(existing, writable);
+                // Always attachAsNew for the browser's Save-As flow when no explicit overwrite was picked
+                // — the level may already be attached to a DIFFERENT resource (e.g. it was loaded from
+                // one package/level and is now being saved as a distinctly-named one), and that prior
+                // attachment must never be mistaken for "nothing to do here."
+                WriteMergedIntoExisting(existing, target.OverwriteResourcePath, attachAsNew: true, writable);
             } else {
+                session.AttachAsNewResource(Array.Empty<ResourceEntry>()); // a fresh archive has no siblings to collide with
                 WriteToNewPackage(target.NewPackageName, writable);
             }
 
@@ -597,7 +607,7 @@ namespace Uberkarl {
             EditableLevel level = EditableLevel.CreateBlank(
                 "Untitled", NewLevelTileSize, NewLevelWidth, NewLevelHeight, DefaultPalette.Build(NewLevelTileSize));
             currentFilePath = null;
-            sourceHandle = null;
+            packageContext = null; // unattached — level.IsAttached is false; first Save routes to Save-As
             AdoptSession(level);
             GD.Print($"LevelEditor: new blank {NewLevelWidth}x{NewLevelHeight} level.");
         }
@@ -615,7 +625,7 @@ namespace Uberkarl {
             try {
                 EditableLevel level = EditableLevelReader.FromPackageBytes(bytes);
                 currentFilePath = sourcePath;
-                sourceHandle = null;
+                packageContext = null;
                 AdoptSession(level);
                 GD.Print($"LevelEditor: loaded {level.Width}x{level.Height} level '{level.Name}' " +
                     $"({level.Tiles.Count} tiles, {level.Layers.Count} layers) from {sourcePath}.");
@@ -745,23 +755,59 @@ namespace Uberkarl {
             }
         }
 
+        // Plain Save reuses whichever attached slot the level already occupies — it never renames or
+        // re-namespaces anything; that only happens on the Save-As paths above (EditableLevel.Attach).
+        // An unattached level (no packageContext, no currentFilePath — "New", never saved) has no slot to
+        // reuse, so Save routes through Save-As instead, exactly as before.
         void Save() {
-            if (sourceHandle is { } handle && packageSource is IWritablePackageSource writable)
-                WriteToSource(handle, writable);
+            if (packageContext != null && packageSource is IWritablePackageSource writable)
+                WriteMergedIntoExisting(packageContext.Handle, overwriteResourcePath: null, attachAsNew: false, writable);
             else if (currentFilePath != null)
                 WriteToPath(currentFilePath);
             else
                 SummonSaveBrowser();
         }
 
-        void WriteToSource(PackageHandle handle, IWritablePackageSource writable) {
+        // Merges the level into the package at `handle` — opens the existing archive, merges the level's
+        // contributions onto it (every sibling resource + the archive's identity carried forward
+        // unchanged — DiVoid #7571/#7572), and writes the merged bytes back.
+        //
+        // `overwriteResourcePath` set: the level attaches to that EXACT resource slot first (Save-As's
+        // "pick existing level to overwrite" outcome) — always re-attaches, regardless of `attachAsNew`.
+        //
+        // `overwriteResourcePath` null: `attachAsNew` decides. A plain re-save (`Save()`) passes `false` —
+        // it must reuse whatever slot the level already occupies (it is always already attached: it was
+        // either loaded from a real resource or established by an earlier Save-As in this same session).
+        // Save-As's "＋ New level…" outcome passes `true` — it MUST derive a fresh namespaced slot from
+        // the level's new name even when the level is already attached to a DIFFERENT resource (e.g. the
+        // author loaded "demo" and Save-As'd it as a brand-new "veriforest" level): checking
+        // `!session.Level.IsAttached` here would wrongly treat "already attached to something" as "nothing
+        // to do," silently overwriting the ORIGIN resource instead of creating the new one — the bug this
+        // parameter exists to prevent.
+        void WriteMergedIntoExisting(PackageHandle handle, ResourcePath? overwriteResourcePath, bool attachAsNew, IWritablePackageSource writable) {
             if (session == null)
                 return;
 
             try {
-                byte[] bytes = session.Save();
+                byte[] bytes;
+                // The read handle must be released before writing back over the same file (FolderPackageSource
+                // atomically renames a temp file over it) — Windows refuses to replace a file that is still
+                // open for read, so this open/merge is its own scope, closed before writable.Write below.
+                using (Package existing = packageSource.Open(handle)) {
+                    if (overwriteResourcePath is { } path)
+                        session.AttachToExistingResource(path);
+                    else if (attachAsNew || !session.Level.IsAttached)
+                        session.AttachAsNewResource(existing.Manifest.Resources);
+
+                    bytes = session.Save(existing);
+                }
+
                 writable.Write(handle, bytes);
-                GD.Print($"LevelEditor: saved {bytes.Length} bytes to '{session.Level.Name}' in the package source.");
+
+                using Package reopened = packageSource.Open(handle);
+                packageContext = PackageContext.FromPackage(reopened, handle);
+                currentFilePath = null;
+                GD.Print($"LevelEditor: saved {bytes.Length} bytes — level '{session.Level.Name}' in package '{packageContext.Name}'.");
             } catch (Exception exception) {
                 session.MarkDirty();
                 GD.PrintErr($"LevelEditor: save failed: {exception.GetType().Name}: {exception.Message}");
@@ -770,17 +816,19 @@ namespace Uberkarl {
             UpdateState();
         }
 
-        // Creates a brand-new package for a "+ New package…" Save-As target (no prior handle to overwrite).
+        // Mints a brand-new archive for a "+ New package…" Save-As target (no existing archive to merge
+        // into — the level is already attached to its own namespaced resource slot by the caller).
         void WriteToNewPackage(string proposedName, IWritablePackageSource writable) {
             if (session == null)
                 return;
 
             try {
-                byte[] bytes = session.Save();
+                byte[] bytes = session.SaveFresh(proposedName);
                 PackageHandle handle = writable.Create(proposedName, bytes);
-                sourceHandle = handle;
+                using Package reopened = packageSource.Open(handle);
+                packageContext = PackageContext.FromPackage(reopened, handle);
                 currentFilePath = null;
-                GD.Print($"LevelEditor: created a new package for '{session.Level.Name}' ({bytes.Length} bytes).");
+                GD.Print($"LevelEditor: created a new package '{proposedName}' for '{session.Level.Name}' ({bytes.Length} bytes).");
             } catch (Exception exception) {
                 session.MarkDirty();
                 GD.PrintErr($"LevelEditor: save failed: {exception.GetType().Name}: {exception.Message}");
@@ -789,15 +837,26 @@ namespace Uberkarl {
             UpdateState();
         }
 
+        // Fallback path for a level loaded from a bare file path (the res://content sample bundled at
+        // first run — see LoadFromResPath) rather than through the package source. Still merges: opens
+        // whatever package already exists at that path so a save here preserves its other resources too,
+        // rather than reintroducing the old fabricate-a-whole-package behavior for this one path.
         void WriteToPath(string absolutePath) {
             if (session == null)
                 return;
 
             try {
-                byte[] bytes = session.Save();
+                byte[] bytes;
+                // Same read-before-write ordering hazard as WriteMergedIntoExisting: release the read
+                // handle before overwriting the same path.
+                using (Package existing = PackageReader.Open(absolutePath)) {
+                    if (!session.Level.IsAttached)
+                        session.AttachAsNewResource(existing.Manifest.Resources);
+                    bytes = session.Save(existing);
+                }
                 File.WriteAllBytes(absolutePath, bytes);
                 currentFilePath = absolutePath;
-                sourceHandle = null;
+                packageContext = null;
                 GD.Print($"LevelEditor: saved {bytes.Length} bytes to {absolutePath}.");
             } catch (Exception exception) {
                 session.MarkDirty();
@@ -846,8 +905,10 @@ namespace Uberkarl {
             if (session == null)
                 return string.Empty;
 
-            string file = sourceHandle != null
-                ? "package"
+            // Package name and level name are shown separately (design #7572 §9) — they are independent
+            // identities under the package-as-VFS correction, never the same string doing double duty.
+            string package = packageContext != null
+                ? packageContext.Name
                 : currentFilePath == null ? "unsaved" : Path.GetFileName(currentFilePath);
             string dirty = session.IsDirty ? " *" : string.Empty;
             string layer = activeLayerIndex >= 0 && activeLayerIndex < session.Level.Layers.Count
@@ -856,7 +917,7 @@ namespace Uberkarl {
             string tile = activeTool == Tool.Erase
                 ? "erase"
                 : activeTileId == LayerDefinition.EmptyCell ? "none" : $"#{activeTileId}";
-            return $"{session.Level.Name}{dirty}  ·  {file}  ·  layer: {layer}  ·  tool: {activeTool} ({tile})";
+            return $"{session.Level.Name}{dirty}  ·  package: {package}  ·  layer: {layer}  ·  tool: {activeTool} ({tile})";
         }
 
         // ----- small factory helpers -----

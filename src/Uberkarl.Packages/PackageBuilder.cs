@@ -65,6 +65,70 @@ public sealed class PackageBuilder
         return this;
     }
 
+    /// <summary>
+    /// Adds a resource at <paramref name="path"/>, or replaces it in place if the path is already
+    /// staged — unlike <see cref="AddResource"/>, which throws on a duplicate path. This is the
+    /// primitive the package-as-VFS merge (DiVoid #7571/#7572) needs: composing a level's contributions
+    /// onto an existing archive's carried-forward resources must be able to overwrite the level's own
+    /// paths while every sibling path is added exactly once via <see cref="SeedFrom"/>. Preserves the
+    /// existing entry's position when replacing (so manifest ordering stays stable across a resave).
+    /// </summary>
+    public PackageBuilder AddOrReplaceResource(string kind, ResourcePath path, byte[] payload, string? mediaType = null, Attribution? attribution = null)
+    {
+        if (string.IsNullOrWhiteSpace(kind))
+            throw new ArgumentException("Resource kind must not be empty.", nameof(kind));
+        if (payload is null)
+            throw new ArgumentNullException(nameof(payload));
+
+        var replacement = new PendingResource(path, kind, mediaType ?? PackageFormat.DefaultMediaType, payload, attribution);
+        var existingIndex = resources.FindIndex(resource => resource.Path.Value == path.Value);
+        if (existingIndex >= 0)
+            resources[existingIndex] = replacement;
+        else
+        {
+            takenPaths.Add(path.Value);
+            resources.Add(replacement);
+        }
+
+        return this;
+    }
+
+    /// <summary>
+    /// Resets this builder to the identity and full resource set of <paramref name="existingPackage"/> —
+    /// every existing resource's payload is read back into memory and staged, so a caller can then use
+    /// <see cref="AddOrReplaceResource"/> to overwrite just the paths it owns and <see cref="Write"/> to
+    /// produce merged bytes that carry every untouched sibling forward unchanged. This is the "seed from
+    /// an existing package" capability the package-as-VFS save model (DiVoid #7572) composes onto: the
+    /// archive's <see cref="PackageManifest.Id"/>/Name/Version/Attribution/ForkedFrom and its dependency
+    /// list are copied verbatim — a merge never mutates identity, only content.
+    /// </summary>
+    public PackageBuilder SeedFrom(Package existingPackage)
+    {
+        if (existingPackage is null)
+            throw new ArgumentNullException(nameof(existingPackage));
+
+        var manifest = existingPackage.Manifest;
+        Id = manifest.Id;
+        Name = manifest.Name;
+        Version = manifest.Version;
+        Attribution = manifest.Attribution;
+        ForkedFrom = manifest.ForkedFrom;
+
+        dependencies.Clear();
+        dependencies.AddRange(manifest.Dependencies);
+
+        resources.Clear();
+        takenPaths.Clear();
+        foreach (var entry in manifest.Resources)
+        {
+            var payload = existingPackage.ReadBytes(entry.Path);
+            takenPaths.Add(entry.Path.Value);
+            resources.Add(new PendingResource(entry.Path, entry.Kind, entry.MediaType, payload, entry.Attribution));
+        }
+
+        return this;
+    }
+
     public PackageBuilder AddLicense(ResourcePath path, string license, byte[] payload)
     {
         AddResource(ResourceKind.License, path, payload, "text/plain");

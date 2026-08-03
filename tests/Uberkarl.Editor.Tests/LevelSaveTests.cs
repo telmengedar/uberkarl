@@ -133,14 +133,25 @@ public sealed class LevelSaveTests
     }
 
     [Test]
-    public void Session_RenameLevel_ThenSave_RoundTripsTheNewNameAsThePackagesManifestName()
+    public void Session_RenameLevel_ThenAttachThenSaveFresh_RoundTripsAsItsOwnNamespacedResource()
     {
+        // Package-as-VFS correction (DiVoid #7571/#7572): a level's display name is content, not a
+        // package's manifest name — SampleLevel() is unattached, so the flow a real Save-As drives is
+        // rename -> attach (derives levels/<slug>.json from the new name) -> save. The reloaded level's
+        // name (like the browser's existing resource list) is derived from ITS resource path, so it comes
+        // back slug-shaped rather than the exact typed string — that is the new, honest contract, not a
+        // round-trip bug: package identity no longer carries a level's display name at all.
         var session = new LevelEditSession(SampleLevel());
         session.RenameLevel("Saved Under New Name");
+        session.AttachAsNewResource(Array.Empty<ResourceEntry>());
 
-        var reloaded = EditableLevelReader.FromPackageBytes(session.Save());
+        var reloaded = EditableLevelReader.FromPackageBytes(session.SaveFresh("Some Package"));
 
-        Assert.That(reloaded.Name, Is.EqualTo("Saved Under New Name"));
+        Assert.Multiple(() =>
+        {
+            Assert.That(reloaded.LevelPath, Is.EqualTo(LevelResourcePaths.LevelPath("saved-under-new-name")));
+            Assert.That(reloaded.Name, Is.EqualTo("saved-under-new-name"));
+        });
     }
 
     // ----- helpers -----
@@ -156,7 +167,7 @@ public sealed class LevelSaveTests
         Array.Fill(cells, LayerDefinition.EmptyCell);
         var layer = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
         return new EditableLevel(
-            PackageId.New(), "Sample", "0.1.0", null, null, LevelPath, TileSetPath,
+            "Sample", LevelPath, TileSetPath,
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
             Palette(), new[] { layer });
