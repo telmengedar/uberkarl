@@ -254,3 +254,74 @@ small, cohesive changes; no new scope beyond the ask (#1184). Resolves §11 Q2 a
   image backdrop is a later, separate concern.
 - **Foreground parallax (`scrollSpeed > 1.0`)** and **zoom tuning** — left as Toni directed
   (allowed/unchanged); §11 Q1 and Q4 remain open.
+
+## 14. Bug fix — parallax is X-only (DiVoid #7528)
+
+Found in Toni's first real playtest of an edited level (via #7519's playtest-from-editor):
+`TileMapLevelBuilder`'s `Parallax2D.ScrollScale` was `(scrollSpeed, scrollSpeed)` — §5.2 and §13.3
+above both describe this as the shipped behaviour, and both are corrected by this section. A
+foreground layer (`scrollSpeed > 1.0`, §11 Q1's still-open "allowed but unused" case) placed at the
+bottom of the grid rendered around player height in play, because scrolling Y by the same factor as
+X drifts a parallax layer vertically as the follow camera tracks the player's Y position.
+
+### 14.1 Design decision
+
+| # | Decision | Rationale | Alternatives rejected |
+|---|---|---|---|
+| D13 | `ScrollScale` is `(scrollSpeed, 1.0)` — **X follows the layer's scroll speed, Y is always world-locked**, regardless of `scrollSpeed` | Uberkarl is a side-scroller (§0 vision, DiVoid #7407): depth reads left-right as the player walks, not vertically. A camera that also follows the player's Y (to keep them in frame while jumping/falling) would scale a non-1.0 Y factor by however far the camera has moved vertically, which is exactly the drift Toni hit | Per-axis authored parallax (`scrollSpeed` becomes a `Vector2`) — no content today needs independent X/Y depth, and it doubles the schema/validation surface for a side-scroller that has no vertical parallax use case (YAGNI, consistent with §2's non-scope) |
+
+No schema change: `scrollSpeed` (§4) still means "the one parallax factor", now correctly applied
+to the one axis parallax is wanted on. `TileMapLevelBuilder.ScrollScaleFor(float scrollSpeed)`
+isolates the mapping as a pure, unit-tested function; `WrapForScroll` (§5.2/§13.3) is otherwise
+unchanged — `repeat_size`, the `scrollSpeed != 1.0 OR repeat` wrap condition (D11), and the
+world-locked/collision invariant (D2) all stand as documented above.
+
+### 14.2 Verification (Godot MCP)
+
+- `dotnet build Uberkarl.csproj` → **0 warnings / 0 errors**. `Uberkarl.Editor.Tests` **114/114**
+  (was 107; +7 for `ScrollScaleFor`'s X-follows-speed and Y-always-1.0 cases) — `ScrollScaleFor`
+  itself is line/branch **100%** covered. Comment-grep (three-class sweep per DiVoid #1704) on the
+  changed diff: **0**. `get_editor_errors`: **0**.
+- Built a temporary verification level (foreground `scrollSpeed 1.5` with tiles on the bottom row +
+  the existing `backdrop` at `scrollSpeed 0.5`), ran `scenes/level_playable.tscn`, and drove the
+  player the full width with an **injected `InputEventJoypadMotion`** (axis 0) — see §15. Numeric
+  proof at two camera positions (x≈264 and x≈938, near the level's far edge): the foreground
+  `Parallax2D.position.y` read **exactly `0.0`** at both, and the backdrop's read the same constant
+  value at both (Y never moves as the camera pans horizontally) — confirming X-only parallax.
+  Screenshots at both positions show the foreground's bottom-row tiles pinned to the bottom of the
+  frame throughout, never rising toward the player. The verification level was not committed
+  (reverted after use); the shipped sample content (§8) is unchanged.
+
+## 15. Gamepad bindings for gameplay input (DiVoid #7528)
+
+Same playtest surfaced that `move_left` / `move_right` / `jump` (`project.godot [input]`) had
+**keyboard events only** — the editor's own `editor_cursor_*` / `editor_paint` actions are
+gamepad-first (§0 vision: this is a gamepad-first project), but the actual gameplay controls were
+keyboard-only, so the game was unplayable by pad.
+
+**Fix:** added gamepad events alongside the existing keyboard ones, mirroring the `editor_cursor_*`
+pattern — left stick + D-pad for movement, face button A for jump:
+
+| Action | Added events |
+|---|---|
+| `move_left` | `InputEventJoypadButton` button 13 (D-pad left) + `InputEventJoypadMotion` axis 0 value −1.0 (left stick) |
+| `move_right` | `InputEventJoypadButton` button 14 (D-pad right) + `InputEventJoypadMotion` axis 0 value +1.0 (left stick) |
+| `jump` | `InputEventJoypadButton` button 0 (face button A) |
+
+No schema/code change — this is purely an Input Map addition; `Player.cs`'s `Input.GetAxis`/
+`IsActionJustPressed` calls are input-source-agnostic and untouched.
+
+**Verification (Godot MCP):** confirmed via `get_input_actions` that the runtime `InputMap` carries
+both the original keyboard events and the new joypad ones for all three actions. Then, against the
+running `scenes/level_playable.tscn`, injected raw input directly with
+`Input.parse_input_event(...)` (not the higher-level action-simulation helper, so this exercises the
+same binding path a real pad does):
+- An `InputEventJoypadMotion` (axis 0, value 1.0) drove the player the **full width of the level**
+  (x≈264 → x≈938, screenshotted at both ends) — the same traversal §7's keyboard-driven proof used.
+- An `InputEventJoypadButton` (button 0, pressed) produced a clean jump: recording
+  `Player.velocity.y` every physics frame showed `Input.is_action_just_pressed("jump")` go true on
+  one frame while `is_on_floor()` was true, `velocity.y` become exactly `-330.0` (`JumpSpeed`) on
+  the next frame, and decay by `-15.0`/frame afterward (`Gravity / 60`) — a textbook jump-and-gravity
+  arc driven purely by the injected gamepad button.
+
+**Not verified here:** an actual physical controller — that confirmation is Toni's.
