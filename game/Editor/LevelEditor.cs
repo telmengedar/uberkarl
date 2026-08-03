@@ -346,6 +346,8 @@ namespace Uberkarl {
             else if (Fired(@event, EditorAction.Save)) Save();
             else if (Fired(@event, EditorAction.FocusNext)) AdvanceFocus();
             else if (Fired(@event, EditorAction.Playtest)) StartPlaytest();
+            else if (Fired(@event, EditorAction.ZoomIn)) canvas.ZoomIn();
+            else if (Fired(@event, EditorAction.ZoomOut)) canvas.ZoomOut();
             else return;
 
             GetViewport().SetInputAsHandled();

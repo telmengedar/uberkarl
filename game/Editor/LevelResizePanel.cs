@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Godot;
 using Uberkarl.Editor;
+using Uberkarl.Editor.Input;
 
 namespace Uberkarl {
 
@@ -199,6 +200,9 @@ namespace Uberkarl {
         sealed partial class DimensionStepper : Control {
 
             readonly string label;
+            // Edge-triggers analog-stick left/right so a held stick steps once per deflection like the
+            // D-pad, instead of every motion frame (DiVoid #7576) — see AnalogStepGate.
+            readonly AnalogStepGate analogGate = new();
 
             /// <summary>Raised whenever the value changes via a stepper press.</summary>
             public event Action Adjusted;
@@ -214,14 +218,38 @@ namespace Uberkarl {
                 FocusMode = FocusModeEnum.All;
                 MouseFilter = MouseFilterEnum.Stop;
                 CustomMinimumSize = new Vector2(260f, 32f);
-                FocusEntered += QueueRedraw;
+                FocusEntered += OnFocusEntered;
                 FocusExited += QueueRedraw;
+            }
+
+            // Re-baseline the analog gate to the stick's CURRENT position every time this stepper (re)gains
+            // focus — including the very first grab right after the panel opens. This is what fixes "opened
+            // the Resize panel with the stick still deflected from aiming the radial": if the stick is
+            // already pushed left/right at that moment, priming records it as the baseline rather than a
+            // fresh edge, so nothing steps until the stick returns to neutral and is pushed again — the same
+            // one-press-one-step feel the D-pad already has.
+            void OnFocusEntered() {
+                analogGate.Prime(Godot.Input.IsActionPressed("ui_left"), Godot.Input.IsActionPressed("ui_right"));
+                QueueRedraw();
             }
 
             public override void _GuiInput(InputEvent @event) {
                 if (@event is InputEventMouseButton button && button.Pressed) {
                     GrabFocus();
                     AcceptEvent();
+                    return;
+                }
+
+                // Analog stick (left-stick horizontal axis): route through the edge-trigger gate rather than
+                // reacting to the raw ui_left/ui_right pressed state directly, which Godot reports true on
+                // essentially every frame the stick stays deflected (unlike a D-pad button press, which it
+                // never echoes) — see AnalogStepGate's doc comment. Other axes (vertical stick) fall through
+                // unhandled so up/down focus navigation between the width/height rows still works.
+                if (@event is InputEventJoypadMotion motion && motion.Axis == JoyAxis.LeftX) {
+                    int step = analogGate.Poll(Godot.Input.IsActionPressed("ui_left"), Godot.Input.IsActionPressed("ui_right"));
+                    AcceptEvent();
+                    if (step != 0)
+                        Adjust(step);
                     return;
                 }
 
