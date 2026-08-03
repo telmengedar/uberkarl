@@ -288,4 +288,130 @@ public sealed class EditorInputTests
         Assert.That(CursorInputGate.AllowsPrimaryAction(surfaceHasFocus: true, directionalCaptured: free),
             Is.True, "editor_paint should act once focus returns to the canvas zone.");
     }
+
+    // ----- stepped value edit-mode state machine (layer panel Scroll stepper, DiVoid #7512) -----
+    //
+    // Toni's playtest fix: a directional press on a merely-focused control must stay free for spatial
+    // nav, so adjusting a value is gated behind an explicit enter/adjust/commit-or-cancel gesture. This is
+    // the engine-agnostic half of that fix (the Godot ScrollStepper control drives it from ui_accept/
+    // ui_left/ui_right/ui_cancel) — pinned down without Godot so the enter/adjust/commit/cancel semantics
+    // are independent of any device or control implementation.
+
+    [Test]
+    public void SteppedValueEditor_Enter_StartsEditingFromTheCurrentValue()
+    {
+        var editor = new SteppedValueEditor<float>((v, d) => v + d);
+
+        var entered = editor.Enter(1.0f);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(entered, Is.True);
+            Assert.That(editor.IsEditing, Is.True);
+            Assert.That(editor.PendingValue, Is.EqualTo(1.0f));
+        });
+    }
+
+    [Test]
+    public void SteppedValueEditor_Enter_WhileAlreadyEditing_IsNoOp()
+    {
+        var editor = new SteppedValueEditor<float>((v, d) => v + d);
+        editor.Enter(1.0f);
+        editor.Adjust(+1); // pending now 2.0
+
+        var reentered = editor.Enter(99f);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(reentered, Is.False, "a second Enter while editing must not restart the edit.");
+            Assert.That(editor.PendingValue, Is.EqualTo(2.0f), "the in-progress pending value must survive.");
+        });
+    }
+
+    [Test]
+    public void SteppedValueEditor_Adjust_WhileEditing_StepsThePendingValueOnly()
+    {
+        var editor = new SteppedValueEditor<float>(ScrollSpeedLadder.Step);
+        editor.Enter(1.0f);
+
+        var adjusted = editor.Adjust(-1);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(adjusted, Is.True);
+            Assert.That(editor.PendingValue, Is.EqualTo(0.75f), "steps via the injected ladder function.");
+            Assert.That(editor.IsEditing, Is.True, "adjusting does not end the edit.");
+        });
+    }
+
+    [Test]
+    public void SteppedValueEditor_Adjust_WhileNotEditing_IsNoOp()
+    {
+        var editor = new SteppedValueEditor<float>((v, d) => v + d);
+
+        var adjusted = editor.Adjust(+1);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(adjusted, Is.False);
+            Assert.That(editor.PendingValue, Is.EqualTo(0f), "never entered, so there is nothing to adjust.");
+        });
+    }
+
+    [Test]
+    public void SteppedValueEditor_TryCommit_WhileEditing_ReturnsFinalValueAndEndsTheEdit()
+    {
+        var editor = new SteppedValueEditor<float>(ScrollSpeedLadder.Step);
+        editor.Enter(1.0f);
+        editor.Adjust(-1); // 0.75
+        editor.Adjust(-1); // 0.5
+
+        var committed = editor.TryCommit(out var value);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(committed, Is.True);
+            Assert.That(value, Is.EqualTo(0.5f));
+            Assert.That(editor.IsEditing, Is.False);
+        });
+    }
+
+    [Test]
+    public void SteppedValueEditor_TryCommit_WhileNotEditing_ReturnsFalse()
+    {
+        var editor = new SteppedValueEditor<float>((v, d) => v + d);
+
+        var committed = editor.TryCommit(out _);
+
+        Assert.That(committed, Is.False, "nothing to commit — the caller must not apply the out value.");
+    }
+
+    [Test]
+    public void SteppedValueEditor_Cancel_WhileEditing_DiscardsThePendingValue_NoModelTouchNeeded()
+    {
+        var editor = new SteppedValueEditor<float>(ScrollSpeedLadder.Step);
+        editor.Enter(1.0f);
+        editor.Adjust(-1); // 0.75 — never committed, so the model was never touched.
+
+        var cancelled = editor.Cancel();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(cancelled, Is.True);
+            Assert.That(editor.IsEditing, Is.False);
+        });
+
+        // A fresh Enter starts clean from whatever the (untouched) model still holds — proving Cancel left
+        // no residue from the discarded 0.75 pending value.
+        editor.Enter(1.0f);
+        Assert.That(editor.PendingValue, Is.EqualTo(1.0f));
+    }
+
+    [Test]
+    public void SteppedValueEditor_Cancel_WhileNotEditing_IsNoOp()
+    {
+        var editor = new SteppedValueEditor<float>((v, d) => v + d);
+
+        Assert.That(editor.Cancel(), Is.False);
+    }
 }

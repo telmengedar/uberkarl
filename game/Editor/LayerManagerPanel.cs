@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Godot;
 using Uberkarl.Editor;
+using Uberkarl.Editor.Input;
 
 namespace Uberkarl {
 
@@ -16,13 +17,17 @@ namespace Uberkarl {
     /// <see cref="LayerModelChanged"/> so the controller re-snapshots the canvas — the panel never
     /// touches the canvas or the level builder.
     ///
-    /// Layout is one flat vertical focus chain — "+ Add Layer", then per layer (top = back, matching
-    /// array/draw order): a header (=set active), a Collision toggle, a Scroll stepper, a Repeat toggle,
-    /// Move up/down, and Delete — with every control's left/right focus neighbour pinned to itself so a
-    /// stick/D-pad aim cannot bounce focus onto the canvas underneath. The Scroll stepper is the one
-    /// control that consumes <c>ui_left</c>/<c>ui_right</c> itself (safe precisely because horizontal
-    /// focus movement is pinned away). Delete requires a confirm press (layer ops are not undoable this
-    /// increment, so an accidental delete would lose a whole painted layer).
+    /// Layout is a 2D control grid (Toni's playtest fix, DiVoid #7512): "+ Add Layer" is row 0, then per
+    /// layer (top = back, matching array/draw order) a row of a header (=set active), a Collision toggle,
+    /// a Scroll stepper, a Repeat toggle, Move up/down, and Delete. <b>Up/down moves to the same column
+    /// in the adjacent row; left/right moves within the row</b> — real spatial neighbours built from the
+    /// actual layout by <see cref="FocusGrid"/>, not one flat vertical chain — with every grid edge pinned
+    /// to itself so a stick/D-pad aim cannot bounce focus onto the canvas underneath. The Scroll stepper no
+    /// longer consumes left/right just because it is focused: it must first be entered via confirm
+    /// (<c>ui_accept</c>), at which point it alone owns left/right to step the preset ladder until a second
+    /// confirm commits or <c>ui_cancel</c> reverts — see <see cref="ScrollStepper"/>. Delete requires a
+    /// confirm press (layer ops are not undoable this increment, so an accidental delete would lose a
+    /// whole painted layer).
     /// </summary>
     public partial class LayerManagerPanel : Control {
 
@@ -31,7 +36,8 @@ namespace Uberkarl {
 
         int activeLayerIndex;
         int pendingDeleteIndex = -1;
-        int lastFocusedIndex;
+        int lastFocusedRow;
+        int lastFocusedCol;
 
         /// <summary>Raised after any mutation (add/delete/move/property-set): "refresh the canvas + status."</summary>
         public event Action LayerModelChanged;
@@ -82,7 +88,8 @@ namespace Uberkarl {
             session = editSession;
             activeLayerIndex = activeLayer;
             pendingDeleteIndex = -1;
-            lastFocusedIndex = 0;
+            lastFocusedRow = 0;
+            lastFocusedCol = 0;
             Visible = true;
             Rebuild();
         }
@@ -91,32 +98,49 @@ namespace Uberkarl {
             foreach (Node child in listBox.GetChildren())
                 child.QueueFree();
 
-            List<Control> chain = new List<Control>();
+            List<List<Control>> rows = new List<List<Control>>();
 
             Button addButton = new Button { Text = "+ Add Layer" };
             addButton.Pressed += OnAddPressed;
             listBox.AddChild(addButton);
-            chain.Add(addButton);
+            rows.Add(new List<Control> { addButton });
 
             if (session != null) {
                 IReadOnlyList<EditableLayer> layers = session.Level.Layers;
                 for (int i = 0; i < layers.Count; i++)
-                    BuildLayerRow(i, layers[i], chain);
+                    rows.Add(BuildLayerRow(i, layers[i]));
             }
 
-            ContainVerticalFocus(chain);
+            FocusGrid.Contain(rows);
+            TrackFocusPosition(rows);
 
-            int restore = Math.Clamp(lastFocusedIndex, 0, chain.Count - 1);
-            if (chain.Count > 0)
-                chain[restore].CallDeferred(Control.MethodName.GrabFocus);
-            else
-                CallDeferred(Control.MethodName.GrabFocus);
+            int restoreRow = Math.Clamp(lastFocusedRow, 0, rows.Count - 1);
+            int restoreCol = Math.Clamp(lastFocusedCol, 0, rows[restoreRow].Count - 1);
+            rows[restoreRow][restoreCol].CallDeferred(Control.MethodName.GrabFocus);
         }
 
-        void BuildLayerRow(int index, EditableLayer layer, List<Control> chain) {
+        // Records which grid cell last held focus (FocusEntered), so a Rebuild() triggered by a mutation
+        // can restore focus to roughly the same spot instead of always snapping back to "+ Add Layer" —
+        // every mutation rebuilds the whole row list from scratch, which would otherwise discard focus
+        // entirely.
+        void TrackFocusPosition(List<List<Control>> rows) {
+            for (int r = 0; r < rows.Count; r++) {
+                for (int c = 0; c < rows[r].Count; c++) {
+                    int capturedRow = r;
+                    int capturedCol = c;
+                    rows[r][c].FocusEntered += () => {
+                        lastFocusedRow = capturedRow;
+                        lastFocusedCol = capturedCol;
+                    };
+                }
+            }
+        }
+
+        List<Control> BuildLayerRow(int index, EditableLayer layer) {
             HBoxContainer row = new HBoxContainer();
             listBox.AddChild(row);
 
+            List<Control> columns = new List<Control>();
             bool editable = LayerPropertyRules.Editable(layer.Collision);
 
             Button header = new Button {
@@ -126,7 +150,7 @@ namespace Uberkarl {
             header.AddThemeColorOverride("font_color", index == activeLayerIndex ? EditorTheme.Accent : EditorTheme.Text);
             header.Pressed += () => OnHeaderPressed(index);
             row.AddChild(header);
-            chain.Add(header);
+            columns.Add(header);
 
             Button collisionToggle = new Button {
                 Text = layer.Collision ? "Collision: On" : "Collision: Off",
@@ -135,19 +159,19 @@ namespace Uberkarl {
             };
             collisionToggle.Pressed += () => OnCollisionPressed(index, collisionToggle);
             row.AddChild(collisionToggle);
-            chain.Add(collisionToggle);
+            columns.Add(collisionToggle);
 
             ScrollStepper stepper = new ScrollStepper();
             row.AddChild(stepper);
-            stepper.Configure($"Scroll {layer.ScrollSpeed:0.00}x" + (editable ? string.Empty : " (locked)"), !editable);
-            stepper.Stepped += direction => OnScrollStepped(index, direction);
-            chain.Add(stepper);
+            stepper.Configure(layer.ScrollSpeed, !editable);
+            stepper.Committed += value => OnScrollCommitted(index, value);
+            columns.Add(stepper);
 
             // Intentionally NOT Button.Disabled: Godot's default ui_down/ui_up focus navigation cannot
             // traverse THROUGH a disabled Control — it silently traps focus there instead of advancing to
             // the next chain member. The real gating already lives server-side (LevelEditSession.SetRepeat
             // no-ops while collision is on); here we only grey the label so the lock reads visually while
-            // keeping the control a normal, navigable stop in the chain.
+            // keeping the control a normal, navigable stop in the grid.
             Button repeatToggle = new Button {
                 Text = layer.Repeat ? "Repeat: On" : "Repeat: Off",
                 ToggleMode = true,
@@ -157,50 +181,30 @@ namespace Uberkarl {
                 repeatToggle.AddThemeColorOverride("font_color", EditorTheme.TextDim);
             repeatToggle.Pressed += () => OnRepeatPressed(index, repeatToggle);
             row.AddChild(repeatToggle);
-            chain.Add(repeatToggle);
+            columns.Add(repeatToggle);
 
             Button moveUp = new Button { Text = "Move ↑" };
             moveUp.Pressed += () => OnMovePressed(index, -1);
             row.AddChild(moveUp);
-            chain.Add(moveUp);
+            columns.Add(moveUp);
 
             Button moveDown = new Button { Text = "Move ↓" };
             moveDown.Pressed += () => OnMovePressed(index, +1);
             row.AddChild(moveDown);
-            chain.Add(moveDown);
+            columns.Add(moveDown);
 
             Button delete = new Button { Text = pendingDeleteIndex == index ? "Confirm Delete?" : "Delete" };
             delete.Pressed += () => OnDeletePressed(index);
             row.AddChild(delete);
-            chain.Add(delete);
+            columns.Add(delete);
 
             if (!editable) {
                 Label hint = new Label { Text = "  collision layers are world-locked and non-repeating" };
                 hint.AddThemeColorOverride("font_color", EditorTheme.TextDim);
                 listBox.AddChild(hint);
             }
-        }
 
-        // Vertical focus chain, ends and every horizontal side pinned to self — the same technique
-        // PackageBrowser.ContainListFocus uses, generalised beyond plain buttons to whatever control kind
-        // sits at each step (including the ScrollStepper, which alone wants ui_left/ui_right for itself).
-        // Also tracks which position last held focus (FocusEntered), so a Rebuild() triggered by a
-        // property edit can restore focus to roughly the same spot instead of always snapping back to
-        // "+ Add Layer" — every mutation rebuilds the whole row list from scratch, which would otherwise
-        // discard focus entirely.
-        void ContainVerticalFocus(List<Control> chain) {
-            NodePath self = new NodePath(".");
-            for (int i = 0; i < chain.Count; i++) {
-                Control control = chain[i];
-                int capturedIndex = i;
-                control.FocusNeighborLeft = self;
-                control.FocusNeighborRight = self;
-                control.FocusNeighborTop = i > 0 ? control.GetPathTo(chain[i - 1]) : self;
-                control.FocusNeighborBottom = i < chain.Count - 1 ? control.GetPathTo(chain[i + 1]) : self;
-                control.FocusNext = self;
-                control.FocusPrevious = self;
-                control.FocusEntered += () => lastFocusedIndex = capturedIndex;
-            }
+            return columns;
         }
 
         void OnAddPressed() {
@@ -230,11 +234,13 @@ namespace Uberkarl {
             Rebuild();
         }
 
-        void OnScrollStepped(int index, int direction) {
+        void OnScrollCommitted(int index, float value) {
             pendingDeleteIndex = -1;
-            LayerEditResult result = session.StepScrollSpeed(index, direction);
-            if (result.Happened)
+            LayerEditResult result = session.SetScrollSpeed(index, value);
+            if (result.Happened) {
+                GD.Print($"LayerManagerPanel: layer {index} scroll speed set to {value:0.00}x.");
                 LayerModelChanged?.Invoke();
+            }
             Rebuild();
         }
 
@@ -296,7 +302,9 @@ namespace Uberkarl {
         // focused, ui_cancel pressed on that Button never reaches the _GuiInput override above; it falls
         // through to unhandled input instead, where this catches it and marks it handled before it can
         // reach LevelEditor's own _UnhandledInput (which would otherwise treat it as a no-op while a modal
-        // is open, per its layerManager.IsOpen guard).
+        // is open, per its layerManager.IsOpen guard). The Scroll stepper consumes ui_cancel itself while
+        // it is mid-edit (exit edit mode without closing the panel), so this only ever sees ui_cancel that
+        // was NOT claimed by an in-progress edit.
         public override void _UnhandledInput(InputEvent @event) {
             if (!Visible || @event.IsEcho())
                 return;
@@ -314,59 +322,98 @@ namespace Uberkarl {
         }
 
         // The scroll-speed preset stepper: a small self-drawn focusable Control (not a Button) so it can
-        // safely consume ui_left/ui_right itself to step the value without fighting Button's own input
-        // handling. Locked (collision on) it still sits in the focus chain — greyed, and its input is
-        // inert — rather than being skipped, so navigating past it never traps focus on an unfocusable
-        // neighbour.
+        // gate ui_left/ui_right behind an explicit edit mode instead of fighting Button's own input
+        // handling. Merely focused, it is inert to left/right — those fall through unaccepted so
+        // FocusGrid's spatial neighbours handle them (Toni's playtest fix: left/right must stay free for
+        // navigation until the author deliberately enters edit mode). ui_accept enters edit mode (visually
+        // highlighted) starting from the committed value; while editing, left/right step a LOCAL pending
+        // value via SteppedValueEditor/ScrollSpeedLadder — the model is untouched until a second ui_accept
+        // commits it (raising Committed); ui_cancel while editing discards the pending value and reverts to
+        // the committed display with no model call at all. Locked (collision on) it still sits in the grid
+        // — greyed, and its input (including entering edit mode) is inert — rather than being skipped, so
+        // navigating past it never traps focus on an unfocusable neighbour.
         sealed partial class ScrollStepper : Control {
 
-            public event Action<int> Stepped;
+            /// <summary>Raised once, on a successful commit, with the final absolute scroll speed to apply to the model.</summary>
+            public event Action<float> Committed;
 
-            string label = string.Empty;
+            readonly SteppedValueEditor<float> edit = new(ScrollSpeedLadder.Step);
+
+            float committedValue;
             bool locked;
 
             public override void _Ready() {
                 FocusMode = FocusModeEnum.All;
                 MouseFilter = MouseFilterEnum.Stop;
                 CustomMinimumSize = new Vector2(150f, 32f);
-                NodePath self = new NodePath(".");
-                FocusNeighborLeft = self;
-                FocusNeighborRight = self;
                 FocusEntered += QueueRedraw;
                 FocusExited += QueueRedraw;
             }
 
-            public void Configure(string text, bool isLocked) {
-                label = text;
+            public void Configure(float scrollSpeed, bool isLocked) {
+                committedValue = scrollSpeed;
                 locked = isLocked;
                 QueueRedraw();
             }
 
             public override void _GuiInput(InputEvent @event) {
-                if (@event.IsActionPressed("ui_left")) {
-                    AcceptEvent();
-                    if (!locked)
-                        Stepped?.Invoke(-1);
-                } else if (@event.IsActionPressed("ui_right")) {
-                    AcceptEvent();
-                    if (!locked)
-                        Stepped?.Invoke(+1);
-                } else if (@event is InputEventMouseButton button && button.Pressed) {
+                if (@event is InputEventMouseButton button && button.Pressed) {
                     GrabFocus();
                     AcceptEvent();
+                    return;
                 }
+
+                // Locked stays a normal, focusable grid stop (mouse click above still works) but every
+                // value-editing gesture is inert — collision governs scroll speed while it is on.
+                if (locked)
+                    return;
+
+                if (@event.IsActionPressed("ui_accept")) {
+                    AcceptEvent();
+                    if (edit.IsEditing) {
+                        edit.TryCommit(out float value);
+                        committedValue = value;
+                        Committed?.Invoke(value);
+                    } else {
+                        edit.Enter(committedValue);
+                    }
+                    QueueRedraw();
+                } else if (edit.IsEditing && @event.IsActionPressed("ui_left")) {
+                    AcceptEvent();
+                    edit.Adjust(-1);
+                    QueueRedraw();
+                } else if (edit.IsEditing && @event.IsActionPressed("ui_right")) {
+                    AcceptEvent();
+                    edit.Adjust(+1);
+                    QueueRedraw();
+                } else if (edit.IsEditing && @event.IsActionPressed("ui_cancel")) {
+                    AcceptEvent();
+                    edit.Cancel();
+                    QueueRedraw();
+                }
+                // Not editing: ui_left/ui_right/ui_cancel fall through unaccepted — ui_left/right resolve to
+                // FocusGrid's spatial neighbours (spatial nav), ui_cancel bubbles to the panel's own
+                // _UnhandledInput and closes it, exactly as on every other control in the grid.
             }
 
             public override void _Draw() {
                 Rect2 rect = new Rect2(Vector2.Zero, Size);
-                Color back = locked ? new Color(0.14f, 0.15f, 0.17f, 0.6f) : EditorTheme.PanelRaised;
+                Color panelRaised = EditorTheme.PanelRaised;
+                Color editingBack = new Color(panelRaised.R + 0.10f, panelRaised.G + 0.10f, panelRaised.B + 0.10f);
+                Color back = locked ? new Color(0.14f, 0.15f, 0.17f, 0.6f) : edit.IsEditing ? editingBack : panelRaised;
                 DrawRect(rect, back);
-                if (HasFocus())
+
+                if (edit.IsEditing)
+                    DrawRect(rect, EditorTheme.Accent, false, 3f);
+                else if (HasFocus())
                     DrawRect(rect, EditorTheme.Accent, false, 2f);
 
                 Font font = GetThemeDefaultFont();
                 int fontSize = GetThemeDefaultFontSize();
                 Color textColor = locked ? EditorTheme.TextDim : EditorTheme.Text;
+                string label = locked
+                    ? $"Scroll {committedValue:0.00}x (locked)"
+                    : edit.IsEditing ? $"◄ {edit.PendingValue:0.00}x ►" : $"Scroll {committedValue:0.00}x";
                 DrawString(font, new Vector2(8f, Size.Y * 0.5f + 5f), label,
                     HorizontalAlignment.Left, Size.X - 16f, fontSize, textColor);
             }
