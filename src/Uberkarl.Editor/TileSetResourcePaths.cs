@@ -27,6 +27,13 @@ public static class TileSetResourcePaths
     public static ResourcePath GraphicPath(string slug, int tileId) => ResourcePath.Create($"graphics/{slug}/{tileId}.png");
 
     /// <summary>
+    /// The in-package path an animation frame beyond the tile's primary graphic is stored at (DiVoid #7551
+    /// Phase 2, design #7580). <paramref name="frameNumber"/> is the OVERALL frame number (2, 3, …) — frame
+    /// 1 is the tile's primary graphic at <see cref="GraphicPath"/>, never stored here.
+    /// </summary>
+    public static ResourcePath FramePath(string slug, int tileId, int frameNumber) => ResourcePath.Create($"graphics/{slug}/{tileId}-{frameNumber}.png");
+
+    /// <summary>
     /// Extracts the slug back out of a <c>tilesets/&lt;slug&gt;.json</c> path (the inverse of
     /// <see cref="TileSetPath"/>), or <c>null</c> when <paramref name="path"/> does not follow that
     /// convention — used to keep a re-saved, already-attached tile set on its own established slug rather

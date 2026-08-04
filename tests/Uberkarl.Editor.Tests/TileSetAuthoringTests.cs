@@ -217,4 +217,245 @@ public sealed class TileSetAuthoringTests
         session.MarkDirty();
         Assert.That(session.IsDirty, Is.True);
     }
+
+    // ----- AddFrame / RemoveFrame / SetAnimationSpeed — DiVoid #7551 Phase 2, design #7580 -----
+    // The simple<->animated structural transition: a tile carries no "kind" flag of its own — Frames.Count
+    // being non-zero IS animated (EditableTile.IsAnimated), so these tests pin that transition directly.
+
+    [Test]
+    public void NewTile_IsNotAnimated()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        var id = tileSet.AddTile(Png("A"), collides: false);
+
+        Assert.That(tileSet.Tiles.First(tile => tile.Id == id).IsAnimated, Is.False);
+    }
+
+    [Test]
+    public void AddFrame_ToASimpleTile_MakesItAnimated_TheSimpleToAnimatedTransition()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        var id = tileSet.AddTile(Png("A"), collides: false);
+
+        var happened = tileSet.AddFrame(id, Png("B"));
+
+        var tile = tileSet.Tiles.First(t => t.Id == id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(happened, Is.True);
+            Assert.That(tile.IsAnimated, Is.True);
+            Assert.That(tile.Frames, Has.Count.EqualTo(1));
+            Assert.That(tile.Frames[0].Graphic, Is.EqualTo(Png("B")));
+            Assert.That(tile.Graphic, Is.EqualTo(Png("A")), "the original graphic stays frame 0.");
+        });
+    }
+
+    [Test]
+    public void AddFrame_Twice_KeepsFramesInAppendOrder()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        var id = tileSet.AddTile(Png("A"), collides: false);
+
+        tileSet.AddFrame(id, Png("B"));
+        tileSet.AddFrame(id, Png("C"));
+
+        var tile = tileSet.Tiles.First(t => t.Id == id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(tile.Frames, Has.Count.EqualTo(2));
+            Assert.That(tile.Frames[0].Graphic, Is.EqualTo(Png("B")));
+            Assert.That(tile.Frames[1].Graphic, Is.EqualTo(Png("C")));
+        });
+    }
+
+    [Test]
+    public void AddFrame_UnknownTileId_IsNoOp_ReturnsFalse()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        Assert.That(tileSet.AddFrame(99, Png("A")), Is.False);
+    }
+
+    [Test]
+    public void AddFrame_RejectsEmptyGraphic()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        var id = tileSet.AddTile(Png("A"), collides: false);
+        Assert.Throws<ArgumentException>(() => tileSet.AddFrame(id, Array.Empty<byte>()));
+    }
+
+    [Test]
+    public void AddFrame_SetsAProvisionalFramePath_DistinctFromTheGraphicPath()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Forest Set");
+        var id = tileSet.AddTile(Png("A"), collides: false);
+
+        tileSet.AddFrame(id, Png("B"));
+
+        var tile = tileSet.Tiles.First(t => t.Id == id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(tile.Frames[0].GraphicPath, Is.EqualTo(TileSetResourcePaths.FramePath("forest-set", id, 2)));
+            Assert.That(tile.Frames[0].GraphicPath, Is.Not.EqualTo(tile.GraphicPath));
+        });
+    }
+
+    [Test]
+    public void RemoveFrame_DropsExactlyThatFrame_KeepsOthers()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        var id = tileSet.AddTile(Png("A"), collides: false);
+        tileSet.AddFrame(id, Png("B"));
+        tileSet.AddFrame(id, Png("C"));
+
+        var happened = tileSet.RemoveFrame(id, 0); // drops "B", keeps "C"
+
+        var tile = tileSet.Tiles.First(t => t.Id == id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(happened, Is.True);
+            Assert.That(tile.Frames, Has.Count.EqualTo(1));
+            Assert.That(tile.Frames[0].Graphic, Is.EqualTo(Png("C")));
+        });
+    }
+
+    [Test]
+    public void RemoveFrame_TheOnlyFrame_MakesTheTileSimpleAgain_TheAnimatedToSimpleTransition()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        var id = tileSet.AddTile(Png("A"), collides: false);
+        tileSet.AddFrame(id, Png("B"));
+
+        var happened = tileSet.RemoveFrame(id, 0);
+
+        var tile = tileSet.Tiles.First(t => t.Id == id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(happened, Is.True);
+            Assert.That(tile.IsAnimated, Is.False);
+            Assert.That(tile.Frames, Is.Empty);
+            Assert.That(tile.Graphic, Is.EqualTo(Png("A")), "the tile itself (frame 0) survives — only the extra frame is gone.");
+        });
+    }
+
+    [Test]
+    public void RemoveFrame_UnknownTileId_IsNoOp_ReturnsFalse()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        Assert.That(tileSet.RemoveFrame(99, 0), Is.False);
+    }
+
+    [Test]
+    public void RemoveFrame_OutOfRangeIndex_IsNoOp_ReturnsFalse()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        var id = tileSet.AddTile(Png("A"), collides: false);
+        tileSet.AddFrame(id, Png("B"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(tileSet.RemoveFrame(id, -1), Is.False);
+            Assert.That(tileSet.RemoveFrame(id, 1), Is.False);
+        });
+    }
+
+    [Test]
+    public void SetAnimationSpeed_ChangesTheSpeed_NoOpWhenUnchanged()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        var id = tileSet.AddTile(Png("A"), collides: false);
+
+        var changed = tileSet.SetAnimationSpeed(id, 12.0);
+        var noOp = tileSet.SetAnimationSpeed(id, 12.0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(changed, Is.True);
+            Assert.That(noOp, Is.False);
+            Assert.That(tileSet.Tiles.First(t => t.Id == id).AnimationSpeed, Is.EqualTo(12.0));
+        });
+    }
+
+    [Test]
+    public void SetAnimationSpeed_NonPositive_Throws()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        var id = tileSet.AddTile(Png("A"), collides: false);
+
+        Assert.Throws<ArgumentException>(() => tileSet.SetAnimationSpeed(id, 0));
+    }
+
+    [Test]
+    public void SetAnimationSpeed_UnknownTileId_IsNoOp_ReturnsFalse()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        Assert.That(tileSet.SetAnimationSpeed(99, 12.0), Is.False);
+    }
+
+    [Test]
+    public void Attach_RemapsFramePaths_ToTheTileSetsOwnNamespace()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        var id = tileSet.AddTile(Png("A"), collides: false);
+        tileSet.AddFrame(id, Png("B"));
+        tileSet.AddFrame(id, Png("C"));
+
+        tileSet.Attach("forest-tiles", overwriteTileSetPath: null);
+
+        var tile = tileSet.Tiles.First(t => t.Id == id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(tile.GraphicPath, Is.EqualTo(TileSetResourcePaths.GraphicPath("forest-tiles", id)));
+            Assert.That(tile.Frames[0].GraphicPath, Is.EqualTo(TileSetResourcePaths.FramePath("forest-tiles", id, 2)));
+            Assert.That(tile.Frames[1].GraphicPath, Is.EqualTo(TileSetResourcePaths.FramePath("forest-tiles", id, 3)));
+        });
+    }
+
+    // ----- TileSetEditSession: frame/speed intents + dirty tracking -----
+
+    [Test]
+    public void Session_AddFrame_MarksDirty()
+    {
+        var session = new TileSetEditSession(EditableTileSet.CreateBlank("Untitled"));
+        var id = session.AddTile(Png("A"), collides: false);
+        session.MarkSaved();
+
+        var happened = session.AddFrame(id, Png("B"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(happened, Is.True);
+            Assert.That(session.IsDirty, Is.True);
+            Assert.That(session.TileSet.Tiles[0].IsAnimated, Is.True);
+        });
+    }
+
+    [Test]
+    public void Session_RemoveFrame_UnknownTileId_DoesNotMarkDirty()
+    {
+        var session = new TileSetEditSession(EditableTileSet.CreateBlank("Untitled"));
+
+        var happened = session.RemoveFrame(1, 0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(happened, Is.False);
+            Assert.That(session.IsDirty, Is.False);
+        });
+    }
+
+    [Test]
+    public void Session_SetAnimationSpeed_MarksDirty()
+    {
+        var session = new TileSetEditSession(EditableTileSet.CreateBlank("Untitled"));
+        var id = session.AddTile(Png("A"), collides: false);
+        session.MarkSaved();
+
+        var happened = session.SetAnimationSpeed(id, 16.0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(happened, Is.True);
+            Assert.That(session.IsDirty, Is.True);
+        });
+    }
 }

@@ -215,6 +215,73 @@ public sealed class PackageVfsSaveModelTests
         });
     }
 
+    // ----- TileSetMergeWriter + EditableTileSetReader: animated-tile round trip (DiVoid #7551 Phase 2) -----
+
+    [Test]
+    public void TileSetMergeWriter_BuildContributions_IncludesEveryAnimationFrameGraphic()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled", Palette());
+        var id = tileSet.Tiles[0].Id;
+        tileSet.AddFrame(id, Encoding.UTF8.GetBytes("FRAME-2"));
+        tileSet.AddFrame(id, Encoding.UTF8.GetBytes("FRAME-3"));
+        tileSet.Attach("forest-tiles", null);
+
+        var contributions = TileSetMergeWriter.BuildContributions(tileSet);
+        var tile = tileSet.Tiles[0];
+
+        Assert.Multiple(() =>
+        {
+            // The primary graphic plus both extra frames — three TileGraphic contributions for one tile.
+            Assert.That(contributions.Count(c => c.Kind == ResourceKind.TileGraphic), Is.EqualTo(3));
+            Assert.That(contributions.Select(c => c.Path), Contains.Item(tile.Frames[0].GraphicPath));
+            Assert.That(contributions.Select(c => c.Path), Contains.Item(tile.Frames[1].GraphicPath));
+        });
+    }
+
+    [Test]
+    public void SavedAnimatedTileSet_ReloadsThroughEditableTileSetReader_WithFramesAndSpeedIntact()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled", Palette());
+        var id = tileSet.Tiles[0].Id;
+        var frame2Bytes = Encoding.UTF8.GetBytes("FRAME-2");
+        var frame3Bytes = Encoding.UTF8.GetBytes("FRAME-3");
+        tileSet.AddFrame(id, frame2Bytes);
+        tileSet.AddFrame(id, frame3Bytes);
+        tileSet.SetAnimationSpeed(id, 12.0);
+        tileSet.Attach("forest-tiles", null);
+
+        var contributions = TileSetMergeWriter.BuildContributions(tileSet);
+        var packageBytes = TileSetMergeWriter.BuildFresh("Forest Pack", contributions);
+        using var package = PackageReader.Open(new MemoryStream(packageBytes));
+
+        var reloaded = EditableTileSetReader.FromPackage(package);
+        var reloadedTile = reloaded.Tiles.First(t => t.Id == id);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(reloadedTile.IsAnimated, Is.True);
+            Assert.That(reloadedTile.Frames, Has.Count.EqualTo(2));
+            Assert.That(reloadedTile.Frames[0].Graphic, Is.EqualTo(frame2Bytes));
+            Assert.That(reloadedTile.Frames[1].Graphic, Is.EqualTo(frame3Bytes));
+            Assert.That(reloadedTile.AnimationSpeed, Is.EqualTo(12.0));
+        });
+    }
+
+    [Test]
+    public void SavedSimpleTileSet_ReloadsThroughEditableTileSetReader_AsNotAnimated()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled", Palette());
+        tileSet.Attach("forest-tiles", null);
+
+        var contributions = TileSetMergeWriter.BuildContributions(tileSet);
+        var packageBytes = TileSetMergeWriter.BuildFresh("Forest Pack", contributions);
+        using var package = PackageReader.Open(new MemoryStream(packageBytes));
+
+        var reloaded = EditableTileSetReader.FromPackage(package);
+
+        Assert.That(reloaded.Tiles[0].IsAnimated, Is.False);
+    }
+
     [Test]
     public void Compose_PreservesSiblingResourcesAndPackageIdentity_TheSevenFiveSeventyPointSixteenSevenScenario()
     {

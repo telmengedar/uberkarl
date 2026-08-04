@@ -27,7 +27,11 @@ public static class TileSetMergeWriter
         var contributions = new List<PendingResource>(tileSet.Tiles.Count + 1);
 
         foreach (var tile in tileSet.Tiles)
+        {
             contributions.Add(new PendingResource(tile.GraphicPath, ResourceKind.TileGraphic, "image/png", tile.Graphic, attribution: null));
+            foreach (var frame in tile.Frames)
+                contributions.Add(new PendingResource(frame.GraphicPath, ResourceKind.TileGraphic, "image/png", frame.Graphic, attribution: null));
+        }
 
         var tileSetDefinition = new TileSetDefinition
         {
@@ -38,6 +42,8 @@ public static class TileSetMergeWriter
                     Name = tile.Name,
                     Graphic = ResourceReference.ToSelf(tile.GraphicPath),
                     Collides = tile.Collides,
+                    Frames = tile.Frames.Select(frame => ResourceReference.ToSelf(frame.GraphicPath)).ToArray(),
+                    AnimationSpeed = tile.AnimationSpeed,
                 })
                 .ToArray(),
         };

@@ -22,6 +22,15 @@ public sealed class ResolvedLevel
     /// <summary>Tile ids flagged as solid in the tile set. Only enforced on layers whose <see cref="ResolvedLayer.Collision"/> is true.</summary>
     public IReadOnlySet<int> CollidingTileIds { get; init; } = new HashSet<int>();
 
+    /// <summary>
+    /// Resolved animation data (ordered frame bytes + speed) keyed by tile id, for exactly the tiles
+    /// <see cref="TileDefinition.IsAnimated"/> flags (DiVoid #7551 Phase 2, design #7580). A tile id absent
+    /// from this dictionary is a simple tile — its one frame is already in <see cref="TileGraphics"/>.
+    /// <c>TileSetBuilder</c> (Godot-side) is the only consumer: it maps an entry here to a
+    /// <c>TileSetAtlasSource</c> with N animation frames + speed, native Godot playback.
+    /// </summary>
+    public IReadOnlyDictionary<int, ResolvedAnimation> TileAnimations { get; init; } = new Dictionary<int, ResolvedAnimation>();
+
     /// <summary>Named spawn cells (tile units) keyed by spawn name. Empty when the level declares none.</summary>
     public IReadOnlyDictionary<string, GridPosition> Spawns { get; init; }
         = new Dictionary<string, GridPosition>();
@@ -61,4 +70,18 @@ public sealed class ResolvedLayer
     public bool Repeat { get; init; }
 
     public IReadOnlyList<int> Cells { get; init; } = Array.Empty<int>();
+}
+
+/// <summary>
+/// One animated tile's resolved playback data: every frame's bytes in author order (frame 0 = the tile's
+/// <see cref="TileDefinition.Graphic"/>, then <see cref="TileDefinition.Frames"/> in order) plus the
+/// playback speed. Always at least two frames — <see cref="TileDefinition.IsAnimated"/> requires
+/// <c>Frames.Count &gt; 0</c>, which is exactly what makes an entry exist for a tile in the first place.
+/// </summary>
+public sealed class ResolvedAnimation
+{
+    public IReadOnlyList<byte[]> Frames { get; init; } = Array.Empty<byte[]>();
+
+    /// <summary>Frames per second (Godot's <c>TileSetAtlasSource</c> animation speed unit).</summary>
+    public double Speed { get; init; } = TileDefinition.DefaultAnimationSpeed;
 }

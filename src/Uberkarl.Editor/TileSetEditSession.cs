@@ -59,6 +59,42 @@ public sealed class TileSetEditSession
         return happened;
     }
 
+    /// <summary>
+    /// Appends a new animation frame to the tile with <paramref name="id"/> (DiVoid #7551 Phase 2). The
+    /// tile's second frame is the simple→animated structural transition. No-op (returns <c>false</c>) when
+    /// the tile does not exist.
+    /// </summary>
+    public bool AddFrame(int id, byte[] graphic)
+    {
+        var happened = TileSet.AddFrame(id, graphic);
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
+    /// <summary>
+    /// Removes the animation frame at <paramref name="frameIndex"/> (0-based into the tile's frames beyond
+    /// its primary graphic) from the tile with <paramref name="id"/>. Removing the last one is the
+    /// animated→simple structural transition. No-op (returns <c>false</c>) when the tile does not exist or
+    /// the index is out of range.
+    /// </summary>
+    public bool RemoveFrame(int id, int frameIndex)
+    {
+        var happened = TileSet.RemoveFrame(id, frameIndex);
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
+    /// <summary>Sets the animation speed (frames per second) of the tile with <paramref name="id"/>. No-op when unchanged.</summary>
+    public bool SetAnimationSpeed(int id, double speed)
+    {
+        var happened = TileSet.SetAnimationSpeed(id, speed);
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
     /// <summary>Renames the tile set itself. Blank/whitespace-only input is a no-op (mirrors <see cref="LevelEditSession.RenameLevel"/>).</summary>
     public bool Rename(string name)
     {

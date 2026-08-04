@@ -19,7 +19,7 @@ namespace Uberkarl {
     public static class TileMapLevelBuilder {
 
         public static Node2D Build(ResolvedLevel level) {
-            TileSetBuilder.BuiltTileSet shared = TileSetBuilder.Build(level.TileGraphics, level.CollidingTileIds, level.TileSize);
+            TileSetBuilder.BuiltTileSet shared = TileSetBuilder.Build(level.TileGraphics, level.CollidingTileIds, level.TileAnimations, level.TileSize);
 
             // The layer's content size in pixels — used as the repeat period for a repeating layer so
             // its content tiles seamlessly across the scroll extent.
@@ -47,7 +47,7 @@ namespace Uberkarl {
         /// (<c>SetCell</c>/<c>EraseCell</c>) without rebuilding the tree.
         /// </summary>
         public static BuiltLevel BuildEditable(ResolvedLevel level) {
-            TileSetBuilder.BuiltTileSet shared = TileSetBuilder.Build(level.TileGraphics, level.CollidingTileIds, level.TileSize);
+            TileSetBuilder.BuiltTileSet shared = TileSetBuilder.Build(level.TileGraphics, level.CollidingTileIds, level.TileAnimations, level.TileSize);
 
             Node2D root = new Node2D { Name = "Level" };
             List<TileMapLayer> layers = new List<TileMapLayer>(level.Layers.Count);

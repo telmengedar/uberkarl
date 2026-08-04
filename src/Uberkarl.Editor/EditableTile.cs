@@ -11,7 +11,12 @@ namespace Uberkarl.Editor;
 /// </summary>
 public sealed class EditableTile
 {
-    public EditableTile(int id, ResourcePath graphicPath, byte[] graphic, bool collides, string? name = null)
+    /// <summary>Mirrors <see cref="Content.TileDefinition.DefaultAnimationSpeed"/> — kept as its own constant so this authoring-side type has no compile-time dependency shape surprise on <c>Content</c> beyond what it already has via <c>LayerDefinition.EmptyCell</c>.</summary>
+    public const double DefaultAnimationSpeed = Content.TileDefinition.DefaultAnimationSpeed;
+
+    public EditableTile(
+        int id, ResourcePath graphicPath, byte[] graphic, bool collides, string? name = null,
+        IReadOnlyList<EditableTileFrame>? frames = null, double animationSpeed = DefaultAnimationSpeed)
     {
         if (id == Content.LayerDefinition.EmptyCell)
             throw new ArgumentException($"Tile id {Content.LayerDefinition.EmptyCell} is reserved for empty cells.", nameof(id));
@@ -20,6 +25,8 @@ public sealed class EditableTile
         Graphic = graphic ?? throw new ArgumentNullException(nameof(graphic));
         Collides = collides;
         Name = name;
+        Frames = frames ?? Array.Empty<EditableTileFrame>();
+        AnimationSpeed = animationSpeed;
     }
 
     /// <summary>The numeric id a grid cell stores to place this tile.</summary>
@@ -28,12 +35,21 @@ public sealed class EditableTile
     /// <summary>Optional author-facing display name (DiVoid #7551 — named via the on-screen keyboard).</summary>
     public string? Name { get; }
 
-    /// <summary>The in-package resource path this tile's graphic is stored at (preserved on save).</summary>
+    /// <summary>The in-package resource path this tile's graphic (animation frame 0) is stored at (preserved on save).</summary>
     public ResourcePath GraphicPath { get; }
 
-    /// <summary>The tile graphic bytes (a PNG for the sample content). Held so the tile set round-trips without the source package.</summary>
+    /// <summary>The tile graphic bytes (a PNG for the sample content) — frame 0. Held so the tile set round-trips without the source package.</summary>
     public byte[] Graphic { get; }
 
-    /// <summary>Whether the tile is solid. Only enforced on a collision layer at play time.</summary>
+    /// <summary>Whether the tile is solid. Only enforced on a collision layer at play time. Stable across every animation frame (design #7580 §11).</summary>
     public bool Collides { get; }
+
+    /// <summary>Ordered animation frames AFTER <see cref="Graphic"/> (DiVoid #7551 Phase 2). Empty for a simple tile — see <see cref="IsAnimated"/>.</summary>
+    public IReadOnlyList<EditableTileFrame> Frames { get; }
+
+    /// <summary>Animation playback speed in frames per second. Only meaningful when <see cref="IsAnimated"/>.</summary>
+    public double AnimationSpeed { get; }
+
+    /// <summary>Structural tile kind (design #7580 §7 — no enum): true once at least one frame has been added beyond <see cref="Graphic"/>.</summary>
+    public bool IsAnimated => Frames.Count > 0;
 }

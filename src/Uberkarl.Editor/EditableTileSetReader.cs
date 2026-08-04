@@ -63,7 +63,17 @@ public static class EditableTileSetReader
                 throw new LevelContentException(
                     $"Tile {tile.Id} graphic lives in another package; cross-package graphics are not editable in this increment.");
             var graphicBytes = package.ReadBytes(tile.Graphic.Path);
-            tiles.Add(new EditableTile(tile.Id, tile.Graphic.Path, graphicBytes, tile.Collides, tile.Name));
+
+            var frames = new List<EditableTileFrame>(tile.Frames.Count);
+            foreach (var frame in tile.Frames)
+            {
+                if (!frame.IsSelf && frame.Package != package.Id)
+                    throw new LevelContentException(
+                        $"Tile {tile.Id} animation frame lives in another package; cross-package graphics are not editable in this increment.");
+                frames.Add(new EditableTileFrame(frame.Path, package.ReadBytes(frame.Path)));
+            }
+
+            tiles.Add(new EditableTile(tile.Id, tile.Graphic.Path, graphicBytes, tile.Collides, tile.Name, frames, tile.AnimationSpeed));
         }
 
         // Loaded from a real package resource, so this tile set already occupies a stable slot — isAttached
