@@ -74,6 +74,16 @@ namespace Uberkarl {
             Image strip = Image.CreateEmpty(tileSize * frameCount, tileSize, false, Image.Format.Rgba8);
             for (int frame = 0; frame < frameCount; frame++) {
                 Image frameImage = LoadImage(tileId, animation.Frames[frame]);
+                // Godot's Image.BlitRect requires the source and destination images to share the exact
+                // same pixel format and silently no-ops (leaving the destination region untouched, i.e.
+                // the strip's transparent-black default) when they don't. PNGs decode to whatever format
+                // their own pixel data implies (Rgb8 for an opaque source, L8/LA8 for grayscale, etc.) —
+                // frame 0's graphic and a newly-imported frame commonly land on different formats, so
+                // without normalizing, one frame of the animation renders as an empty/blank tile (the bug
+                // Toni reported: "the second frame is empty"). Force every frame to the strip's own Rgba8
+                // format before blitting so the copy always actually happens.
+                if (frameImage.GetFormat() != Image.Format.Rgba8)
+                    frameImage.Convert(Image.Format.Rgba8);
                 strip.BlitRect(frameImage, new Rect2I(Vector2I.Zero, new Vector2I(tileSize, tileSize)), new Vector2I(frame * tileSize, 0));
             }
 

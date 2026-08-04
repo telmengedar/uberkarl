@@ -169,6 +169,62 @@ public sealed class AnimatedTileTests
         });
     }
 
+    // Regression for the "second frame renders empty" bug (Toni, DiVoid #7551 Phase 2 live test): reported
+    // as "if i add a frame to the grass tile it animates, but the second frame is empty - so it more or
+    // less disappears every other frame." The root cause was Godot-side (TileSetBuilder.BuildAnimatedSource
+    // blitting frame images of differing pixel formats onto its Rgba8 atlas strip — Godot's Image.BlitRect
+    // silently no-ops on a format mismatch, leaving that frame's strip region blank — fixed by normalizing
+    // every frame to Rgba8 before blitting; verified in-engine via Godot MCP per this file's own convention,
+    // see TileSetBuilder.cs). This test pins the content-layer half of the contract TileSetBuilder relies on
+    // for that fix to be meaningful: exactly Toni's path (an existing simple tile's own Graphic as frame 0,
+    // ONE additive frame) must resolve to exactly two frames, each carrying its own distinct, non-empty
+    // bytes — and the frame count must be 1 + tile.Frames.Count, the SAME value TileSetBuilder uses
+    // uniformly for the strip width, SetTileAnimationColumns, and SetTileAnimationFramesCount, so a
+    // reintroduced accounting bug there (a column count that disagrees with the strip) would first show up
+    // here as a frame-count mismatch.
+    [Test]
+    public void Load_AddingOneFrameToASimpleTile_ResolvesToTwoDistinctNonEmptyFrames()
+    {
+        var grassGraphic = Encoding.UTF8.GetBytes("GRASS-FRAME-0");
+        var addedFrame = Encoding.UTF8.GetBytes("ADDED-FRAME-1");
+
+        var tileSet = new TileSetDefinition
+        {
+            Tiles = new[]
+            {
+                new TileDefinition
+                {
+                    Id = 1,
+                    Graphic = ResourceReference.ToSelf(GrassPath),
+                    Frames = new[] { ResourceReference.ToSelf(FrameTwoPath) },
+                },
+            },
+        };
+        var level = MinimalLevel(new[] { 1 });
+
+        var builder = new PackageBuilder().WithName("Demo Pack");
+        builder.AddResource(ResourceKind.Level, LevelPath, LevelContentSerializer.WriteLevel(level));
+        builder.AddResource(ResourceKind.TileSet, TileSetPath, LevelContentSerializer.WriteTileSet(tileSet));
+        builder.AddResource(ResourceKind.TileGraphic, GrassPath, grassGraphic, "image/png");
+        builder.AddResource(ResourceKind.TileGraphic, FrameTwoPath, addedFrame, "image/png");
+        using var registry = OpenRegistry(builder);
+
+        var resolved = LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath));
+
+        Assert.Multiple(() =>
+        {
+            var animation = resolved.TileAnimations[1];
+            // Exactly 1 (Graphic) + 1 (added frame) — the same count TileSetBuilder.BuildAnimatedSource
+            // uses for the strip width, SetTileAnimationColumns, and SetTileAnimationFramesCount alike.
+            Assert.That(animation.Frames, Has.Count.EqualTo(1 + tileSet.Tiles[0].Frames.Count));
+            Assert.That(animation.Frames[0], Is.Not.Empty, "frame 0 (the tile's own Graphic) must not be empty.");
+            Assert.That(animation.Frames[1], Is.Not.Empty, "the added frame must not be empty — this is the exact symptom Toni reported.");
+            Assert.That(animation.Frames[0], Is.EqualTo(grassGraphic));
+            Assert.That(animation.Frames[1], Is.EqualTo(addedFrame));
+            Assert.That(animation.Frames[0], Is.Not.EqualTo(animation.Frames[1]), "the two frames must carry distinct graphics, not one silently aliasing/blanking the other.");
+        });
+    }
+
     [Test]
     public void Load_SimpleTile_HasNoTileAnimationsEntry()
     {
