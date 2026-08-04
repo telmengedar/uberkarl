@@ -55,4 +55,21 @@ public sealed class TileDefinition
     /// keep in sync with <see cref="Frames"/>.
     /// </summary>
     public bool IsAnimated => Frames.Count > 0;
+
+    /// <summary>
+    /// Which declared <see cref="TerrainDefinition.Id"/> (from the owning tile set's
+    /// <see cref="TileSetDefinition.TerrainSets"/>) this tile is a variant of, or <c>null</c> for a plain
+    /// tile that never participates in terrain auto-tiling (DiVoid #7551 Phase 3, design #7580 §7). Omitted
+    /// from JSON when null so pre-Phase-3 content loads unchanged. A tile may be simple-or-animated AND a
+    /// terrain variant at the same time — terrain membership is orthogonal to animation (design #7580 §7,
+    /// "kind is structural").
+    /// </summary>
+    public int? Terrain { get; init; }
+
+    /// <summary>
+    /// Which of this variant's eight neighbours must belong to the SAME terrain for Godot's terrain-connect
+    /// resolution to pick this specific tile (DiVoid #7551 Phase 3, design #7580 §14). Only meaningful when
+    /// <see cref="Terrain"/> is set; <see cref="TerrainPeering.None"/> (the default) for a non-terrain tile.
+    /// </summary>
+    public TerrainPeering PeeringBits { get; init; } = TerrainPeering.None;
 }

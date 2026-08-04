@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Godot;
 using Uberkarl.Content;
@@ -40,8 +41,30 @@ namespace Uberkarl {
             IReadOnlySet<int> collidingTileIds,
             IReadOnlyDictionary<int, ResolvedAnimation> tileAnimations,
             int tileSize) {
+            return Build(tileGraphics, collidingTileIds, tileAnimations, Array.Empty<ResolvedTerrainSet>(), new Dictionary<int, ResolvedTileTerrain>(), tileSize);
+        }
+
+        /// <summary>
+        /// Overload adding terrain support (DiVoid #7551 Phase 3, design #7580): <paramref name="terrainSets"/>
+        /// are mapped, in declaration order, onto Godot's index-based Terrain Sets/Terrains; every tile with an
+        /// entry in <paramref name="tileTerrains"/> has its atlas tile's <c>TerrainSet</c>/<c>Terrain</c> and
+        /// peering bits set from that membership. This IS the meta-tile feature made real: with a variant's
+        /// peering bits correctly declared here, <see cref="TileMapLevelBuilder"/>'s
+        /// <c>TileMapLayer.SetCellsTerrainConnect</c> call lets Godot auto-select the matching variant from a
+        /// level's logical terrain paint — no custom neighbour-pattern resolver in this codebase (design #7580
+        /// §10, trade-off 2: "lean on Godot Terrain Sets... not a custom auto-tile resolver").
+        /// </summary>
+        public static BuiltTileSet Build(
+            IReadOnlyDictionary<int, byte[]> tileGraphics,
+            IReadOnlySet<int> collidingTileIds,
+            IReadOnlyDictionary<int, ResolvedAnimation> tileAnimations,
+            IReadOnlyList<ResolvedTerrainSet> terrainSets,
+            IReadOnlyDictionary<int, ResolvedTileTerrain> tileTerrains,
+            int tileSize) {
             TileSet tileSet = new TileSet { TileSize = new Vector2I(tileSize, tileSize) };
             tileSet.AddPhysicsLayer();
+
+            Dictionary<int, TerrainIndex> terrainIndexByTerrainId = BuildTerrainSets(tileSet, terrainSets);
 
             Dictionary<int, int> sourceByTile = new Dictionary<int, int>();
             foreach (KeyValuePair<int, byte[]> graphic in tileGraphics) {
@@ -54,9 +77,84 @@ namespace Uberkarl {
 
                 if (collidingTileIds.Contains(tileId))
                     AddFullTileCollision(source, tileSize);
+
+                if (tileTerrains.TryGetValue(tileId, out ResolvedTileTerrain membership) &&
+                    terrainIndexByTerrainId.TryGetValue(membership.TerrainId, out TerrainIndex index))
+                    ApplyTerrainMembership(source, tileSize, index, membership.PeeringBits);
             }
 
-            return new BuiltTileSet(tileSet, sourceByTile);
+            return new BuiltTileSet(tileSet, sourceByTile, terrainIndexByTerrainId);
+        }
+
+        // Adds each terrain set (in declaration order — this order IS the Godot terrain-set index) and its
+        // terrains, and returns the id -> Godot-index lookup ApplyTerrainMembership and (for the caller,
+        // TileMapLevelBuilder's terrain-connect calls) the level builder both need.
+        static Dictionary<int, TerrainIndex> BuildTerrainSets(TileSet tileSet, IReadOnlyList<ResolvedTerrainSet> terrainSets) {
+            Dictionary<int, TerrainIndex> lookup = new Dictionary<int, TerrainIndex>();
+            foreach (ResolvedTerrainSet terrainSet in terrainSets) {
+                int setIndex = tileSet.GetTerrainSetsCount();
+                tileSet.AddTerrainSet(-1);
+                tileSet.SetTerrainSetMode(setIndex, MapMatchingMode(terrainSet.MatchingMode));
+
+                foreach (ResolvedTerrain terrain in terrainSet.Terrains) {
+                    int terrainIndex = tileSet.GetTerrainsCount(setIndex);
+                    tileSet.AddTerrain(setIndex, -1);
+                    tileSet.SetTerrainName(setIndex, terrainIndex, terrain.Name);
+                    if (terrain.Color is { } color)
+                        tileSet.SetTerrainColor(setIndex, terrainIndex, new Color(color.R / 255f, color.G / 255f, color.B / 255f, color.A / 255f));
+                    lookup[terrain.Id] = new TerrainIndex(setIndex, terrainIndex);
+                }
+            }
+
+            return lookup;
+        }
+
+        static TileSet.TerrainMode MapMatchingMode(TerrainMatchMode mode) => mode switch {
+            TerrainMatchMode.Corners => TileSet.TerrainMode.Corners,
+            TerrainMatchMode.Sides => TileSet.TerrainMode.Sides,
+            _ => TileSet.TerrainMode.CornersAndSides,
+        };
+
+        // Assigns ONE atlas tile (always Vector2I.Zero — each of our tiles is a single-cell atlas source) to
+        // its terrain set/terrain and sets the peering bits for the eight directions the variant declares
+        // (design #7580 §14's 3x3 peering-bit grid, realized). A direction NOT in peeringBits is left unset
+        // (Godot's "don't care" default) rather than pointed at a different terrain — this codebase's terrain
+        // model doesn't (yet) express "must be a DIFFERENT specific terrain on this side", only "must be the
+        // same terrain" (design #7580 §14 recommendation), which is exactly what a same-terrain-set peering
+        // bit expresses.
+        static void ApplyTerrainMembership(TileSetAtlasSource source, int tileSize, TerrainIndex index, TerrainPeering peeringBits) {
+            TileData data = source.GetTileData(Vector2I.Zero, 0);
+            data.TerrainSet = index.TerrainSet;
+            data.Terrain = index.Terrain;
+
+            foreach (KeyValuePair<TerrainPeering, TileSet.CellNeighbor> direction in DirectionByPeeringBit) {
+                if ((peeringBits & direction.Key) != 0)
+                    data.SetTerrainPeeringBit(direction.Value, index.Terrain);
+            }
+        }
+
+        // Maps our engine-agnostic eight-direction bitmask onto Godot's square-tile CellNeighbor values.
+        static readonly Dictionary<TerrainPeering, TileSet.CellNeighbor> DirectionByPeeringBit = new() {
+            [TerrainPeering.North] = TileSet.CellNeighbor.TopSide,
+            [TerrainPeering.NorthEast] = TileSet.CellNeighbor.TopRightCorner,
+            [TerrainPeering.East] = TileSet.CellNeighbor.RightSide,
+            [TerrainPeering.SouthEast] = TileSet.CellNeighbor.BottomRightCorner,
+            [TerrainPeering.South] = TileSet.CellNeighbor.BottomSide,
+            [TerrainPeering.SouthWest] = TileSet.CellNeighbor.BottomLeftCorner,
+            [TerrainPeering.West] = TileSet.CellNeighbor.LeftSide,
+            [TerrainPeering.NorthWest] = TileSet.CellNeighbor.TopLeftCorner,
+        };
+
+        /// <summary>A terrain's resolved Godot indices: which terrain SET, and which terrain within it.</summary>
+        public readonly struct TerrainIndex {
+            public TerrainIndex(int terrainSet, int terrain) {
+                TerrainSet = terrainSet;
+                Terrain = terrain;
+            }
+
+            public int TerrainSet { get; }
+
+            public int Terrain { get; }
         }
 
         static TileSetAtlasSource BuildSimpleSource(int tileId, byte[] png, int tileSize) {
@@ -120,16 +218,23 @@ namespace Uberkarl {
             data.SetCollisionPolygonPoints(0, 0, square);
         }
 
-        /// <summary>The built Godot <see cref="TileSet"/> plus the tile-id → atlas-source-id map placement needs.</summary>
+        /// <summary>
+        /// The built Godot <see cref="TileSet"/> plus the tile-id → atlas-source-id map placement needs, plus
+        /// (DiVoid #7551 Phase 3) the terrain-id → Godot-index lookup <see cref="TileMapLevelBuilder"/> needs
+        /// to drive <c>TileMapLayer.SetCellsTerrainConnect</c> for a level's logical terrain paint.
+        /// </summary>
         public readonly struct BuiltTileSet {
-            public BuiltTileSet(TileSet set, Dictionary<int, int> sourceByTile) {
+            public BuiltTileSet(TileSet set, Dictionary<int, int> sourceByTile, Dictionary<int, TerrainIndex> terrainIndexByTerrainId) {
                 Set = set;
                 SourceByTile = sourceByTile;
+                TerrainIndexByTerrainId = terrainIndexByTerrainId;
             }
 
             public TileSet Set { get; }
 
             public Dictionary<int, int> SourceByTile { get; }
+
+            public Dictionary<int, TerrainIndex> TerrainIndexByTerrainId { get; }
         }
     }
 }

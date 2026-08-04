@@ -16,7 +16,8 @@ public sealed class EditableTile
 
     public EditableTile(
         int id, ResourcePath graphicPath, byte[] graphic, bool collides, string? name = null,
-        IReadOnlyList<EditableTileFrame>? frames = null, double animationSpeed = DefaultAnimationSpeed)
+        IReadOnlyList<EditableTileFrame>? frames = null, double animationSpeed = DefaultAnimationSpeed,
+        int? terrain = null, Content.TerrainPeering peeringBits = Content.TerrainPeering.None)
     {
         if (id == Content.LayerDefinition.EmptyCell)
             throw new ArgumentException($"Tile id {Content.LayerDefinition.EmptyCell} is reserved for empty cells.", nameof(id));
@@ -27,6 +28,8 @@ public sealed class EditableTile
         Name = name;
         Frames = frames ?? Array.Empty<EditableTileFrame>();
         AnimationSpeed = animationSpeed;
+        Terrain = terrain;
+        PeeringBits = peeringBits;
     }
 
     /// <summary>The numeric id a grid cell stores to place this tile.</summary>
@@ -52,4 +55,13 @@ public sealed class EditableTile
 
     /// <summary>Structural tile kind (design #7580 §7 — no enum): true once at least one frame has been added beyond <see cref="Graphic"/>.</summary>
     public bool IsAnimated => Frames.Count > 0;
+
+    /// <summary>Which declared <see cref="EditableTerrain.Id"/> this tile is a variant of (DiVoid #7551 Phase 3), or <c>null</c> for a plain tile.</summary>
+    public int? Terrain { get; }
+
+    /// <summary>This variant's peering bits (only meaningful when <see cref="Terrain"/> is set).</summary>
+    public Content.TerrainPeering PeeringBits { get; }
+
+    /// <summary>Whether this tile currently belongs to a terrain (DiVoid #7551 Phase 3).</summary>
+    public bool IsTerrainVariant => Terrain.HasValue;
 }

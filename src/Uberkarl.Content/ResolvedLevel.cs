@@ -31,6 +31,19 @@ public sealed class ResolvedLevel
     /// </summary>
     public IReadOnlyDictionary<int, ResolvedAnimation> TileAnimations { get; init; } = new Dictionary<int, ResolvedAnimation>();
 
+    /// <summary>
+    /// The bound tile set's declared terrain sets/terrains (DiVoid #7551 Phase 3, design #7580). Empty when
+    /// the tile set declares no terrains. <c>TileSetBuilder</c> is the only consumer: it maps this, in
+    /// declaration order, onto Godot's index-based Terrain Sets/Terrains.
+    /// </summary>
+    public IReadOnlyList<ResolvedTerrainSet> TerrainSets { get; init; } = Array.Empty<ResolvedTerrainSet>();
+
+    /// <summary>
+    /// Which tile ids are terrain variants and their peering bits, keyed by tile id (DiVoid #7551 Phase 3,
+    /// design #7580). A tile id absent from this dictionary is not a terrain variant.
+    /// </summary>
+    public IReadOnlyDictionary<int, ResolvedTileTerrain> TileTerrains { get; init; } = new Dictionary<int, ResolvedTileTerrain>();
+
     /// <summary>Named spawn cells (tile units) keyed by spawn name. Empty when the level declares none.</summary>
     public IReadOnlyDictionary<string, GridPosition> Spawns { get; init; }
         = new Dictionary<string, GridPosition>();
@@ -70,6 +83,60 @@ public sealed class ResolvedLayer
     public bool Repeat { get; init; }
 
     public IReadOnlyList<int> Cells { get; init; } = Array.Empty<int>();
+
+    /// <summary>
+    /// The resolved logical terrain paint, parallel to <see cref="Cells"/> and always the same length
+    /// (DiVoid #7551 Phase 3, design #7580) — every entry is a declared terrain id or
+    /// <see cref="LayerDefinition.EmptyCell"/>. Unlike <see cref="LayerDefinition.Terrain"/> this is ALWAYS
+    /// fully populated (never empty) even for a layer with no terrain painted, so <c>TileMapLevelBuilder</c>
+    /// can always index it in lockstep with <see cref="Cells"/> without a length check.
+    /// </summary>
+    public IReadOnlyList<int> Terrain { get; init; } = Array.Empty<int>();
+}
+
+/// <summary>
+/// One logical terrain, resolved (DiVoid #7551 Phase 3, design #7580) — the runtime counterpart to
+/// <see cref="TerrainDefinition"/>.
+/// </summary>
+public sealed class ResolvedTerrain
+{
+    public int Id { get; init; }
+
+    public string Name { get; init; } = string.Empty;
+
+    /// <summary>Parsed author colour, or <c>null</c> when the terrain declares none.</summary>
+    public RgbaColor? Color { get; init; }
+}
+
+/// <summary>
+/// One terrain set, resolved (DiVoid #7551 Phase 3, design #7580) — the runtime counterpart to
+/// <see cref="TerrainSetDefinition"/>. <c>TileSetBuilder</c> maps declaration order onto Godot's own
+/// index-based terrain sets/terrains.
+/// </summary>
+public sealed class ResolvedTerrainSet
+{
+    public int Id { get; init; }
+
+    public string Name { get; init; } = string.Empty;
+
+    public TerrainMatchMode MatchingMode { get; init; } = TerrainMatchMode.CornersAndSides;
+
+    public IReadOnlyList<ResolvedTerrain> Terrains { get; init; } = Array.Empty<ResolvedTerrain>();
+}
+
+/// <summary>
+/// A terrain-variant tile's resolved membership (DiVoid #7551 Phase 3, design #7580): which terrain set +
+/// terrain it belongs to, and its peering bits. <see cref="TerrainSetId"/> is redundant with
+/// <see cref="TerrainId"/> (a terrain belongs to exactly one set) but kept explicit so <c>TileSetBuilder</c>
+/// never has to reverse-look-up the owning set.
+/// </summary>
+public sealed class ResolvedTileTerrain
+{
+    public int TerrainSetId { get; init; }
+
+    public int TerrainId { get; init; }
+
+    public TerrainPeering PeeringBits { get; init; }
 }
 
 /// <summary>

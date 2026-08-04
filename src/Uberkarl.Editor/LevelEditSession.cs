@@ -34,6 +34,13 @@ public sealed class LevelEditSession
     /// Paints <paramref name="tileId"/> onto the cell on the given layer. No-ops (returns <c>null</c>)
     /// when the cell already holds that tile — this keeps a click-drag that re-touches the same cell
     /// from stacking redundant history entries. Throws when the layer, tile, or cell is invalid.
+    ///
+    /// <b>Two-channel invariant</b> (DiVoid #7551 Phase 3, design #7580 §7): placing a concrete tile always
+    /// clears any terrain paint at that cell too (<see cref="SetCellCommand"/>). Because of that, a
+    /// terrain-painted cell's OWN concrete channel already reads <see cref="LayerDefinition.EmptyCell"/> —
+    /// so erasing it (<paramref name="tileId"/> == <see cref="LayerDefinition.EmptyCell"/>) must still
+    /// execute even though the concrete channel "already matches", or the terrain paint would survive an
+    /// Erase. The no-op check therefore also looks at the terrain channel, not just the concrete one.
     /// </summary>
     public CellChange? PaintCell(int layerIndex, int x, int y, int tileId)
     {
@@ -43,7 +50,10 @@ public sealed class LevelEditSession
             return null;
         if (!Level.IsPlaceableTile(tileId))
             throw new ArgumentException($"Tile id {tileId} is not in the level's palette.", nameof(tileId));
-        if (Level.GetCell(layerIndex, x, y) == tileId)
+
+        var layer = Level.Layers[layerIndex];
+        var index = Level.CellIndex(x, y);
+        if (layer.Cells[index] == tileId && layer.Terrain[index] == LayerDefinition.EmptyCell)
             return null;
 
         var change = history.Execute(new SetCellCommand(layerIndex, x, y, tileId), Level);
@@ -54,6 +64,41 @@ public sealed class LevelEditSession
     /// <summary>Erases the cell on the given layer (paints the empty marker). No-op when already empty.</summary>
     public CellChange? EraseCell(int layerIndex, int x, int y)
         => PaintCell(layerIndex, x, y, LayerDefinition.EmptyCell);
+
+    /// <summary>
+    /// Paints the LOGICAL terrain <paramref name="terrainId"/> onto the cell on the given layer (DiVoid
+    /// #7551 Phase 3, design #7580 §6.4 — "painting writes the logical (terrainSet, terrain) into the
+    /// layer's terrain channel, not a concrete id"). Always clears any concrete tile at that cell too (the
+    /// two-channel invariant). No-ops (returns <c>null</c>) when the cell already holds that terrain AND is
+    /// already concrete-empty. Returned <see cref="CellChange"/> always carries <see cref="LayerDefinition.EmptyCell"/>
+    /// as its tile id — the caller applies it via the same canvas path a concrete edit uses (clearing any
+    /// stale concrete visual), then re-issues the engine's terrain-connect resolution to paint the actual
+    /// matching variant (design #7580 §6.4 — "the editor immediately re-drives terrain-connect... so the
+    /// canvas shows the resolved variants live"); this session never touches Godot, so it cannot do that
+    /// part itself. Throws when the layer, terrain, or cell is invalid.
+    /// </summary>
+    public CellChange? PaintTerrain(int layerIndex, int x, int y, int terrainId)
+    {
+        if (layerIndex < 0 || layerIndex >= Level.Layers.Count)
+            throw new ArgumentOutOfRangeException(nameof(layerIndex));
+        if (!Level.InBounds(x, y))
+            return null;
+        if (!Level.IsPlaceableTerrain(terrainId))
+            throw new ArgumentException($"Terrain id {terrainId} is not declared by the level's bound tile set.", nameof(terrainId));
+
+        var layer = Level.Layers[layerIndex];
+        var index = Level.CellIndex(x, y);
+        if (layer.Terrain[index] == terrainId && layer.Cells[index] == LayerDefinition.EmptyCell)
+            return null;
+
+        var change = history.Execute(new SetTerrainCommand(layerIndex, x, y, terrainId), Level);
+        IsDirty = true;
+        return change;
+    }
+
+    /// <summary>Erases the terrain paint on the cell on the given layer (paints the terrain-empty marker). No-op when already unpainted.</summary>
+    public CellChange? EraseTerrain(int layerIndex, int x, int y)
+        => PaintTerrain(layerIndex, x, y, LayerDefinition.EmptyCell);
 
     /// <summary>Undoes the last edit and returns the cell to refresh, or <c>null</c> when nothing to undo.</summary>
     public CellChange? Undo()

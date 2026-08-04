@@ -19,6 +19,10 @@ public static class EditableLevelSnapshot
         var graphics = new Dictionary<int, byte[]>(level.Tiles.Count);
         var colliding = new HashSet<int>();
         var animations = new Dictionary<int, ResolvedAnimation>();
+        var terrainSetIdByTerrainId = level.TerrainSets
+            .SelectMany(set => set.Terrains.Select(terrain => (TerrainId: terrain.Id, TerrainSetId: set.Id)))
+            .ToDictionary(pair => pair.TerrainId, pair => pair.TerrainSetId);
+        var tileTerrains = new Dictionary<int, ResolvedTileTerrain>();
         foreach (var tile in level.Tiles)
         {
             graphics[tile.Id] = tile.Graphic;
@@ -36,7 +40,31 @@ public static class EditableLevelSnapshot
                     frames.Add(frame.Graphic);
                 animations[tile.Id] = new ResolvedAnimation { Frames = frames, Speed = tile.AnimationSpeed };
             }
+
+            // DiVoid #7551 Phase 3: same requirement, for terrain membership — the P2 bug (the snapshot
+            // dropping new data so the canvas preview silently diverged from the runtime) is exactly what
+            // this feeds forward: TileSetBuilder/TileMapLevelBuilder need TerrainSets/TileTerrains from the
+            // SAME snapshot the canvas and the playtest overlay both build through.
+            if (tile.Terrain is { } terrainId && terrainSetIdByTerrainId.TryGetValue(terrainId, out var terrainSetId))
+                tileTerrains[tile.Id] = new ResolvedTileTerrain { TerrainSetId = terrainSetId, TerrainId = terrainId, PeeringBits = tile.PeeringBits };
         }
+
+        var terrainSets = level.TerrainSets
+            .Select(set => new ResolvedTerrainSet
+            {
+                Id = set.Id,
+                Name = set.Name,
+                MatchingMode = set.MatchingMode,
+                Terrains = set.Terrains
+                    .Select(terrain => new ResolvedTerrain
+                    {
+                        Id = terrain.Id,
+                        Name = terrain.Name,
+                        Color = RgbaColor.TryParse(terrain.Color, out var color) ? color : null,
+                    })
+                    .ToArray(),
+            })
+            .ToArray();
 
         RgbaColor? background = null;
         if (!string.IsNullOrWhiteSpace(level.BackgroundColor) && RgbaColor.TryParse(level.BackgroundColor, out var parsed))
@@ -50,6 +78,7 @@ public static class EditableLevelSnapshot
                 ScrollSpeed = layer.ScrollSpeed,
                 Repeat = layer.Repeat,
                 Cells = layer.Cells.ToArray(),
+                Terrain = layer.Terrain.ToArray(),
             })
             .ToArray();
 
@@ -63,6 +92,8 @@ public static class EditableLevelSnapshot
             TileGraphics = graphics,
             CollidingTileIds = colliding,
             TileAnimations = animations,
+            TerrainSets = terrainSets,
+            TileTerrains = tileTerrains,
             Spawns = new Dictionary<string, GridPosition>(level.Spawns),
             DefaultSpawn = level.DefaultSpawn,
         };

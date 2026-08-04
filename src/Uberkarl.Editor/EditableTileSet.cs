@@ -24,20 +24,31 @@ namespace Uberkarl.Editor;
 public sealed class EditableTileSet
 {
     private readonly List<EditableTile> tiles;
+    private readonly List<EditableTerrainSet> terrainSets;
     private int nextTileId;
+    private int nextTerrainSetId;
+    private int nextTerrainId;
 
     public EditableTileSet(
         string name,
         ResourcePath tileSetPath,
         IReadOnlyList<EditableTile> tiles,
         bool isAttached = false,
-        int? nextTileId = null)
+        int? nextTileId = null,
+        IReadOnlyList<EditableTerrainSet>? terrainSets = null,
+        int? nextTerrainSetId = null,
+        int? nextTerrainId = null)
     {
         Name = name ?? throw new ArgumentNullException(nameof(name));
         TileSetPath = tileSetPath;
         this.tiles = new List<EditableTile>(tiles ?? throw new ArgumentNullException(nameof(tiles)));
         IsAttached = isAttached;
         this.nextTileId = nextTileId ?? (this.tiles.Count == 0 ? 1 : this.tiles.Max(tile => tile.Id) + 1);
+
+        this.terrainSets = new List<EditableTerrainSet>(terrainSets ?? Array.Empty<EditableTerrainSet>());
+        this.nextTerrainSetId = nextTerrainSetId ?? (this.terrainSets.Count == 0 ? 1 : this.terrainSets.Max(set => set.Id) + 1);
+        var allTerrainIds = this.terrainSets.SelectMany(set => set.Terrains).Select(terrain => terrain.Id).ToList();
+        this.nextTerrainId = nextTerrainId ?? (allTerrainIds.Count == 0 ? 1 : allTerrainIds.Max() + 1);
     }
 
     public string Name { get; private set; }
@@ -53,6 +64,9 @@ public sealed class EditableTileSet
     public bool IsAttached { get; private set; }
 
     public IReadOnlyList<EditableTile> Tiles => tiles;
+
+    /// <summary>The tile set's logical terrain sets (DiVoid #7551 Phase 3, design #7580).</summary>
+    public IReadOnlyList<EditableTerrainSet> TerrainSets => terrainSets;
 
     /// <summary>True when <paramref name="tileId"/> names a declared tile.</summary>
     public bool Contains(int tileId)
@@ -113,7 +127,7 @@ public sealed class EditableTileSet
         if (string.Equals(current.Name, normalized, StringComparison.Ordinal))
             return false;
 
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, normalized, current.Frames, current.AnimationSpeed);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, normalized, current.Frames, current.AnimationSpeed, current.Terrain, current.PeeringBits);
         return true;
     }
 
@@ -128,7 +142,7 @@ public sealed class EditableTileSet
         if (current.Collides == collides)
             return false;
 
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, collides, current.Name, current.Frames, current.AnimationSpeed);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, collides, current.Name, current.Frames, current.AnimationSpeed, current.Terrain, current.PeeringBits);
         return true;
     }
 
@@ -154,7 +168,7 @@ public sealed class EditableTileSet
         var provisionalSlug = TileSetResourcePaths.Slugify(Name);
         var path = TileSetResourcePaths.FramePath(provisionalSlug, id, overallFrameNumber);
         var frames = new List<EditableTileFrame>(current.Frames) { new EditableTileFrame(path, graphic) };
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, current.Name, frames, current.AnimationSpeed);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, current.Name, frames, current.AnimationSpeed, current.Terrain, current.PeeringBits);
         return true;
     }
 
@@ -178,7 +192,7 @@ public sealed class EditableTileSet
 
         var frames = new List<EditableTileFrame>(current.Frames);
         frames.RemoveAt(frameIndex);
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, current.Name, frames, current.AnimationSpeed);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, current.Name, frames, current.AnimationSpeed, current.Terrain, current.PeeringBits);
         return true;
     }
 
@@ -201,7 +215,7 @@ public sealed class EditableTileSet
         if (current.AnimationSpeed == speed)
             return false;
 
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, current.Name, current.Frames, speed);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, current.Name, current.Frames, speed, current.Terrain, current.PeeringBits);
         return true;
     }
 
@@ -238,10 +252,199 @@ public sealed class EditableTileSet
                 : tile.Frames
                     .Select((frame, frameIndex) => new EditableTileFrame(TileSetResourcePaths.FramePath(slug, tile.Id, frameIndex + 2), frame.Graphic))
                     .ToArray();
-            tiles[i] = new EditableTile(tile.Id, TileSetResourcePaths.GraphicPath(slug, tile.Id), tile.Graphic, tile.Collides, tile.Name, frames, tile.AnimationSpeed);
+            tiles[i] = new EditableTile(tile.Id, TileSetResourcePaths.GraphicPath(slug, tile.Id), tile.Graphic, tile.Collides, tile.Name, frames, tile.AnimationSpeed, tile.Terrain, tile.PeeringBits);
         }
 
         IsAttached = true;
+    }
+
+    // ----- terrain authoring (DiVoid #7551 Phase 3, design #7580 §7/§14) -----
+
+    /// <summary>Adds a new, empty terrain set. Mints a fresh, never-before-used id (mirrors <see cref="AddTile"/>). Returns the new terrain set's id.</summary>
+    public int AddTerrainSet(string name, Content.TerrainMatchMode matchingMode)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Terrain set name must not be empty.", nameof(name));
+
+        var id = nextTerrainSetId++;
+        terrainSets.Add(new EditableTerrainSet(id, name.Trim(), matchingMode, Array.Empty<EditableTerrain>()));
+        return id;
+    }
+
+    /// <summary>
+    /// Removes the terrain set with <paramref name="id"/> and every terrain belonging to it. Any tile
+    /// currently a member of one of those terrains is demoted back to a plain tile (its <see cref="EditableTile.Terrain"/>
+    /// cleared) rather than left dangling — mirrors <see cref="RemoveTile"/>'s "no cross-check, loader is the
+    /// defensive backstop" stance for LEVEL references, but a tile's own membership is this tile set's own
+    /// data, so it is kept internally consistent here. Returns <c>false</c> (no-op) when not found.
+    /// </summary>
+    public bool RemoveTerrainSet(int id)
+    {
+        var index = terrainSets.FindIndex(set => set.Id == id);
+        if (index < 0)
+            return false;
+
+        var removedTerrainIds = new HashSet<int>(terrainSets[index].Terrains.Select(terrain => terrain.Id));
+        terrainSets.RemoveAt(index);
+        DemoteTilesOfTerrains(removedTerrainIds);
+        return true;
+    }
+
+    /// <summary>Renames the terrain set with <paramref name="id"/>. Returns <c>false</c> (no-op) when not found or unchanged.</summary>
+    public bool RenameTerrainSet(int id, string name)
+    {
+        var index = terrainSets.FindIndex(set => set.Id == id);
+        if (index < 0 || string.IsNullOrWhiteSpace(name))
+            return false;
+
+        var current = terrainSets[index];
+        var trimmed = name.Trim();
+        if (string.Equals(current.Name, trimmed, StringComparison.Ordinal))
+            return false;
+
+        terrainSets[index] = new EditableTerrainSet(current.Id, trimmed, current.MatchingMode, current.Terrains);
+        return true;
+    }
+
+    /// <summary>Sets the matching mode of the terrain set with <paramref name="id"/>. Returns <c>false</c> (no-op) when not found or unchanged.</summary>
+    public bool SetTerrainSetMatchingMode(int id, Content.TerrainMatchMode matchingMode)
+    {
+        var index = terrainSets.FindIndex(set => set.Id == id);
+        if (index < 0)
+            return false;
+
+        var current = terrainSets[index];
+        if (current.MatchingMode == matchingMode)
+            return false;
+
+        terrainSets[index] = new EditableTerrainSet(current.Id, current.Name, matchingMode, current.Terrains);
+        return true;
+    }
+
+    /// <summary>Adds a new terrain to the terrain set with <paramref name="terrainSetId"/>. Mints a fresh id UNIQUE ACROSS THE WHOLE TILE SET (not just this set — mirrors <see cref="TerrainDefinition.Id"/>'s stability). Returns the new terrain's id, or <c>-1</c> when the terrain set does not exist.</summary>
+    public int AddTerrain(int terrainSetId, string name, string? color = null)
+    {
+        var index = terrainSets.FindIndex(set => set.Id == terrainSetId);
+        if (index < 0)
+            return -1;
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Terrain name must not be empty.", nameof(name));
+
+        var id = nextTerrainId++;
+        var current = terrainSets[index];
+        var terrains = new List<EditableTerrain>(current.Terrains) { new EditableTerrain(id, name.Trim(), color) };
+        terrainSets[index] = new EditableTerrainSet(current.Id, current.Name, current.MatchingMode, terrains);
+        return id;
+    }
+
+    /// <summary>Removes the terrain with <paramref name="terrainId"/> from the terrain set with <paramref name="terrainSetId"/>, demoting any member tile back to plain. Returns <c>false</c> (no-op) when not found.</summary>
+    public bool RemoveTerrain(int terrainSetId, int terrainId)
+    {
+        var index = terrainSets.FindIndex(set => set.Id == terrainSetId);
+        if (index < 0)
+            return false;
+
+        var current = terrainSets[index];
+        var terrainIndex = current.Terrains.ToList().FindIndex(terrain => terrain.Id == terrainId);
+        if (terrainIndex < 0)
+            return false;
+
+        var terrains = new List<EditableTerrain>(current.Terrains);
+        terrains.RemoveAt(terrainIndex);
+        terrainSets[index] = new EditableTerrainSet(current.Id, current.Name, current.MatchingMode, terrains);
+        DemoteTilesOfTerrains(new HashSet<int> { terrainId });
+        return true;
+    }
+
+    /// <summary>Renames the terrain with <paramref name="terrainId"/> in the terrain set with <paramref name="terrainSetId"/>. Returns <c>false</c> (no-op) when not found or unchanged.</summary>
+    public bool RenameTerrain(int terrainSetId, int terrainId, string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+        return ReplaceTerrain(terrainSetId, terrainId, terrain =>
+            string.Equals(terrain.Name, name.Trim(), StringComparison.Ordinal)
+                ? null
+                : new EditableTerrain(terrain.Id, name.Trim(), terrain.Color));
+    }
+
+    /// <summary>Sets the author colour of the terrain with <paramref name="terrainId"/>. Returns <c>false</c> (no-op) when not found or unchanged.</summary>
+    public bool SetTerrainColor(int terrainSetId, int terrainId, string? color)
+        => ReplaceTerrain(terrainSetId, terrainId, terrain =>
+            string.Equals(terrain.Color, color, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : new EditableTerrain(terrain.Id, terrain.Name, color));
+
+    private bool ReplaceTerrain(int terrainSetId, int terrainId, Func<EditableTerrain, EditableTerrain?> update)
+    {
+        var setIndex = terrainSets.FindIndex(set => set.Id == terrainSetId);
+        if (setIndex < 0)
+            return false;
+
+        var current = terrainSets[setIndex];
+        var terrains = current.Terrains.ToList();
+        var terrainIndex = terrains.FindIndex(terrain => terrain.Id == terrainId);
+        if (terrainIndex < 0)
+            return false;
+
+        var updated = update(terrains[terrainIndex]);
+        if (updated is null)
+            return false;
+
+        terrains[terrainIndex] = updated;
+        terrainSets[setIndex] = new EditableTerrainSet(current.Id, current.Name, current.MatchingMode, terrains);
+        return true;
+    }
+
+    /// <summary>
+    /// Assigns the tile with <paramref name="tileId"/> to terrain <paramref name="terrainId"/> — or, when
+    /// <paramref name="terrainId"/> is <c>null</c>, demotes it back to a plain tile (clearing its peering
+    /// bits too, since they are meaningless without a terrain). Returns <c>false</c> (no-op) when the tile
+    /// does not exist, or <paramref name="terrainId"/> names an undeclared terrain.
+    /// </summary>
+    public bool SetTileTerrain(int tileId, int? terrainId)
+    {
+        var index = tiles.FindIndex(tile => tile.Id == tileId);
+        if (index < 0)
+            return false;
+        if (terrainId is { } id && !terrainSets.Any(set => set.Terrains.Any(terrain => terrain.Id == id)))
+            return false;
+
+        var current = tiles[index];
+        if (current.Terrain == terrainId)
+            return false;
+
+        var peering = terrainId is null ? Content.TerrainPeering.None : current.PeeringBits;
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, current.Name, current.Frames, current.AnimationSpeed, terrainId, peering);
+        return true;
+    }
+
+    /// <summary>
+    /// Sets the tile with <paramref name="tileId"/>'s peering bits wholesale (design #7580 §14 — the 3×3
+    /// grid commits the whole bitmask each toggle/preset). No-op if the tile is not currently a terrain
+    /// variant (<see cref="EditableTile.IsTerrainVariant"/> false) or the bits are unchanged.
+    /// </summary>
+    public bool SetTilePeeringBits(int tileId, Content.TerrainPeering peeringBits)
+    {
+        var index = tiles.FindIndex(tile => tile.Id == tileId);
+        if (index < 0)
+            return false;
+
+        var current = tiles[index];
+        if (!current.IsTerrainVariant || current.PeeringBits == peeringBits)
+            return false;
+
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, current.Name, current.Frames, current.AnimationSpeed, current.Terrain, peeringBits);
+        return true;
+    }
+
+    private void DemoteTilesOfTerrains(HashSet<int> removedTerrainIds)
+    {
+        for (var i = 0; i < tiles.Count; i++)
+        {
+            var tile = tiles[i];
+            if (tile.Terrain is { } terrainId && removedTerrainIds.Contains(terrainId))
+                tiles[i] = new EditableTile(tile.Id, tile.GraphicPath, tile.Graphic, tile.Collides, tile.Name, tile.Frames, tile.AnimationSpeed, null, Content.TerrainPeering.None);
+        }
     }
 
     /// <summary>

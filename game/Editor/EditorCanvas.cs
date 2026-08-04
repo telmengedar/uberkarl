@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Godot;
 using Uberkarl.Content;
 using Uberkarl.Editor;
@@ -123,6 +124,27 @@ namespace Uberkarl {
                 layer.EraseCell(cell);
             else if (built.SourceByTile.TryGetValue(change.TileId, out int sourceId))
                 layer.SetCell(cell, sourceId, Vector2I.Zero);
+        }
+
+        /// <summary>
+        /// Terrain id → Godot (terrainSet, terrain) index lookup for the currently-built level (DiVoid #7551
+        /// Phase 3) — what the controller's terrain-reflow pass (<c>LevelEditor.ReflowTerrain</c>) needs to
+        /// re-issue Godot's own terrain-connect resolution after a paint/erase, so a neighbour edit re-flows
+        /// the border live, exactly like the runtime (design #7580 §9 — "editor preview must resolve terrains
+        /// with the SAME mechanism the runtime uses").
+        /// </summary>
+        public IReadOnlyDictionary<int, TileSetBuilder.TerrainIndex> TerrainIndexByTerrainId => built?.TerrainIndexByTerrainId;
+
+        /// <summary>
+        /// Re-resolves terrain <paramref name="terrainSetIndex"/>/<paramref name="terrainIndex"/> over
+        /// <paramref name="cells"/> on the given layer via Godot's own <c>TileMapLayer.SetCellsTerrainConnect</c>
+        /// — the SAME call <see cref="TileMapLevelBuilder.ConnectTerrain"/> uses at load/build time, so the
+        /// live canvas preview never diverges from what a fresh load (or playtest) would render.
+        /// </summary>
+        public void ReconnectTerrain(int layerIndex, int terrainSetIndex, int terrainIndex, Godot.Collections.Array<Vector2I> cells) {
+            if (built == null || layerIndex < 0 || layerIndex >= built.Layers.Count || cells.Count == 0)
+                return;
+            built.Layers[layerIndex].SetCellsTerrainConnect(cells, terrainSetIndex, terrainIndex, ignoreEmptyTerrains: true);
         }
 
         // Poll the held cursor-move actions only while this surface has focus AND no radial/panel is
