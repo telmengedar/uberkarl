@@ -147,6 +147,32 @@ namespace Uberkarl {
             built.Layers[layerIndex].SetCellsTerrainConnect(cells, terrainSetIndex, terrainIndex, ignoreEmptyTerrains: true);
         }
 
+        /// <summary>
+        /// Fills, on layer <paramref name="layerIndex"/>, every cell in <paramref name="cells"/> that the
+        /// preceding <see cref="ReconnectTerrain"/> call just left with no tile (DiVoid #7638) with the tile
+        /// <paramref name="defaultTileId"/> names — empirically (Toni, 2026-08-04 live test), Godot's
+        /// <c>SetCellsTerrainConnect</c> leaves a cell whose real neighbour pattern matches no declared
+        /// variant completely empty rather than picking a "closest" one; this is what
+        /// <c>LevelEditor.ReflowTerrain</c> calls right after <see cref="ReconnectTerrain"/> so the LIVE
+        /// terrain brush shows the exact same deterministic fallback the runtime (<c>TileMapLevelBuilder</c>)
+        /// applies, per design #7580 §9 ("editor preview must resolve terrains with the SAME mechanism the
+        /// runtime uses"). A cell Godot DID resolve to a real variant is left untouched. No-op (not a crash)
+        /// if <paramref name="defaultTileId"/> has no source in the current tile set — a stale
+        /// authoring-time reference is defensive, not fatal, here.
+        /// </summary>
+        public void ApplyDefaultTile(int layerIndex, int defaultTileId, Godot.Collections.Array<Vector2I> cells) {
+            if (built == null || layerIndex < 0 || layerIndex >= built.Layers.Count || cells.Count == 0)
+                return;
+            if (!built.SourceByTile.TryGetValue(defaultTileId, out int sourceId))
+                return;
+
+            TileMapLayer layer = built.Layers[layerIndex];
+            foreach (Vector2I cell in cells) {
+                if (layer.GetCellSourceId(cell) == -1)
+                    layer.SetCell(cell, sourceId, Vector2I.Zero);
+            }
+        }
+
         // Poll the held cursor-move actions only while this surface has focus AND no radial/panel is
         // capturing directional input (CursorInputGate), so the same D-pad / stick / arrow keys drive the
         // grid cursor here but steer an open wheel or navigate a focused panel instead — never both. A

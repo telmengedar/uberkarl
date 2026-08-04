@@ -55,7 +55,7 @@ public static class TileSetMergeWriter
                     Name = terrainSet.Name,
                     MatchingMode = terrainSet.MatchingMode,
                     Terrains = terrainSet.Terrains
-                        .Select(terrain => new TerrainDefinition { Id = terrain.Id, Name = terrain.Name, Color = terrain.Color })
+                        .Select(terrain => new TerrainDefinition { Id = terrain.Id, Name = terrain.Name, Color = terrain.Color, DefaultTile = terrain.DefaultTile })
                         .ToArray(),
                 })
                 .ToArray(),

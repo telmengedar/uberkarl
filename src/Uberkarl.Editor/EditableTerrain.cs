@@ -7,11 +7,12 @@ namespace Uberkarl.Editor;
 /// </summary>
 public sealed class EditableTerrain
 {
-    public EditableTerrain(int id, string name, string? color = null)
+    public EditableTerrain(int id, string name, string? color = null, int? defaultTile = null)
     {
         Id = id;
         Name = name ?? throw new ArgumentNullException(nameof(name));
         Color = color;
+        DefaultTile = defaultTile;
     }
 
     /// <summary>Stable id, unique across the whole tile set (mirrors <see cref="EditableTile.Id"/>'s never-reused stability).</summary>
@@ -21,6 +22,15 @@ public sealed class EditableTerrain
 
     /// <summary>Author-facing colour (hex string), or <c>null</c> when unset.</summary>
     public string? Color { get; }
+
+    /// <summary>
+    /// This terrain's author-designated fallback <see cref="EditableTile.Id"/> (DiVoid #7638), or
+    /// <c>null</c> when unset — see <see cref="Content.TerrainDefinition.DefaultTile"/> for the "why".
+    /// Always a tile that is currently a member of THIS terrain — <see cref="EditableTileSet"/> keeps this
+    /// invariant (clears it if the referenced tile is removed or reassigned elsewhere), the same
+    /// self-consistency guarantee it already gives a tile's own <see cref="EditableTile.Terrain"/>.
+    /// </summary>
+    public int? DefaultTile { get; }
 }
 
 /// <summary>

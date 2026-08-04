@@ -186,6 +186,15 @@ public sealed class TileSetEditSession
         return happened;
     }
 
+    /// <summary>Sets terrain <paramref name="terrainId"/>'s author-designated default/fallback tile (DiVoid #7638). No-op when the terrain is not found, <paramref name="tileId"/> is not a member of this terrain, or unchanged.</summary>
+    public bool SetTerrainDefaultTile(int terrainSetId, int terrainId, int? tileId)
+    {
+        var happened = TileSet.SetTerrainDefaultTile(terrainSetId, terrainId, tileId);
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
     /// <summary>Renames the tile set itself. Blank/whitespace-only input is a no-op (mirrors <see cref="LevelEditSession.RenameLevel"/>).</summary>
     public bool Rename(string name)
     {

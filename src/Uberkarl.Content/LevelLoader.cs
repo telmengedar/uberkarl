@@ -171,8 +171,9 @@ public static class LevelLoader
     /// Resolves the tile set's declared terrain sets/terrains (DiVoid #7551 Phase 3, design #7580), in
     /// declaration order — the order <c>TileSetBuilder</c> maps onto Godot's index-based terrain sets.
     /// Fails typed when a terrain set id or a terrain id (unique across the WHOLE tile set, not just its own
-    /// set — see <see cref="TerrainDefinition.Id"/>) repeats, or a terrain's colour is present but not a
-    /// valid hex string.
+    /// set — see <see cref="TerrainDefinition.Id"/>) repeats, a terrain's colour is present but not a valid
+    /// hex string, or (DiVoid #7638) a terrain's <see cref="TerrainDefinition.DefaultTile"/> does not name a
+    /// declared tile that is itself a member of THIS terrain.
     /// </summary>
     private static List<ResolvedTerrainSet> ResolveTerrainSets(TileSetDefinition tileSet)
     {
@@ -200,7 +201,20 @@ public static class LevelLoader
                     color = parsed;
                 }
 
-                terrains.Add(new ResolvedTerrain { Id = terrain.Id, Name = terrain.Name, Color = color });
+                int? defaultTileId = null;
+                if (terrain.DefaultTile is { } candidateId)
+                {
+                    var candidate = tileSet.Tiles.FirstOrDefault(candidateTile => candidateTile.Id == candidateId);
+                    if (candidate is null)
+                        throw new LevelContentException(
+                            $"Terrain '{terrain.Name}' (id {terrain.Id}) default tile {candidateId} is not a declared tile.");
+                    if (candidate.Terrain != terrain.Id)
+                        throw new LevelContentException(
+                            $"Terrain '{terrain.Name}' (id {terrain.Id}) default tile {candidateId} does not belong to this terrain.");
+                    defaultTileId = candidateId;
+                }
+
+                terrains.Add(new ResolvedTerrain { Id = terrain.Id, Name = terrain.Name, Color = color, DefaultTileId = defaultTileId });
             }
 
             terrainSets.Add(new ResolvedTerrainSet

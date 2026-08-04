@@ -61,6 +61,7 @@ public static class EditableLevelSnapshot
                         Id = terrain.Id,
                         Name = terrain.Name,
                         Color = RgbaColor.TryParse(terrain.Color, out var color) ? color : null,
+                        DefaultTileId = terrain.DefaultTile,
                     })
                     .ToArray(),
             })

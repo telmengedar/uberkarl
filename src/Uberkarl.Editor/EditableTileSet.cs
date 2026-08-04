@@ -112,6 +112,7 @@ public sealed class EditableTileSet
             return false;
 
         tiles.RemoveAt(index);
+        ClearDanglingDefaultTileReferences(id);
         return true;
     }
 
@@ -364,7 +365,7 @@ public sealed class EditableTileSet
         return ReplaceTerrain(terrainSetId, terrainId, terrain =>
             string.Equals(terrain.Name, name.Trim(), StringComparison.Ordinal)
                 ? null
-                : new EditableTerrain(terrain.Id, name.Trim(), terrain.Color));
+                : new EditableTerrain(terrain.Id, name.Trim(), terrain.Color, terrain.DefaultTile));
     }
 
     /// <summary>Sets the author colour of the terrain with <paramref name="terrainId"/>. Returns <c>false</c> (no-op) when not found or unchanged.</summary>
@@ -372,7 +373,59 @@ public sealed class EditableTileSet
         => ReplaceTerrain(terrainSetId, terrainId, terrain =>
             string.Equals(terrain.Color, color, StringComparison.OrdinalIgnoreCase)
                 ? null
-                : new EditableTerrain(terrain.Id, terrain.Name, color));
+                : new EditableTerrain(terrain.Id, terrain.Name, color, terrain.DefaultTile));
+
+    /// <summary>
+    /// Sets terrain <paramref name="terrainId"/>'s author-designated default/fallback tile (DiVoid #7638) —
+    /// the tile <c>TileMapLevelBuilder</c> fills in for a painted cell whose real neighbour pattern matches
+    /// no declared variant (Godot's <c>SetCellsTerrainConnect</c> otherwise leaves such a cell empty/invisible).
+    /// <paramref name="tileId"/> must name a tile that is CURRENTLY a member of THIS terrain (mirrors
+    /// <see cref="SetTileTerrain"/>'s own "must be declared" guard) — <c>null</c> clears it. Returns
+    /// <c>false</c> (no-op) when the terrain is not found, <paramref name="tileId"/> is not a member of this
+    /// terrain, or unchanged.
+    /// </summary>
+    public bool SetTerrainDefaultTile(int terrainSetId, int terrainId, int? tileId)
+    {
+        if (tileId is { } id)
+        {
+            var candidate = tiles.FirstOrDefault(tile => tile.Id == id);
+            if (candidate is null || candidate.Terrain != terrainId)
+                return false;
+        }
+
+        return ReplaceTerrain(terrainSetId, terrainId, terrain =>
+            terrain.DefaultTile == tileId
+                ? null
+                : new EditableTerrain(terrain.Id, terrain.Name, terrain.Color, tileId));
+    }
+
+    // DiVoid #7638: keeps a terrain's DefaultTile self-consistent with tile membership — mirrors
+    // DemoteTilesOfTerrains' "this tile set's own data, so it is kept internally consistent here" stance
+    // (as opposed to RemoveTile's "no cross-check against LEVEL references" stance, which is a different,
+    // external resource). Called whenever a tile stops being a member of whatever terrain it belonged to
+    // (removed outright, or reassigned to a different terrain/none) — any terrain whose DefaultTile still
+    // points at that tile id would otherwise dangle silently (TileMapLevelBuilder just skips a dangling
+    // reference defensively, so the author's chosen fallback would silently stop applying).
+    private void ClearDanglingDefaultTileReferences(int tileId)
+    {
+        for (var i = 0; i < terrainSets.Count; i++)
+        {
+            var set = terrainSets[i];
+            List<EditableTerrain>? updated = null;
+            for (var j = 0; j < set.Terrains.Count; j++)
+            {
+                var terrain = set.Terrains[j];
+                if (terrain.DefaultTile != tileId)
+                    continue;
+
+                updated ??= set.Terrains.ToList();
+                updated[j] = new EditableTerrain(terrain.Id, terrain.Name, terrain.Color, null);
+            }
+
+            if (updated != null)
+                terrainSets[i] = new EditableTerrainSet(set.Id, set.Name, set.MatchingMode, updated);
+        }
+    }
 
     private bool ReplaceTerrain(int terrainSetId, int terrainId, Func<EditableTerrain, EditableTerrain?> update)
     {
@@ -415,6 +468,7 @@ public sealed class EditableTileSet
 
         var peering = terrainId is null ? Content.TerrainPeering.None : current.PeeringBits;
         tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, current.Name, current.Frames, current.AnimationSpeed, terrainId, peering);
+        ClearDanglingDefaultTileReferences(tileId); // it just stopped being a member of whatever terrain it belonged to before
         return true;
     }
 
