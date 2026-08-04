@@ -17,8 +17,15 @@ namespace Uberkarl {
     ///
     /// Scoped to the CURRENT package only (Phase 1 simplicity, matching <see cref="EditableLevelReader"/>'s
     /// existing same-package restriction on a level's tile set) — cross-package binding is not built.
+    ///
+    /// <b>Always opens</b> (DiVoid #7551 bugfix): the panel must give feedback on every "Bind Tileset…"
+    /// press — the bindable siblings, the "no other tile sets" empty state (<see cref="Summon"/>, both
+    /// already handled before the bug), OR, when the level isn't attached to a browsable package yet, the
+    /// <see cref="SummonUnavailable"/> explanation. It must never silently do nothing.
     /// </summary>
     public partial class TileSetBindPanel : Control {
+
+        const string NoSiblingsMessage = "No other tile sets in this package.";
 
         IPackageSource source;
         PackageHandle packageHandle;
@@ -86,7 +93,7 @@ namespace Uberkarl {
             listBox = new VBoxContainer();
             scroll.AddChild(listBox);
 
-            emptyLabel = new Label { Visible = false, Text = "No other tile sets in this package." };
+            emptyLabel = new Label { Visible = false, Text = NoSiblingsMessage };
             emptyLabel.AddThemeColorOverride("font_color", EditorTheme.TextDim);
             root.AddChild(emptyLabel);
         }
@@ -100,14 +107,31 @@ namespace Uberkarl {
 
             List<ResourceSummary> found = new List<ResourceSummary>();
             try {
-                foreach (ResourceSummary entry in source.GetContents(handle))
-                    if (entry.Kind == ResourceKind.TileSet && !(current.IsSelf && entry.Path == current.Path))
-                        found.Add(entry);
+                found = TileSetBindAvailability.SelectBindableSiblings(source.GetContents(handle), current);
             } catch (Exception exception) {
                 GD.PrintErr($"TileSetBindPanel: {exception.GetType().Name}: {exception.Message}");
             }
             tileSets = found;
 
+            emptyLabel.Text = NoSiblingsMessage;
+            Rebuild();
+        }
+
+        /// <summary>
+        /// Summon the panel in a "can't list siblings" state — e.g. the level under edit is not (yet)
+        /// attached to a browsable package (DiVoid #7551 bugfix, Toni 2026-08-xx: "bind tileset does
+        /// nothing"). Previously <c>LevelEditor</c> simply skipped calling <see cref="Summon"/> at all in
+        /// this case, so "Bind Tileset…" silently did nothing — no panel, no feedback, indistinguishable
+        /// from the action not being wired up at all. Every "Bind Tileset…" press now opens SOMETHING.
+        /// </summary>
+        public void SummonUnavailable(string reason) {
+            source = null;
+            packageHandle = default;
+            currentReference = default;
+            tileSets = Array.Empty<ResourceSummary>();
+            Visible = true;
+
+            emptyLabel.Text = reason;
             Rebuild();
         }
 

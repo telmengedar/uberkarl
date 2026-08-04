@@ -307,16 +307,16 @@ namespace Uberkarl {
         void SummonTileSetEditor() {
             if (tileSetSession == null)
                 return;
-            tileSetEditor.Summon(tileSetSession);
+            tileSetEditor.Summon(tileSetSession, session.Level.TileSize);
         }
 
-        // Only offered once the level already lives in a package (design #7580 — Phase 1 keeps binding
-        // scoped to "another tileset resource already in the SAME package", the same restriction the
-        // editor already applies to reading a level's tileset at all). A brand-new, never-saved level has
-        // no package to browse siblings from yet.
+        /// <summary>Opens <see cref="tileSetBindPanel"/> against the level's siblings, or its unavailable state (DiVoid #7551 bugfix) when there's no package to browse yet.</summary>
         void SummonTileSetBindPanel() {
-            if (session == null || packageContext == null)
+            string unavailableReason = TileSetBindAvailability.UnavailableReason(session != null, packageContext != null);
+            if (unavailableReason != null) {
+                tileSetBindPanel.SummonUnavailable(unavailableReason);
                 return;
+            }
             tileSetBindPanel.Summon(packageSource, packageContext.Handle, session.Level.TileSetReference);
         }
 

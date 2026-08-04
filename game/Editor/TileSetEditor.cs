@@ -29,6 +29,8 @@ namespace Uberkarl {
         OnScreenKeyboard keyboard;
         FileDialog importDialog;
 
+        int tileSize = 1;
+
         int pendingDeleteId = -1;
         int lastFocusedRow;
         int lastFocusedCol;
@@ -98,9 +100,14 @@ namespace Uberkarl {
         /// </summary>
         public void AttachKeyboard(OnScreenKeyboard onScreenKeyboard) => keyboard = onScreenKeyboard;
 
-        /// <summary>Summon the panel against <paramref name="editSession"/>, showing its current tiles.</summary>
-        public void Summon(TileSetEditSession editSession) {
+        /// <summary>
+        /// Summon the panel against <paramref name="editSession"/>, showing its current tiles.
+        /// <paramref name="levelTileSize"/> is the level grid's square cell size (pixels) that a newly
+        /// imported graphic is scaled to fill (DiVoid #7551 bugfix) — the caller's <c>EditableLevel.TileSize</c>.
+        /// </summary>
+        public void Summon(TileSetEditSession editSession, int levelTileSize) {
             session = editSession;
+            tileSize = levelTileSize;
             pendingDeleteId = -1;
             lastFocusedRow = 0;
             lastFocusedCol = 0;
@@ -200,6 +207,7 @@ namespace Uberkarl {
             importDialog.PopupCentered();
         }
 
+        /// <summary>Imports a graphic as a new tile, scaled to <see cref="tileSize"/> per <see cref="TileGraphicImport"/>.</summary>
         void OnGraphicFileSelected(string path) {
             if (session == null)
                 return;
@@ -214,6 +222,14 @@ namespace Uberkarl {
             if (probe.LoadPngFromBuffer(bytes) != Error.Ok) {
                 GD.PrintErr($"TileSetEditor: '{path}' is not a readable PNG.");
                 return;
+            }
+
+            int sourceWidth = probe.GetWidth();
+            int sourceHeight = probe.GetHeight();
+            if (TileGraphicImport.NeedsResize(sourceWidth, sourceHeight, tileSize)) {
+                probe.Resize(tileSize, tileSize, Image.Interpolation.Lanczos);
+                bytes = probe.SavePngToBuffer();
+                GD.Print($"TileSetEditor: '{path}' was {sourceWidth}x{sourceHeight}, scaled to {tileSize}x{tileSize} to fill the tile.");
             }
 
             int id = session.AddTile(bytes, collides: false);
