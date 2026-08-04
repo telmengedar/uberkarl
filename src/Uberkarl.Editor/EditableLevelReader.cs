@@ -15,6 +15,13 @@ namespace Uberkarl.Editor;
 /// This increment edits self-contained packages (every tile graphic is a self reference in the same
 /// package, as the sample is). A tile graphic that points at another package is out of scope for the
 /// MVP and surfaces as a clear <see cref="LevelContentException"/>.
+///
+/// <b>Shared-tileset correction (DiVoid #7551 Phase 1a):</b> the level's bound tile set is read via
+/// <see cref="EditableTileSetReader"/> (the level no longer owns its tile definitions/graphics) — this
+/// reader only takes the resulting tile LIST to seed the level's palette cache
+/// (<see cref="EditableLevel.Tiles"/>); the tile set's own resource identity/path is exposed separately
+/// through <see cref="EditableLevel.TileSetReference"/> for a caller (<c>LevelEditor</c>) that wants to
+/// also open it for editing via <see cref="EditableTileSetReader"/> directly.
 /// </summary>
 public static class EditableLevelReader
 {
@@ -52,20 +59,7 @@ public static class EditableLevelReader
         var levelDefinition = LevelContentSerializer.ReadLevel(package.ReadBytes(levelPath));
 
         var tileSetReference = levelDefinition.TileSet;
-        if (!tileSetReference.IsSelf && tileSetReference.Package != package.Id)
-            throw new LevelContentException("Editing a level whose tile set lives in another package is not supported.");
-        var tileSetPath = tileSetReference.Path;
-        var tileSetDefinition = LevelContentSerializer.ReadTileSet(package.ReadBytes(tileSetPath));
-
-        var tiles = new List<EditableTile>(tileSetDefinition.Tiles.Count);
-        foreach (var tile in tileSetDefinition.Tiles)
-        {
-            if (!tile.Graphic.IsSelf && tile.Graphic.Package != package.Id)
-                throw new LevelContentException(
-                    $"Tile {tile.Id} graphic lives in another package; cross-package graphics are not editable in this increment.");
-            var graphicBytes = package.ReadBytes(tile.Graphic.Path);
-            tiles.Add(new EditableTile(tile.Id, tile.Graphic.Path, graphicBytes, tile.Collides));
-        }
+        var tiles = EditableTileSetReader.FromPackage(package, tileSetReference).Tiles;
 
         var layers = new List<EditableLayer>(levelDefinition.Layers.Count);
         foreach (var layer in levelDefinition.Layers)
@@ -79,9 +73,10 @@ public static class EditableLevelReader
         }
 
         // Loaded from a real package resource, so this level already occupies a stable slot: isAttached
-        // is true and levelPath/tileSetPath are preserved verbatim, even if they predate the per-resource
-        // namespacing scheme (a legacy fixed-constant path like "tileset.json" still round-trips fine —
-        // this correction does not force a migration of already-saved content).
+        // is true and levelPath is preserved verbatim, even if it predates the per-resource namespacing
+        // scheme (a legacy fixed-constant path like "level.json" still round-trips fine — this correction
+        // does not force a migration of already-saved content). tileSetReference is preserved verbatim too
+        // — whatever shared resource the level already binds, unchanged by loading it into the editor.
         //
         // The level's own display name comes from ITS resource path, never the package's manifest name
         // (DiVoid #7571/#7572 — package identity is independent of level naming; a package can hold many
@@ -90,7 +85,7 @@ public static class EditableLevelReader
         return new EditableLevel(
             DisplayNameFromPath(levelPath),
             levelPath,
-            tileSetPath,
+            tileSetReference,
             levelDefinition.TileSize,
             levelDefinition.Width,
             levelDefinition.Height,

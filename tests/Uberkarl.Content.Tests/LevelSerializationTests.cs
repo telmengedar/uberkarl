@@ -64,6 +64,38 @@ public sealed class LevelSerializationTests
     }
 
     [Test]
+    public void TileDefinition_Name_RoundTrips_WhenSet()
+    {
+        // DiVoid #7551 Phase 1b — the on-screen-keyboard-authored tile name.
+        var original = new TileSetDefinition
+        {
+            Tiles = new[]
+            {
+                new TileDefinition { Id = 1, Name = "Grass", Graphic = ResourceReference.ToSelf(ResourcePath.Create("tiles/grass.png")) },
+            },
+        };
+
+        var restored = LevelContentSerializer.ReadTileSet(LevelContentSerializer.WriteTileSet(original));
+
+        Assert.That(restored.Tiles[0].Name, Is.EqualTo("Grass"));
+    }
+
+    [Test]
+    public void TileDefinition_Name_IsOmittedFromJson_WhenUnset()
+    {
+        // Omit-when-default (design #7580 §12): pre-authoring content (no Name ever set) must serialize
+        // without a "name" field at all, so it stays byte-comparable with content written before this PR.
+        var tileSet = new TileSetDefinition
+        {
+            Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(ResourcePath.Create("tiles/grass.png")) } },
+        };
+
+        var json = System.Text.Encoding.UTF8.GetString(LevelContentSerializer.WriteTileSet(tileSet));
+
+        Assert.That(json, Does.Not.Contain("\"name\""));
+    }
+
+    [Test]
     public void ReadLevel_OnInvalidJson_ThrowsLevelContentException()
     {
         var garbage = System.Text.Encoding.UTF8.GetBytes("{ not json ]");

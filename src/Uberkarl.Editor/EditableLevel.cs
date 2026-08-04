@@ -12,10 +12,19 @@ namespace Uberkarl.Editor;
 /// living inside a package (an archive of many typed resources), not the package itself. Archive
 /// identity (<c>PackageId</c>/Name/Version/Attribution/ForkedFrom) has moved OUT of this class and lives
 /// on <see cref="PackageContext"/> instead; <see cref="Rename"/> here changes only this level's own
-/// display name, never a package's. <see cref="LevelPath"/>/<see cref="TileSetPath"/> are this level's
-/// own in-package addresses — namespaced per level (<see cref="LevelResourcePaths"/>) so two distinctly-
-/// named levels in the same package never collide — and stay fixed once <see cref="IsAttached"/>
-/// (renaming the level does not move its VFS entry); see <see cref="Attach"/>.
+/// display name, never a package's. <see cref="LevelPath"/> is this level's own in-package address —
+/// namespaced per level (<see cref="LevelResourcePaths"/>) so two distinctly-named levels in the same
+/// package never collide — and stays fixed once <see cref="IsAttached"/> (renaming the level does not
+/// move its VFS entry); see <see cref="Attach"/>.
+///
+/// <b>Shared-tileset correction (DiVoid #7551 Phase 1a, design #7580):</b> a level no longer OWNS its
+/// tileset. It binds one by <see cref="TileSetReference"/> — a <see cref="ResourceReference"/> to a
+/// standalone <see cref="EditableTileSet"/> resource that many levels may reference — via
+/// <see cref="BindTileSet"/>. <see cref="Tiles"/> remains the level's read-only palette CACHE for painting
+/// (kept in sync with whatever tile set is currently bound), but it is no longer this level's own
+/// resource contribution on save (see <see cref="LevelMergeWriter"/>): <see cref="Attach"/> therefore no
+/// longer remaps tile graphic paths — those belong to the bound tile set's own namespace
+/// (<see cref="TileSetResourcePaths"/>), untouched by a level's attach/rename.
 ///
 /// Edit commands mutate a layer's cells in place; structural changes (resize, add/remove layers or
 /// tiles, edit spawns) are deferred increments — for this increment the geometry and palette are fixed
@@ -32,7 +41,7 @@ public sealed class EditableLevel
     public EditableLevel(
         string name,
         ResourcePath levelPath,
-        ResourcePath tileSetPath,
+        ResourceReference tileSetReference,
         int tileSize,
         int width,
         int height,
@@ -50,7 +59,7 @@ public sealed class EditableLevel
 
         Name = name ?? throw new ArgumentNullException(nameof(name));
         LevelPath = levelPath;
-        TileSetPath = tileSetPath;
+        TileSetReference = tileSetReference;
         TileSize = tileSize;
         Width = width;
         Height = height;
@@ -78,8 +87,12 @@ public sealed class EditableLevel
     /// <see cref="IsAttached"/> — see <see cref="Attach"/>.</summary>
     public ResourcePath LevelPath { get; private set; }
 
-    /// <summary>This level's own tile-set path (tilesets/&lt;slug&gt;.json once attached).</summary>
-    public ResourcePath TileSetPath { get; private set; }
+    /// <summary>
+    /// The shared tile set resource this level currently binds (DiVoid #7551 Phase 1a) — a reference, not
+    /// an ownership relationship. Set at creation and changed only via <see cref="BindTileSet"/> (the
+    /// level-side "bind tileset" affordance, Phase 1b).
+    /// </summary>
+    public ResourceReference TileSetReference { get; private set; }
 
     public int TileSize { get; }
 
@@ -334,15 +347,17 @@ public sealed class EditableLevel
 
     /// <summary>
     /// Establishes (or re-establishes) this level's namespaced resource slot in a package: derives
-    /// <see cref="LevelPath"/>/<see cref="TileSetPath"/> from <paramref name="slug"/>
-    /// (<see cref="LevelResourcePaths"/>), or reuses <paramref name="overwriteLevelPath"/> verbatim when
-    /// the author explicitly picked an existing level resource to overwrite, and remaps every tile's
-    /// graphic to <c>graphics/&lt;slug&gt;/&lt;tileId&gt;.png</c> so this level's whole resource set is
-    /// self-namespaced and cannot collide with any sibling. Marks <see cref="IsAttached"/> so a later
-    /// plain Save reuses these exact paths without re-deriving them from whatever the level is renamed to
-    /// next (design #7572 open question 3). Called by <see cref="LevelEditSession.AttachAsNewResource"/>/
-    /// <see cref="LevelEditSession.AttachToExistingResource"/> — the two Save-As outcomes that establish
-    /// or confirm a level's slot; a plain re-save into an already-attached level never calls this.
+    /// <see cref="LevelPath"/> from <paramref name="slug"/> (<see cref="LevelResourcePaths"/>), or reuses
+    /// <paramref name="overwriteLevelPath"/> verbatim when the author explicitly picked an existing level
+    /// resource to overwrite. Under the shared-tileset correction (DiVoid #7551 Phase 1a) this no longer
+    /// touches tile graphic paths at all — those belong to whichever tile set is currently bound
+    /// (<see cref="TileSetReference"/>), which has its own independent attach lifecycle
+    /// (<see cref="EditableTileSet.Attach"/>) untouched by a level's own rename/re-namespace. Marks
+    /// <see cref="IsAttached"/> so a later plain Save reuses this exact path without re-deriving it from
+    /// whatever the level is renamed to next (design #7572 open question 3). Called by
+    /// <see cref="LevelEditSession.AttachAsNewResource"/>/<see cref="LevelEditSession.AttachToExistingResource"/>
+    /// — the two Save-As outcomes that establish or confirm a level's slot; a plain re-save into an
+    /// already-attached level never calls this.
     /// </summary>
     public void Attach(string slug, ResourcePath? overwriteLevelPath)
     {
@@ -350,25 +365,49 @@ public sealed class EditableLevel
             throw new ArgumentException("Slug must not be empty.", nameof(slug));
 
         LevelPath = overwriteLevelPath ?? LevelResourcePaths.LevelPath(slug);
-        TileSetPath = LevelResourcePaths.TileSetPath(slug);
-        tiles = tiles.Select(tile => new EditableTile(tile.Id, LevelResourcePaths.GraphicPath(slug, tile.Id), tile.Graphic, tile.Collides)).ToList();
         IsAttached = true;
     }
 
     /// <summary>
-    /// Creates an empty level: one collision layer of the given size filled with empty cells, and the
-    /// supplied palette (the caller provides the tile graphics — the model never encodes images). Used by
-    /// the editor's "New" action; the palette is fixed because tile-set editing is a later increment. The
-    /// level starts <b>unattached</b> (<see cref="IsAttached"/> is <c>false</c>) with provisional paths
-    /// derived from <paramref name="name"/> — never persisted as-is; the first Save routes through
-    /// Save-As, which calls <see cref="Attach"/> to establish the level's real namespaced slot from
-    /// whatever name is actually typed there.
+    /// Rebinds this level to a different shared tile set resource (DiVoid #7551 Phase 1b — the level-side
+    /// "bind tileset" affordance): sets <see cref="TileSetReference"/> and replaces the palette cache
+    /// (<see cref="Tiles"/>) with the newly-bound tile set's tiles. Does not validate that every already-
+    /// painted cell resolves against the new palette (design #7580 §11 — a full "surfaces a validation
+    /// warning, not a silent break" guard is later work); a stray dangling cell id would still be caught,
+    /// typed, by the loader on next load/save. Also the seam <see cref="RefreshTiles"/> uses to keep the
+    /// cache in sync after an in-place edit to the SAME bound tile set (add/remove/rename a tile via
+    /// <c>TileSetEditor</c> without rebinding to a different resource).
+    /// </summary>
+    public void BindTileSet(ResourceReference tileSetReference, IReadOnlyList<EditableTile> tiles)
+    {
+        TileSetReference = tileSetReference;
+        this.tiles = tiles ?? throw new ArgumentNullException(nameof(tiles));
+    }
+
+    /// <summary>
+    /// Re-syncs the palette cache from the currently-bound tile set's live tile list, without changing
+    /// which tile set is bound — the seam a mutation made through <c>TileSetEditor</c> (add/remove/rename
+    /// a tile in the tile set this level already has open) uses to keep <see cref="Tiles"/> current.
+    /// </summary>
+    public void RefreshTiles(IReadOnlyList<EditableTile> tiles) => this.tiles = tiles ?? throw new ArgumentNullException(nameof(tiles));
+
+    /// <summary>
+    /// Creates an empty level: one collision layer of the given size filled with empty cells, bound to
+    /// <paramref name="tileSetReference"/> with <paramref name="palette"/> as the initial cache of that
+    /// tile set's tiles (the caller resolves the actual tiles — the model never encodes images or reads
+    /// packages). Used by the editor's "New" action, which mints a fresh <see cref="EditableTileSet"/>
+    /// (seeded from <c>DefaultPalette</c>) alongside the level so "New" still opens paintable, then binds
+    /// it here. The level starts <b>unattached</b> (<see cref="IsAttached"/> is <c>false</c>) with a
+    /// provisional <see cref="LevelPath"/> derived from <paramref name="name"/> — never persisted as-is;
+    /// the first Save routes through Save-As, which calls <see cref="Attach"/> to establish the level's
+    /// real namespaced slot from whatever name is actually typed there.
     /// </summary>
     public static EditableLevel CreateBlank(
         string name,
         int tileSize,
         int width,
         int height,
+        ResourceReference tileSetReference,
         IReadOnlyList<EditableTile> palette)
     {
         if (palette is null)
@@ -382,7 +421,7 @@ public sealed class EditableLevel
         return new EditableLevel(
             name,
             LevelResourcePaths.LevelPath(slug),
-            LevelResourcePaths.TileSetPath(slug),
+            tileSetReference,
             tileSize,
             width,
             height,

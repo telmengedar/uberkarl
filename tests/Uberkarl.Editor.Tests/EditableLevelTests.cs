@@ -162,7 +162,7 @@ public sealed class EditableLevelTests
     [Test]
     public void CreateBlank_ProducesEmptyPaintableLevel()
     {
-        var level = EditableLevel.CreateBlank("Untitled", TileSize, 5, 4, Palette());
+        var level = EditableLevel.CreateBlank("Untitled", TileSize, 5, 4, ResourceReference.ToSelf(TileSetPath), Palette());
 
         Assert.Multiple(() =>
         {
@@ -321,7 +321,7 @@ public sealed class EditableLevelTests
         using var package = PackageReader.Open(new MemoryStream(packageBytes));
         var origin = EditableLevelReader.FromPackage(package);
         var withBackground = new EditableLevel(
-            origin.Name, origin.LevelPath, origin.TileSetPath, origin.TileSize, origin.Width, origin.Height,
+            origin.Name, origin.LevelPath, origin.TileSetReference, origin.TileSize, origin.Width, origin.Height,
             "#3A5A8C", origin.Spawns, origin.DefaultSpawn, origin.Tiles, origin.Layers, isAttached: true);
         var session = new LevelEditSession(withBackground);
 
@@ -335,7 +335,7 @@ public sealed class EditableLevelTests
     {
         var origin = EditableLevelReader.FromPackageBytes(BuildSamplePackageBytes());
         var withBackground = new EditableLevel(
-            origin.Name, origin.LevelPath, origin.TileSetPath, origin.TileSize, origin.Width, origin.Height,
+            origin.Name, origin.LevelPath, origin.TileSetReference, origin.TileSize, origin.Width, origin.Height,
             "#204080", origin.Spawns, origin.DefaultSpawn, origin.Tiles, origin.Layers, isAttached: true);
 
         var resolved = EditableLevelSnapshot.ToResolvedLevel(withBackground);
@@ -346,9 +346,17 @@ public sealed class EditableLevelTests
     [Test]
     public void CreateBlank_SavesAndReloads()
     {
-        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, 3, 3, Palette()));
+        // Shared-tileset correction (DiVoid #7551 Phase 1a): a level's own save no longer carries its
+        // tileset — the bound tile set must be saved too (its own contributions), exactly as
+        // LevelEditor.SaveLevelAndTileSet orchestrates, or the reference the level.json carries dangles.
+        var tileSet = EditableTileSet.CreateBlank("Untitled Tiles", Palette());
+        var tileSetSession = new TileSetEditSession(tileSet);
+        tileSetSession.AttachAsNewResource(Array.Empty<ResourceEntry>());
+
+        var session = new LevelEditSession(EditableLevel.CreateBlank(
+            "Untitled", TileSize, 3, 3, ResourceReference.ToSelf(tileSet.TileSetPath), Palette()));
         session.PaintCell(0, 1, 1, 1);
-        var reloaded = EditableLevelReader.FromPackageBytes(session.SaveFresh("Untitled Package"));
+        var reloaded = EditableLevelReader.FromPackageBytes(session.SaveFresh("Untitled Package", tileSetSession.BuildContributions()));
 
         Assert.That(reloaded.GetCell(0, 1, 1), Is.EqualTo(1));
         Assert.That(reloaded.Layers[0].Cells, Has.Length.EqualTo(9));
@@ -381,7 +389,7 @@ public sealed class EditableLevelTests
         Array.Fill(cells, LayerDefinition.EmptyCell);
         var layer = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
         return new EditableLevel(
-            "Sample", LevelPath, TileSetPath,
+            "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
             Palette(), new[] { layer });

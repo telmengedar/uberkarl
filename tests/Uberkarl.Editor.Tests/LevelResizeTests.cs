@@ -335,7 +335,7 @@ public sealed class LevelResizeTests
         Array.Fill(cells, LayerDefinition.EmptyCell);
         var layer = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
         return new EditableLevel(
-            "Sample", LevelPath, TileSetPath,
+            "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
             Palette(), new[] { layer });

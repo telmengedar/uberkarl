@@ -129,6 +129,25 @@ public sealed class PackageBuilder
         return this;
     }
 
+    /// <summary>
+    /// Removes the staged resource at <paramref name="path"/>, if any — a no-op when nothing is staged
+    /// there. The primitive a content-rewriting pass (e.g. <c>Uberkarl.Editor.TileSetMigration</c>
+    /// deduplicating identical per-level tile sets, DiVoid #7551 Phase 1a) needs on top of
+    /// <see cref="SeedFrom"/>: seed the whole archive, add-or-replace whatever moved, then drop whatever
+    /// became orphaned.
+    /// </summary>
+    public PackageBuilder RemoveResource(ResourcePath path)
+    {
+        var index = resources.FindIndex(resource => resource.Path.Value == path.Value);
+        if (index >= 0)
+        {
+            resources.RemoveAt(index);
+            takenPaths.Remove(path.Value);
+        }
+
+        return this;
+    }
+
     public PackageBuilder AddLicense(ResourcePath path, string license, byte[] payload)
     {
         AddResource(ResourceKind.License, path, payload, "text/plain");

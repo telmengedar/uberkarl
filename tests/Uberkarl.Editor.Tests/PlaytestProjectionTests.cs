@@ -58,7 +58,7 @@ public sealed class PlaytestProjectionTests
         var terrain = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
         var backdrop = new EditableLayer("backdrop", collision: false, scrollSpeed: 0.5f, repeat: true, (int[])cells.Clone());
         var level = new EditableLevel(
-            "Sample", LevelPath, TileSetPath,
+            "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new System.Collections.Generic.Dictionary<string, GridPosition>(), defaultSpawn: null,
             Palette(), new[] { terrain, backdrop });
@@ -79,7 +79,7 @@ public sealed class PlaytestProjectionTests
     {
         // A freshly-created (never-saved) level declares no spawn — the play path must fall back to a
         // default cell rather than fail. This is the projection half of that "empty level" edge case.
-        var level = EditableLevel.CreateBlank("Untitled", TileSize, 5, 4, Palette());
+        var level = EditableLevel.CreateBlank("Untitled", TileSize, 5, 4, ResourceReference.ToSelf(TileSetPath), Palette());
 
         var resolved = EditableLevelSnapshot.ToResolvedLevel(level);
 
@@ -156,7 +156,7 @@ public sealed class PlaytestProjectionTests
         Array.Fill(cells, LayerDefinition.EmptyCell);
         var layer = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
         return new EditableLevel(
-            "Sample", LevelPath, TileSetPath,
+            "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new System.Collections.Generic.Dictionary<string, GridPosition>(), defaultSpawn: null,
             Palette(), new[] { layer });

@@ -19,7 +19,7 @@ namespace Uberkarl {
     public static class TileMapLevelBuilder {
 
         public static Node2D Build(ResolvedLevel level) {
-            BuiltTileSet shared = BuildTileSet(level);
+            TileSetBuilder.BuiltTileSet shared = TileSetBuilder.Build(level.TileGraphics, level.CollidingTileIds, level.TileSize);
 
             // The layer's content size in pixels — used as the repeat period for a repeating layer so
             // its content tiles seamlessly across the scroll extent.
@@ -47,7 +47,7 @@ namespace Uberkarl {
         /// (<c>SetCell</c>/<c>EraseCell</c>) without rebuilding the tree.
         /// </summary>
         public static BuiltLevel BuildEditable(ResolvedLevel level) {
-            BuiltTileSet shared = BuildTileSet(level);
+            TileSetBuilder.BuiltTileSet shared = TileSetBuilder.Build(level.TileGraphics, level.CollidingTileIds, level.TileSize);
 
             Node2D root = new Node2D { Name = "Level" };
             List<TileMapLayer> layers = new List<TileMapLayer>(level.Layers.Count);
@@ -103,45 +103,6 @@ namespace Uberkarl {
         /// </summary>
         public static Vector2 ScrollScaleFor(float scrollSpeed) => new Vector2(scrollSpeed, 1f);
 
-        static BuiltTileSet BuildTileSet(ResolvedLevel level) {
-            TileSet tileSet = new TileSet { TileSize = new Vector2I(level.TileSize, level.TileSize) };
-            tileSet.AddPhysicsLayer();
-
-            Dictionary<int, int> sourceByTile = new Dictionary<int, int>();
-            foreach (KeyValuePair<int, byte[]> graphic in level.TileGraphics) {
-                Image image = new Image();
-                Error status = image.LoadPngFromBuffer(graphic.Value);
-                if (status != Error.Ok)
-                    throw new LevelContentException($"Tile {graphic.Key} graphic is not a readable PNG (Godot error {status}).");
-
-                ImageTexture texture = ImageTexture.CreateFromImage(image);
-                TileSetAtlasSource source = new TileSetAtlasSource {
-                    Texture = texture,
-                    TextureRegionSize = new Vector2I(level.TileSize, level.TileSize),
-                };
-                source.CreateTile(Vector2I.Zero);
-                sourceByTile[graphic.Key] = tileSet.AddSource(source);
-
-                if (level.CollidingTileIds.Contains(graphic.Key))
-                    AddFullTileCollision(source, level.TileSize);
-            }
-
-            return new BuiltTileSet(tileSet, sourceByTile);
-        }
-
-        static void AddFullTileCollision(TileSetAtlasSource source, int tileSize) {
-            TileData data = source.GetTileData(Vector2I.Zero, 0);
-            float half = tileSize / 2f;
-            Vector2[] square = {
-                new Vector2(-half, -half),
-                new Vector2(half, -half),
-                new Vector2(half, half),
-                new Vector2(-half, half),
-            };
-            data.AddCollisionPolygon(0);
-            data.SetCollisionPolygonPoints(0, 0, square);
-        }
-
         /// <summary>
         /// The result of building a level for the editor: the parent node, the per-layer tile-map nodes
         /// (index-aligned to the level's layers) and the tile-id → atlas-source-id map used to place a
@@ -160,17 +121,6 @@ namespace Uberkarl {
             public IReadOnlyList<TileMapLayer> Layers { get; }
 
             public IReadOnlyDictionary<int, int> SourceByTile { get; }
-        }
-
-        readonly struct BuiltTileSet {
-            public BuiltTileSet(TileSet set, Dictionary<int, int> sourceByTile) {
-                Set = set;
-                SourceByTile = sourceByTile;
-            }
-
-            public TileSet Set { get; }
-
-            public Dictionary<int, int> SourceByTile { get; }
         }
     }
 }

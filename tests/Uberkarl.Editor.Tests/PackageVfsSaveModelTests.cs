@@ -27,6 +27,11 @@ public sealed class PackageVfsSaveModelTests
 
     private static readonly ResourcePath GrassPath = ResourcePath.Create("tiles/grass.png");
 
+    // A pre-existing "village" tile set's path — a plain, arbitrary fixture path (not derived from the
+    // now-removed LevelResourcePaths.TileSetPath; a tile set's namespace is TileSetResourcePaths' own,
+    // DiVoid #7551 Phase 1a) standing in for content that already existed in a package before this PR.
+    private static readonly ResourcePath VillageTileSetPath = ResourcePath.Create("tilesets/village.json");
+
     // ----- LevelResourcePaths -----
 
     [TestCase("Forest Level", "forest-level")]
@@ -50,13 +55,31 @@ public sealed class PackageVfsSaveModelTests
     }
 
     [Test]
-    public void LevelPath_TileSetPath_GraphicPath_FollowTheNamespacedConvention()
+    public void LevelPath_FollowsTheNamespacedConvention()
+    {
+        // Shared-tileset correction (DiVoid #7551 Phase 1a): LevelResourcePaths no longer addresses tile
+        // set/graphic paths at all — those are TileSetResourcePaths' own namespace now (see the
+        // TileSetResourcePaths tests below), since a tile set is no longer a level-owned resource.
+        Assert.That(LevelResourcePaths.LevelPath("forest"), Is.EqualTo(ResourcePath.Create("levels/forest.json")));
+    }
+
+    [Test]
+    public void TileSetResourcePaths_TileSetPath_GraphicPath_FollowTheNamespacedConvention()
     {
         Assert.Multiple(() =>
         {
-            Assert.That(LevelResourcePaths.LevelPath("forest"), Is.EqualTo(ResourcePath.Create("levels/forest.json")));
-            Assert.That(LevelResourcePaths.TileSetPath("forest"), Is.EqualTo(ResourcePath.Create("tilesets/forest.json")));
-            Assert.That(LevelResourcePaths.GraphicPath("forest", 3), Is.EqualTo(ResourcePath.Create("graphics/forest/3.png")));
+            Assert.That(TileSetResourcePaths.TileSetPath("forest-tiles"), Is.EqualTo(ResourcePath.Create("tilesets/forest-tiles.json")));
+            Assert.That(TileSetResourcePaths.GraphicPath("forest-tiles", 3), Is.EqualTo(ResourcePath.Create("graphics/forest-tiles/3.png")));
+        });
+    }
+
+    [Test]
+    public void TileSetResourcePaths_SlugFromTileSetPath_ExtractsTheSlug()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(TileSetResourcePaths.SlugFromTileSetPath(ResourcePath.Create("tilesets/forest-tiles.json")), Is.EqualTo("forest-tiles"));
+            Assert.That(TileSetResourcePaths.SlugFromTileSetPath(ResourcePath.Create("tileset.json")), Is.Null, "a legacy non-namespaced path does not follow the convention.");
         });
     }
 
@@ -116,9 +139,14 @@ public sealed class PackageVfsSaveModelTests
     // ----- EditableLevel.Attach -----
 
     [Test]
-    public void Attach_NamespacesLevelTileSetAndGraphicPaths_FromTheGivenSlug_MarksAttached()
+    public void Attach_NamespacesTheLevelPath_FromTheGivenSlug_MarksAttached_NeverTouchesTileGraphicPaths()
     {
-        var level = EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette());
+        // Shared-tileset correction (DiVoid #7551 Phase 1a): a level's own Attach only ever namespaces
+        // ITS level path — tile graphic paths belong to whichever tile set is bound (a separate resource
+        // with its own independent attach lifecycle, EditableTileSet.Attach), so they must be untouched by
+        // a level-side attach/rename.
+        var level = EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, ResourceReference.ToSelf(GrassPath), Palette());
+        var graphicPathBefore = level.Tiles[0].GraphicPath;
         Assert.That(level.IsAttached, Is.False);
 
         level.Attach("forest", overwriteLevelPath: null);
@@ -127,15 +155,14 @@ public sealed class PackageVfsSaveModelTests
         {
             Assert.That(level.IsAttached, Is.True);
             Assert.That(level.LevelPath, Is.EqualTo(LevelResourcePaths.LevelPath("forest")));
-            Assert.That(level.TileSetPath, Is.EqualTo(LevelResourcePaths.TileSetPath("forest")));
-            Assert.That(level.Tiles[0].GraphicPath, Is.EqualTo(LevelResourcePaths.GraphicPath("forest", level.Tiles[0].Id)));
+            Assert.That(level.Tiles[0].GraphicPath, Is.EqualTo(graphicPathBefore));
         });
     }
 
     [Test]
     public void Attach_WithAnExplicitOverwritePath_UsesItVerbatimForTheLevelPath()
     {
-        var level = EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette());
+        var level = EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, ResourceReference.ToSelf(GrassPath), Palette());
         var existingPath = ResourcePath.Create("levels/legacy.json");
 
         level.Attach("legacy", existingPath);
@@ -146,20 +173,45 @@ public sealed class PackageVfsSaveModelTests
     // ----- LevelMergeWriter: BuildContributions / Compose / BuildFresh -----
 
     [Test]
-    public void BuildContributions_YieldsLevelTileSetAndEveryTileGraphic_AtTheLevelsOwnPaths()
+    public void BuildContributions_YieldsOnlyTheLevelDefinition_CarryingTheBoundTileSetAsAReference()
     {
-        var level = EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette());
+        // The shared-tileset correction's central contract (DiVoid #7551 Phase 1a, design #7580): a level
+        // no longer contributes a tileset.json or any tile graphics on save — those belong to
+        // TileSetMergeWriter (see the tests below). The level's ONE contribution carries whatever
+        // TileSetReference it is bound to, unchanged.
+        var reference = new ResourceReference(PackageId.New(), ResourcePath.Create("tilesets/shared.json"));
+        var level = EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, reference, Palette());
         level.Attach("forest", null);
 
         var contributions = LevelMergeWriter.BuildContributions(level);
 
         Assert.Multiple(() =>
         {
-            Assert.That(contributions.Count(c => c.Kind == ResourceKind.Level), Is.EqualTo(1));
+            Assert.That(contributions, Has.Count.EqualTo(1));
+            Assert.That(contributions[0].Kind, Is.EqualTo(ResourceKind.Level));
+            Assert.That(contributions[0].Path, Is.EqualTo(level.LevelPath));
+
+            var written = LevelContentSerializer.ReadLevel(contributions[0].Payload);
+            Assert.That(written.TileSet, Is.EqualTo(reference));
+        });
+    }
+
+    // ----- TileSetMergeWriter: BuildContributions (DiVoid #7551 Phase 1a counterpart to LevelMergeWriter) -----
+
+    [Test]
+    public void TileSetMergeWriter_BuildContributions_YieldsTheDefinitionAndEveryTileGraphic_AtTheTileSetsOwnPaths()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled", Palette());
+        tileSet.Attach("forest-tiles", null);
+
+        var contributions = TileSetMergeWriter.BuildContributions(tileSet);
+
+        Assert.Multiple(() =>
+        {
             Assert.That(contributions.Count(c => c.Kind == ResourceKind.TileSet), Is.EqualTo(1));
-            Assert.That(contributions.Count(c => c.Kind == ResourceKind.TileGraphic), Is.EqualTo(level.Tiles.Count));
-            Assert.That(contributions.Select(c => c.Path), Contains.Item(level.LevelPath));
-            Assert.That(contributions.Select(c => c.Path), Contains.Item(level.TileSetPath));
+            Assert.That(contributions.Count(c => c.Kind == ResourceKind.TileGraphic), Is.EqualTo(tileSet.Tiles.Count));
+            Assert.That(contributions.Select(c => c.Path), Contains.Item(tileSet.TileSetPath));
+            Assert.That(contributions.Select(c => c.Path), Contains.Item(tileSet.Tiles[0].GraphicPath));
         });
     }
 
@@ -174,16 +226,23 @@ public sealed class PackageVfsSaveModelTests
         existingBuilder.AddResource(ResourceKind.Track, ResourcePath.Create("audio/theme.ogg"), Encoding.UTF8.GetBytes("theme-bytes"));
         existingBuilder.AddResource(ResourceKind.Level, LevelResourcePaths.LevelPath("village"),
             LevelContentSerializer.WriteLevel(MinimalLevelDefinition()));
-        existingBuilder.AddResource(ResourceKind.TileSet, LevelResourcePaths.TileSetPath("village"),
+        existingBuilder.AddResource(ResourceKind.TileSet, VillageTileSetPath,
             LevelContentSerializer.WriteTileSet(MinimalTileSetDefinition()));
         existingBuilder.AddResource(ResourceKind.TileGraphic, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), "image/png");
         using var existingPackage = ToPackage(existingBuilder);
         var originalId = existingPackage.Id;
 
-        // Author loads and edits a SECOND, distinctly-named level, then saves it into the SAME package.
-        var forestLevel = EditableLevel.CreateBlank("Forest", TileSize, Width, Height, Palette());
+        // Author loads and edits a SECOND, distinctly-named level bound to its OWN fresh tile set, then
+        // saves both into the SAME package in one merge (mirrors LevelEditor.SaveLevelAndTileSet — a
+        // level's own contribution is just its level.json under the shared-tileset correction, so the
+        // bound tile set's contributions are folded in alongside it).
+        var forestTileSet = EditableTileSet.CreateBlank("Forest Tiles", Palette());
+        forestTileSet.Attach("forest-tiles", overwriteTileSetPath: null);
+        var forestLevel = EditableLevel.CreateBlank("Forest", TileSize, Width, Height, ResourceReference.ToSelf(forestTileSet.TileSetPath), Palette());
         forestLevel.Attach("forest", overwriteLevelPath: null);
-        var contributions = LevelMergeWriter.BuildContributions(forestLevel);
+        var contributions = LevelMergeWriter.BuildContributions(forestLevel)
+            .Concat(TileSetMergeWriter.BuildContributions(forestTileSet))
+            .ToList();
 
         var mergedBytes = LevelMergeWriter.Compose(existingPackage, contributions);
         using var merged = PackageReader.Open(new MemoryStream(mergedBytes));
@@ -203,6 +262,11 @@ public sealed class PackageVfsSaveModelTests
             Assert.That(merged.Contains(LevelResourcePaths.LevelPath("forest")), Is.True);
             Assert.That(merged.Contains(LevelResourcePaths.LevelPath("village")), Is.True);
 
+            // Its bound tile set landed too, at ITS own distinct (non-level-namespaced) path — village's own
+            // tileset resource is untouched, still there, no collision between the two tile sets either.
+            Assert.That(merged.Contains(TileSetResourcePaths.TileSetPath("forest-tiles")), Is.True);
+            Assert.That(merged.Contains(VillageTileSetPath), Is.True);
+
             var villageAndForest = merged.Manifest.Resources.Count(e => e.Kind == ResourceKind.Level);
             Assert.That(villageAndForest, Is.EqualTo(2));
         });
@@ -211,7 +275,7 @@ public sealed class PackageVfsSaveModelTests
     [Test]
     public void BuildFresh_MintsANewPackageId_AndContainsOnlyTheContributions()
     {
-        var level = EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette());
+        var level = EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, ResourceReference.ToSelf(GrassPath), Palette());
         level.Attach("solo", null);
         var contributions = LevelMergeWriter.BuildContributions(level);
 
@@ -229,7 +293,7 @@ public sealed class PackageVfsSaveModelTests
     [Test]
     public void BuildFresh_CalledTwice_MintsDistinctPackageIds()
     {
-        var level = EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette());
+        var level = EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, ResourceReference.ToSelf(GrassPath), Palette());
         level.Attach("solo", null);
         var contributions = LevelMergeWriter.BuildContributions(level);
 
@@ -244,7 +308,7 @@ public sealed class PackageVfsSaveModelTests
     [Test]
     public void Session_AttachAsNewResource_DerivesSlugFromTheLevelsCurrentName()
     {
-        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette()));
+        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, ResourceReference.ToSelf(GrassPath), Palette()));
         session.RenameLevel("Forest Level");
 
         session.AttachAsNewResource(Array.Empty<ResourceEntry>());
@@ -267,7 +331,7 @@ public sealed class PackageVfsSaveModelTests
         // must call AttachAsNewResource unconditionally for a "＋ New level…" outcome; this test pins the
         // session-level contract that makes that call always move the level, regardless of IsAttached.
         var loadedLevel = new EditableLevel(
-            "demo", ResourcePath.Create("levels/demo.json"), ResourcePath.Create("tilesets/demo.json"),
+            "demo", ResourcePath.Create("levels/demo.json"), ResourceReference.ToSelf(ResourcePath.Create("tilesets/demo.json")),
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null, Palette(),
             new[] { new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, new int[Width * Height]) },
@@ -287,7 +351,7 @@ public sealed class PackageVfsSaveModelTests
     [Test]
     public void Session_AttachAsNewResource_UniquifiesAgainstACollidingSibling()
     {
-        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette()));
+        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, ResourceReference.ToSelf(GrassPath), Palette()));
         session.RenameLevel("Forest Level");
         var existingResources = new[]
         {
@@ -303,17 +367,76 @@ public sealed class PackageVfsSaveModelTests
     public void Session_AttachToExistingResource_ReusesThePathVerbatim_AndStaysIdempotentAcrossResaves()
     {
         var overwritePath = ResourcePath.Create("levels/village.json");
-        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette()));
+        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, ResourceReference.ToSelf(GrassPath), Palette()));
 
         session.AttachToExistingResource(overwritePath);
-        var firstTileSetPath = session.Level.TileSetPath;
+        var firstLevelPath = session.Level.LevelPath;
         session.AttachToExistingResource(overwritePath); // re-save into the same slot
 
         Assert.Multiple(() =>
         {
             Assert.That(session.Level.LevelPath, Is.EqualTo(overwritePath));
-            Assert.That(session.Level.TileSetPath, Is.EqualTo(firstTileSetPath), "re-attaching to the same slot must be idempotent, not drift to a fresh slug.");
+            Assert.That(session.Level.LevelPath, Is.EqualTo(firstLevelPath), "re-attaching to the same slot must be idempotent, not drift to a fresh slug.");
         });
+    }
+
+    // ----- TileSetEditSession: AttachAsNewResource / AttachToExistingResource (DiVoid #7551 Phase 1a counterpart) -----
+
+    [Test]
+    public void TileSetEditSession_AttachAsNewResource_DerivesSlugFromTheTileSetsCurrentName()
+    {
+        var session = new TileSetEditSession(EditableTileSet.CreateBlank("Grassland Tiles", Palette()));
+
+        session.AttachAsNewResource(Array.Empty<ResourceEntry>());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(session.TileSet.IsAttached, Is.True);
+            Assert.That(session.TileSet.TileSetPath, Is.EqualTo(TileSetResourcePaths.TileSetPath("grassland-tiles")));
+        });
+    }
+
+    [Test]
+    public void TileSetEditSession_AttachAsNewResource_UniquifiesAgainstACollidingSibling()
+    {
+        var session = new TileSetEditSession(EditableTileSet.CreateBlank("Grassland Tiles", Palette()));
+        var existingResources = new[]
+        {
+            new ResourceEntry { Path = TileSetResourcePaths.TileSetPath("grassland-tiles"), Kind = ResourceKind.TileSet },
+        };
+
+        session.AttachAsNewResource(existingResources);
+
+        Assert.That(session.TileSet.TileSetPath, Is.EqualTo(TileSetResourcePaths.TileSetPath("grassland-tiles-2")));
+    }
+
+    [Test]
+    public void TileSetEditSession_AttachToExistingResource_ReusesThePathVerbatim_AndStaysIdempotentAcrossResaves()
+    {
+        var overwritePath = ResourcePath.Create("tilesets/village.json");
+        var session = new TileSetEditSession(EditableTileSet.CreateBlank("Untitled", Palette()));
+
+        session.AttachToExistingResource(overwritePath);
+        var firstGraphicPath = session.TileSet.Tiles[0].GraphicPath;
+        session.AttachToExistingResource(overwritePath); // re-save into the same slot
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(session.TileSet.TileSetPath, Is.EqualTo(overwritePath));
+            Assert.That(session.TileSet.Tiles[0].GraphicPath, Is.EqualTo(firstGraphicPath), "re-attaching to the same slot must be idempotent, not drift to a fresh slug.");
+        });
+    }
+
+    [Test]
+    public void TileSetEditSession_EnsureAttached_OnlyAttachesOnce()
+    {
+        var session = new TileSetEditSession(EditableTileSet.CreateBlank("Untitled", Palette()));
+
+        session.EnsureAttached(Array.Empty<ResourceEntry>());
+        var pathAfterFirst = session.TileSet.TileSetPath;
+        session.EnsureAttached(new[] { new ResourceEntry { Path = pathAfterFirst, Kind = ResourceKind.TileSet } });
+
+        Assert.That(session.TileSet.TileSetPath, Is.EqualTo(pathAfterFirst), "a tile set that already has a home must never be moved by a later save.");
     }
 
     [Test]
@@ -323,7 +446,7 @@ public sealed class PackageVfsSaveModelTests
         existing.AddResource(ResourceKind.Script, ResourcePath.Create("scripts/keep.lua"), Encoding.UTF8.GetBytes("keep-me"));
         using var existingPackage = ToPackage(existing);
 
-        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, Palette()));
+        var session = new LevelEditSession(EditableLevel.CreateBlank("Untitled", TileSize, Width, Height, ResourceReference.ToSelf(GrassPath), Palette()));
         session.AttachAsNewResource(existingPackage.Manifest.Resources);
 
         var bytes = session.Save(existingPackage);
@@ -349,7 +472,7 @@ public sealed class PackageVfsSaveModelTests
         TileSize = TileSize,
         Width = 1,
         Height = 1,
-        TileSet = ResourceReference.ToSelf(LevelResourcePaths.TileSetPath("village")),
+        TileSet = ResourceReference.ToSelf(VillageTileSetPath),
         Layers = new[] { new LayerDefinition { Name = "terrain", Cells = new[] { LayerDefinition.EmptyCell } } },
     };
 
