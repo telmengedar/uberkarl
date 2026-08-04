@@ -55,6 +55,15 @@ namespace Uberkarl {
         Tool activeTool = Tool.Paint;
         int activeTileId = LayerDefinition.EmptyCell;
         int activePaletteIndex = -1;
+        // DiVoid #7551 Phase 3 (design #7580 §6.4): the level's terrain brush. Selecting a terrain from the
+        // Tiles radial (mirrors selecting a tile — "the author selects a terrain... from the Tiles radial")
+        // flips paintingTerrain on and remembers which terrain; selecting a plain tile flips it back off.
+        // Paint applies whichever is active; Erase always clears BOTH channels regardless of mode (the
+        // two-channel invariant SetCellCommand/SetTerrainCommand both enforce).
+        bool paintingTerrain;
+        int activeTerrainId = LayerDefinition.EmptyCell;
+        readonly List<int> paletteTerrainIds = new List<int>();
+        readonly List<string> paletteTerrainLabels = new List<string>();
         int activeLayerIndex;
         string currentFilePath;
 
@@ -221,10 +230,16 @@ namespace Uberkarl {
             }
         }
 
+        // DiVoid #7551 Phase 3, design #7580 §6.4: terrains ride the SAME "Tiles" radial as concrete tiles —
+        // no separate trigger. A terrain wedge has no single-graphic icon (PopInMenu only draws an icon for
+        // MenuOutcomeKind.SelectTile), so it renders as a text label; "Terrain: <name>" makes the mode switch
+        // legible at a glance in a wheel that otherwise shows bare tile ids.
         RadialMenuModel BuildTilesMenu() {
-            List<RadialMenuItem> items = new List<RadialMenuItem>(paletteTileIds.Count);
+            List<RadialMenuItem> items = new List<RadialMenuItem>(paletteTileIds.Count + paletteTerrainIds.Count);
             for (int i = 0; i < paletteTileIds.Count; i++)
                 items.Add(new RadialMenuItem($"#{paletteTileIds[i]}", MenuOutcome.SelectTile(i)));
+            for (int i = 0; i < paletteTerrainIds.Count; i++)
+                items.Add(new RadialMenuItem($"Terrain: {paletteTerrainLabels[i]}", MenuOutcome.SelectTerrain(i)));
             return new RadialMenuModel("Tiles", items);
         }
 
@@ -265,6 +280,10 @@ namespace Uberkarl {
                 case MenuOutcomeKind.SelectTile:
                     if (outcome.Index >= 0 && outcome.Index < paletteTileIds.Count)
                         OnPaletteSelected(outcome.Index);
+                    break;
+                case MenuOutcomeKind.SelectTerrain:
+                    if (outcome.Index >= 0 && outcome.Index < paletteTerrainIds.Count)
+                        OnTerrainSelected(outcome.Index);
                     break;
                 case MenuOutcomeKind.SelectLayer:
                     if (session != null && outcome.Index >= 0 && outcome.Index < session.Level.Layers.Count)
@@ -646,7 +665,7 @@ namespace Uberkarl {
         void OnTileSetModelChanged() {
             if (session == null || tileSetSession == null)
                 return;
-            session.Level.RefreshTiles(tileSetSession.TileSet.Tiles);
+            session.Level.RefreshTiles(tileSetSession.TileSet.Tiles, tileSetSession.TileSet.TerrainSets);
             PopulatePalette(session.Level);
             canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(session.Level));
             UpdateState();
@@ -662,7 +681,7 @@ namespace Uberkarl {
             if (session == null)
                 return;
 
-            session.Level.BindTileSet(reference, boundTileSet.Tiles);
+            session.Level.BindTileSet(reference, boundTileSet.Tiles, boundTileSet.TerrainSets);
             tileSetSession = new TileSetEditSession(boundTileSet);
             PopulatePalette(session.Level);
             canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(session.Level));
@@ -782,6 +801,23 @@ namespace Uberkarl {
                 activePaletteIndex = -1;
                 activeTileId = LayerDefinition.EmptyCell;
             }
+
+            // DiVoid #7551 Phase 3: flatten every terrain across every terrain set into one ordered list —
+            // the Tiles radial's terrain wedges read this. A terrain's label includes its owning set's name
+            // only when the tile set declares more than one, so the common "one terrain set" case stays as
+            // terse as a plain tile wedge.
+            paletteTerrainIds.Clear();
+            paletteTerrainLabels.Clear();
+            bool multipleSets = level.TerrainSets.Count > 1;
+            foreach (EditableTerrainSet terrainSet in level.TerrainSets) {
+                foreach (EditableTerrain terrain in terrainSet.Terrains) {
+                    paletteTerrainIds.Add(terrain.Id);
+                    paletteTerrainLabels.Add(multipleSets ? $"{terrainSet.Name}/{terrain.Name}" : terrain.Name);
+                }
+            }
+
+            paintingTerrain = false;
+            activeTerrainId = LayerDefinition.EmptyCell;
         }
 
         // Reset the active layer to the first. Layer names are read live from the session by the Layers radial
@@ -803,23 +839,84 @@ namespace Uberkarl {
             if (session == null)
                 return;
 
+            // DiVoid #7551 Phase 3: the terrain brush routes through PaintTerrain instead of PaintCell while
+            // active — everything else (tool dispatch, applying the returned change, reflowing terrain
+            // afterwards) is identical to the concrete-tile path.
             CellChange? change = activeTool == Tool.Erase
                 ? session.EraseCell(activeLayerIndex, x, y)
-                : activeTileId != LayerDefinition.EmptyCell
-                    ? session.PaintCell(activeLayerIndex, x, y, activeTileId)
-                    : null;
+                : paintingTerrain
+                    ? session.PaintTerrain(activeLayerIndex, x, y, activeTerrainId)
+                    : activeTileId != LayerDefinition.EmptyCell
+                        ? session.PaintCell(activeLayerIndex, x, y, activeTileId)
+                        : null;
 
-            if (change is { } committed)
+            if (change is { } committed) {
                 canvas.Apply(committed);
+                ReflowTerrain(activeLayerIndex);
+            }
             UpdateState();
         }
 
         void OnCellErased(int x, int y) {
             if (session == null)
                 return;
-            if (session.EraseCell(activeLayerIndex, x, y) is { } committed)
+            if (session.EraseCell(activeLayerIndex, x, y) is { } committed) {
                 canvas.Apply(committed);
+                ReflowTerrain(activeLayerIndex);
+            }
             UpdateState();
+        }
+
+        /// <summary>
+        /// Re-resolves every terrain currently painted on layer <paramref name="layerIndex"/> via Godot's own
+        /// terrain-connect (DiVoid #7551 Phase 3, design #7580 §6.4 — "the editor immediately re-drives
+        /// terrain-connect over the touched cell + its neighbours so the canvas shows the resolved variants
+        /// live"). Recomputes over ALL of that layer's currently terrain-painted cells per distinct terrain
+        /// id present (not just the just-touched cell) — simplest possible rule that is still fully correct:
+        /// Godot's connect call inspects each cell's actual grid neighbours regardless of which cells were
+        /// passed, so re-including a terrain's full current cell set on every edit is exactly what makes an
+        /// erase or an edit on one side of a border re-flow the tiles on the OTHER side too (the "extend a
+        /// region → borders re-flow" proof), at a cost that is negligible for hand-authored levels (design
+        /// #7580 §9 — "terrain-connect runs once per load per terrain... well within budget"). Called after
+        /// every cell mutation on the layer — concrete or terrain, paint/erase/undo/redo — because a concrete
+        /// edit can also change a terrain's neighbour pattern (e.g. overwriting a terrain-painted cell with a
+        /// plain tile removes it from its terrain's border).
+        /// </summary>
+        void ReflowTerrain(int layerIndex) {
+            if (session == null || canvas == null)
+                return;
+            if (layerIndex < 0 || layerIndex >= session.Level.Layers.Count)
+                return;
+
+            System.Collections.Generic.IReadOnlyDictionary<int, TileSetBuilder.TerrainIndex> lookup = canvas.TerrainIndexByTerrainId;
+            if (lookup == null || lookup.Count == 0)
+                return;
+
+            EditableLayer layer = session.Level.Layers[layerIndex];
+            int width = session.Level.Width;
+            int height = session.Level.Height;
+
+            Dictionary<int, Godot.Collections.Array<Vector2I>> cellsByTerrain = null;
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int terrainId = layer.Terrain[y * width + x];
+                    if (terrainId == LayerDefinition.EmptyCell)
+                        continue;
+
+                    cellsByTerrain ??= new Dictionary<int, Godot.Collections.Array<Vector2I>>();
+                    if (!cellsByTerrain.TryGetValue(terrainId, out Godot.Collections.Array<Vector2I> cells))
+                        cellsByTerrain[terrainId] = cells = new Godot.Collections.Array<Vector2I>();
+                    cells.Add(new Vector2I(x, y));
+                }
+            }
+
+            if (cellsByTerrain == null)
+                return;
+
+            foreach (KeyValuePair<int, Godot.Collections.Array<Vector2I>> entry in cellsByTerrain) {
+                if (lookup.TryGetValue(entry.Key, out TileSetBuilder.TerrainIndex index))
+                    canvas.ReconnectTerrain(layerIndex, index.TerrainSet, index.Terrain, entry.Value);
+            }
         }
 
         // ----- action-driven navigation (gamepad + keyboard parity with mouse selection) -----
@@ -865,6 +962,7 @@ namespace Uberkarl {
         void Undo() {
             if (session?.Undo() is { } change) {
                 canvas.Apply(change);
+                ReflowTerrain(change.LayerIndex);
                 UpdateState();
             }
         }
@@ -872,6 +970,7 @@ namespace Uberkarl {
         void Redo() {
             if (session?.Redo() is { } change) {
                 canvas.Apply(change);
+                ReflowTerrain(change.LayerIndex);
                 UpdateState();
             }
         }
@@ -1016,6 +1115,22 @@ namespace Uberkarl {
                 activePaletteIndex = i;
                 activeTileId = paletteTileIds[i];
             }
+            paintingTerrain = false; // selecting a plain tile switches the brush back off terrain mode
+            SetTool(Tool.Paint);
+            paintButton.ButtonPressed = true;
+            eraseButton.ButtonPressed = false;
+            UpdateState();
+        }
+
+        // DiVoid #7551 Phase 3: selecting a terrain from the Tiles radial switches the paint brush to
+        // "terrain mode" — OnCellPressed routes to session.PaintTerrain instead of session.PaintCell while
+        // this is active. Mirrors OnPaletteSelected exactly, just for the other palette.
+        void OnTerrainSelected(long index) {
+            int i = (int)index;
+            if (i >= 0 && i < paletteTerrainIds.Count) {
+                activeTerrainId = paletteTerrainIds[i];
+                paintingTerrain = true;
+            }
             SetTool(Tool.Paint);
             paintButton.ButtonPressed = true;
             eraseButton.ButtonPressed = false;
@@ -1058,6 +1173,7 @@ namespace Uberkarl {
                 : "-";
             string tile = activeTool == Tool.Erase
                 ? "erase"
+                : paintingTerrain ? $"terrain #{activeTerrainId}"
                 : activeTileId == LayerDefinition.EmptyCell ? "none" : $"#{activeTileId}";
             string tileSet = tileSetSession != null ? tileSetSession.TileSet.Name : "none";
             return $"{session.Level.Name}{dirty}  ·  package: {package}  ·  tileset: {tileSet}  ·  layer: {layer}  ·  tool: {activeTool} ({tile})";

@@ -95,6 +95,97 @@ public sealed class TileSetEditSession
         return happened;
     }
 
+    // ----- terrain authoring (DiVoid #7551 Phase 3, design #7580 §7/§14) -----
+
+    /// <summary>Adds a new, empty terrain set. Returns its new id.</summary>
+    public int AddTerrainSet(string name, Content.TerrainMatchMode matchingMode)
+    {
+        var id = TileSet.AddTerrainSet(name, matchingMode);
+        IsDirty = true;
+        return id;
+    }
+
+    /// <summary>Removes the terrain set with <paramref name="id"/> (and every terrain in it — member tiles are demoted to plain). No-op when it does not exist.</summary>
+    public bool RemoveTerrainSet(int id)
+    {
+        var happened = TileSet.RemoveTerrainSet(id);
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
+    /// <summary>Renames the terrain set with <paramref name="id"/>. No-op when unchanged.</summary>
+    public bool RenameTerrainSet(int id, string name)
+    {
+        var happened = TileSet.RenameTerrainSet(id, name);
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
+    /// <summary>Sets the matching mode of the terrain set with <paramref name="id"/>. No-op when unchanged.</summary>
+    public bool SetTerrainSetMatchingMode(int id, Content.TerrainMatchMode matchingMode)
+    {
+        var happened = TileSet.SetTerrainSetMatchingMode(id, matchingMode);
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
+    /// <summary>Adds a new terrain to terrain set <paramref name="terrainSetId"/>. Returns its new id, or <c>-1</c> when the terrain set does not exist.</summary>
+    public int AddTerrain(int terrainSetId, string name, string? color = null)
+    {
+        var id = TileSet.AddTerrain(terrainSetId, name, color);
+        if (id >= 0)
+            IsDirty = true;
+        return id;
+    }
+
+    /// <summary>Removes terrain <paramref name="terrainId"/> from terrain set <paramref name="terrainSetId"/> (member tiles are demoted to plain). No-op when not found.</summary>
+    public bool RemoveTerrain(int terrainSetId, int terrainId)
+    {
+        var happened = TileSet.RemoveTerrain(terrainSetId, terrainId);
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
+    /// <summary>Renames terrain <paramref name="terrainId"/>. No-op when unchanged.</summary>
+    public bool RenameTerrain(int terrainSetId, int terrainId, string name)
+    {
+        var happened = TileSet.RenameTerrain(terrainSetId, terrainId, name);
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
+    /// <summary>Sets terrain <paramref name="terrainId"/>'s author colour. No-op when unchanged.</summary>
+    public bool SetTerrainColor(int terrainSetId, int terrainId, string? color)
+    {
+        var happened = TileSet.SetTerrainColor(terrainSetId, terrainId, color);
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
+    /// <summary>Assigns (or clears, when <paramref name="terrainId"/> is <c>null</c>) which terrain the tile with <paramref name="tileId"/> is a variant of. No-op when unchanged.</summary>
+    public bool SetTileTerrain(int tileId, int? terrainId)
+    {
+        var happened = TileSet.SetTileTerrain(tileId, terrainId);
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
+    /// <summary>Sets the tile with <paramref name="tileId"/>'s peering bits (design #7580 §14). No-op when the tile is not a terrain variant, or unchanged.</summary>
+    public bool SetTilePeeringBits(int tileId, Content.TerrainPeering peeringBits)
+    {
+        var happened = TileSet.SetTilePeeringBits(tileId, peeringBits);
+        if (happened)
+            IsDirty = true;
+        return happened;
+    }
+
     /// <summary>Renames the tile set itself. Blank/whitespace-only input is a no-op (mirrors <see cref="LevelEditSession.RenameLevel"/>).</summary>
     public bool Rename(string name)
     {

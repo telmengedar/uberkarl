@@ -17,6 +17,9 @@ public static class LevelLoader
         var graphics = ResolveGraphics(resolver, tileSet);
         var collidingTileIds = CollectCollidingTileIds(tileSet);
         var animations = ResolveAnimations(resolver, tileSet, graphics);
+        var terrainSets = ResolveTerrainSets(tileSet);
+        var declaredTerrainIds = CollectDeclaredTerrainIds(terrainSets);
+        var tileTerrains = ResolveTileTerrains(tileSet, declaredTerrainIds);
         ValidateSpawns(level);
         var backgroundColor = ParseBackgroundColor(level);
 
@@ -24,6 +27,7 @@ public static class LevelLoader
         foreach (var layer in level.Layers)
         {
             ValidateLayer(level, layer, graphics.Keys);
+            var terrain = ValidateAndResolveTerrainChannel(level, layer, declaredTerrainIds);
             layers.Add(new ResolvedLayer
             {
                 Name = layer.Name,
@@ -31,6 +35,7 @@ public static class LevelLoader
                 ScrollSpeed = layer.ScrollSpeed,
                 Repeat = layer.Repeat,
                 Cells = layer.Cells,
+                Terrain = terrain,
             });
         }
 
@@ -43,6 +48,8 @@ public static class LevelLoader
             TileGraphics = graphics,
             CollidingTileIds = collidingTileIds,
             TileAnimations = animations,
+            TerrainSets = terrainSets,
+            TileTerrains = tileTerrains,
             Spawns = level.Spawns,
             DefaultSpawn = level.DefaultSpawn,
             BackgroundColor = backgroundColor,
@@ -158,6 +165,135 @@ public static class LevelLoader
         }
 
         return animations;
+    }
+
+    /// <summary>
+    /// Resolves the tile set's declared terrain sets/terrains (DiVoid #7551 Phase 3, design #7580), in
+    /// declaration order — the order <c>TileSetBuilder</c> maps onto Godot's index-based terrain sets.
+    /// Fails typed when a terrain set id or a terrain id (unique across the WHOLE tile set, not just its own
+    /// set — see <see cref="TerrainDefinition.Id"/>) repeats, or a terrain's colour is present but not a
+    /// valid hex string.
+    /// </summary>
+    private static List<ResolvedTerrainSet> ResolveTerrainSets(TileSetDefinition tileSet)
+    {
+        var terrainSets = new List<ResolvedTerrainSet>(tileSet.TerrainSets.Count);
+        var seenSetIds = new HashSet<int>();
+        var seenTerrainIds = new HashSet<int>();
+
+        foreach (var terrainSet in tileSet.TerrainSets)
+        {
+            if (!seenSetIds.Add(terrainSet.Id))
+                throw new LevelContentException($"Terrain set id {terrainSet.Id} is defined more than once.");
+
+            var terrains = new List<ResolvedTerrain>(terrainSet.Terrains.Count);
+            foreach (var terrain in terrainSet.Terrains)
+            {
+                if (!seenTerrainIds.Add(terrain.Id))
+                    throw new LevelContentException($"Terrain id {terrain.Id} is defined more than once.");
+
+                RgbaColor? color = null;
+                if (!string.IsNullOrWhiteSpace(terrain.Color))
+                {
+                    if (!RgbaColor.TryParse(terrain.Color, out var parsed))
+                        throw new LevelContentException(
+                            $"Terrain '{terrain.Name}' (id {terrain.Id}) colour '{terrain.Color}' is not a valid hex colour.");
+                    color = parsed;
+                }
+
+                terrains.Add(new ResolvedTerrain { Id = terrain.Id, Name = terrain.Name, Color = color });
+            }
+
+            terrainSets.Add(new ResolvedTerrainSet
+            {
+                Id = terrainSet.Id,
+                Name = terrainSet.Name,
+                MatchingMode = terrainSet.MatchingMode,
+                Terrains = terrains,
+            });
+        }
+
+        return terrainSets;
+    }
+
+    private static HashSet<int> CollectDeclaredTerrainIds(IReadOnlyList<ResolvedTerrainSet> terrainSets)
+    {
+        var ids = new HashSet<int>();
+        foreach (var terrainSet in terrainSets)
+            foreach (var terrain in terrainSet.Terrains)
+                ids.Add(terrain.Id);
+        return ids;
+    }
+
+    /// <summary>
+    /// Resolves which tiles are terrain variants and their peering bits (DiVoid #7551 Phase 3, design
+    /// #7580). Fails typed when a tile's <see cref="TileDefinition.Terrain"/> names an undeclared terrain id
+    /// (design #7580 §8 — "fails typed... if... a peering bit names an undeclared terrain").
+    /// </summary>
+    private static Dictionary<int, ResolvedTileTerrain> ResolveTileTerrains(TileSetDefinition tileSet, HashSet<int> declaredTerrainIds)
+    {
+        var terrainSetIdByTerrainId = new Dictionary<int, int>();
+        foreach (var terrainSet in tileSet.TerrainSets)
+            foreach (var terrain in terrainSet.Terrains)
+                terrainSetIdByTerrainId[terrain.Id] = terrainSet.Id;
+
+        var tileTerrains = new Dictionary<int, ResolvedTileTerrain>();
+        foreach (var tile in tileSet.Tiles)
+        {
+            if (tile.Terrain is not { } terrainId)
+                continue;
+
+            if (!declaredTerrainIds.Contains(terrainId))
+                throw new LevelContentException($"Tile {tile.Id} belongs to undeclared terrain id {terrainId}.");
+
+            tileTerrains[tile.Id] = new ResolvedTileTerrain
+            {
+                TerrainSetId = terrainSetIdByTerrainId[terrainId],
+                TerrainId = terrainId,
+                PeeringBits = tile.PeeringBits,
+            };
+        }
+
+        return tileTerrains;
+    }
+
+    /// <summary>
+    /// Validates a layer's terrain channel (DiVoid #7551 Phase 3, design #7580 §8) and returns it ALWAYS
+    /// fully populated to <c>Width*Height</c> entries (an omitted/empty <see cref="LayerDefinition.Terrain"/>
+    /// resolves to every cell sentinel) — see <see cref="ResolvedLayer.Terrain"/>. Enforces: the channel, if
+    /// declared, has exactly as many entries as the grid; every non-sentinel entry names a declared terrain
+    /// id; and the two-channel invariant — a cell is never BOTH a concrete tile AND terrain-painted (design
+    /// #7580 §7, "a cell is not both concrete and terrain-marked").
+    /// </summary>
+    private static IReadOnlyList<int> ValidateAndResolveTerrainChannel(LevelDefinition level, LayerDefinition layer, HashSet<int> declaredTerrainIds)
+    {
+        var expected = level.Width * level.Height;
+        if (layer.Terrain.Count == 0)
+        {
+            var empty = new int[expected];
+            Array.Fill(empty, LayerDefinition.EmptyCell);
+            return empty;
+        }
+
+        if (layer.Terrain.Count != expected)
+            throw new LevelContentException(
+                $"Layer '{layer.Name}' has {layer.Terrain.Count} terrain cells but the {level.Width}x{level.Height} grid needs {expected}.");
+
+        for (var i = 0; i < expected; i++)
+        {
+            var terrainId = layer.Terrain[i];
+            if (terrainId == LayerDefinition.EmptyCell)
+                continue;
+
+            if (!declaredTerrainIds.Contains(terrainId))
+                throw new LevelContentException($"Layer '{layer.Name}' references undefined terrain id {terrainId}.");
+
+            if (layer.Cells[i] != LayerDefinition.EmptyCell)
+                throw new LevelContentException(
+                    $"Layer '{layer.Name}' cell index {i} is both a concrete tile ({layer.Cells[i]}) and terrain-painted " +
+                    $"(terrain {terrainId}) — a cell must be one or the other.");
+        }
+
+        return layer.Terrain;
     }
 
     private static void ValidateLayer(LevelDefinition level, LayerDefinition layer, IReadOnlyCollection<int> knownTileIds)

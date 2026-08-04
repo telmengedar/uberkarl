@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
+using Uberkarl.Content;
 using Uberkarl.Editor;
 
 namespace Uberkarl {
@@ -27,6 +29,15 @@ namespace Uberkarl {
     ///
     /// <b>Naming</b> (DiVoid #7513): a tile's header/name cell opens the shared <see cref="OnScreenKeyboard"/>
     /// seeded with its current name, mirroring <see cref="LayerManagerPanel"/>'s rename affordance exactly.
+    ///
+    /// <b>Terrains</b> (DiVoid #7551 Phase 3, design #7580 §14 — "minimal-but-real" scope: the fuller 3×3-
+    /// grid-with-hover-preview polish and one-click interior/edge/corner PRESETS are filed as a follow-up,
+    /// see DiVoid #7551 discussion; this ships define → assign → peer → test end-to-end today). "+ Add
+    /// Terrain Set…"/"+ Add Terrain…" define the logical types; each tile row gets an "Assign Terrain" cycle
+    /// button; once assigned, the tile grows a real 3×3 peering-bit grid (3 focusable rows of toggle buttons,
+    /// N/NE/E/SE/S/SW/W/NW around the tile) so the author declares which neighbours must share this terrain
+    /// for Godot to pick this specific variant — no presets yet, every bit is hand-toggled, but it is the
+    /// real mechanism <c>TileSetBuilder</c> reads, not a placeholder.
     /// </summary>
     public partial class TileSetEditor : Control {
 
@@ -51,6 +62,18 @@ namespace Uberkarl {
         // an undo stack this increment, same as every other tile-set mutation in this panel.
         int pendingRemoveFrameTileId = -1;
         int pendingRemoveFrameIndex = -1;
+
+        // DiVoid #7551 Phase 3 (design #7580 §14, "minimal-but-real" terrain authoring — see class doc):
+        // confirm-gated removal state for terrain sets/terrains, mirrors pendingDeleteId exactly.
+        int pendingRemoveTerrainSetId = -1;
+        int pendingRemoveTerrainSetTerrainId = -1;
+        // A small fixed palette a freshly-added terrain cycles from — this increment does not build a full
+        // colour picker (deferred, see class doc); "+ Add Terrain" auto-assigns the next unused-in-rotation
+        // swatch so terrains are visually distinct without any picker UI, and the colour button on each
+        // terrain row still lets the author cycle it further.
+        static readonly string[] TerrainColorPalette = {
+            "#8a5c34", "#4ea842", "#82828a", "#4a7ad2", "#be4a3c", "#c9a227", "#3ca7a0", "#a04ec0",
+        };
 
         int lastFocusedRow;
         int lastFocusedCol;
@@ -132,6 +155,8 @@ namespace Uberkarl {
             pendingFrameTileId = -1;
             pendingRemoveFrameTileId = -1;
             pendingRemoveFrameIndex = -1;
+            pendingRemoveTerrainSetId = -1;
+            pendingRemoveTerrainSetTerrainId = -1;
             lastFocusedRow = 0;
             lastFocusedCol = 0;
             Visible = true;
@@ -154,12 +179,36 @@ namespace Uberkarl {
             rows.Add(new List<Control> { addButton });
 
             if (session != null) {
+                Label terrainHeader = new Label { Text = "Terrain Sets" };
+                terrainHeader.AddThemeColorOverride("font_color", EditorTheme.Accent);
+                listBox.AddChild(terrainHeader);
+
+                Button addTerrainSetButton = new Button { Text = "+ Add Terrain Set…" };
+                addTerrainSetButton.Pressed += OnAddTerrainSetPressed;
+                listBox.AddChild(addTerrainSetButton);
+                rows.Add(new List<Control> { addTerrainSetButton });
+
+                foreach (EditableTerrainSet terrainSet in session.TileSet.TerrainSets) {
+                    rows.Add(BuildTerrainSetRow(terrainSet));
+                    rows.Add(BuildAddTerrainRow(terrainSet));
+                    foreach (EditableTerrain terrain in terrainSet.Terrains)
+                        rows.Add(BuildTerrainRow(terrainSet, terrain));
+                }
+
+                Label tilesHeader = new Label { Text = "Tiles" };
+                tilesHeader.AddThemeColorOverride("font_color", EditorTheme.Accent);
+                listBox.AddChild(tilesHeader);
+
                 foreach (EditableTile tile in session.TileSet.Tiles) {
                     rows.Add(BuildTileRow(tile));
                     if (tile.IsAnimated) {
                         rows.Add(BuildAnimationSpeedRow(tile));
                         for (int frameIndex = 0; frameIndex < tile.Frames.Count; frameIndex++)
                             rows.Add(BuildFrameRow(tile, frameIndex));
+                    }
+                    if (tile.IsTerrainVariant) {
+                        foreach (List<Control> peeringRow in BuildPeeringBitRows(tile))
+                            rows.Add(peeringRow);
                     }
                 }
             }
@@ -225,6 +274,17 @@ namespace Uberkarl {
             addFrame.Pressed += () => OnAddFramePressed(tile.Id);
             row.AddChild(addFrame);
             columns.Add(addFrame);
+
+            // DiVoid #7551 Phase 3: cycles None → each declared terrain (across every terrain set) → None.
+            // Assigning a terrain is what turns this tile a terrain variant (structural, mirrors animation's
+            // "no separate toggle" shape) — a peering-bit grid grows below it once assigned.
+            EditableTerrain assignedTerrain = tile.Terrain is { } terrainId ? FindTerrain(terrainId) : null;
+            Button assignTerrain = new Button {
+                Text = assignedTerrain != null ? $"Terrain: {assignedTerrain.Name}" : "Terrain: none",
+            };
+            assignTerrain.Pressed += () => OnAssignTerrainPressed(tile.Id);
+            row.AddChild(assignTerrain);
+            columns.Add(assignTerrain);
 
             Button delete = new Button { Text = pendingDeleteId == tile.Id ? "Confirm Remove?" : "Remove" };
             delete.Pressed += () => OnRemovePressed(tile.Id);
@@ -294,6 +354,299 @@ namespace Uberkarl {
             columns.Add(remove);
 
             return columns;
+        }
+
+        // ----- terrain authoring (DiVoid #7551 Phase 3, design #7580 §14) -----
+
+        List<Control> BuildTerrainSetRow(EditableTerrainSet terrainSet) {
+            HBoxContainer row = new HBoxContainer();
+            listBox.AddChild(row);
+            List<Control> columns = new List<Control>();
+
+            Button header = new Button { Text = $"“{terrainSet.Name}” ({terrainSet.Terrains.Count} terrain(s))", SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            header.Pressed += () => OnRenameTerrainSetPressed(terrainSet.Id);
+            row.AddChild(header);
+            columns.Add(header);
+
+            Button mode = new Button { Text = $"Mode: {terrainSet.MatchingMode}" };
+            mode.Pressed += () => OnCycleMatchingModePressed(terrainSet.Id, terrainSet.MatchingMode);
+            row.AddChild(mode);
+            columns.Add(mode);
+
+            bool pendingThisSet = pendingRemoveTerrainSetId == terrainSet.Id && pendingRemoveTerrainSetTerrainId == -1;
+            Button delete = new Button { Text = pendingThisSet ? "Confirm Remove?" : "Remove Set" };
+            delete.Pressed += () => OnRemoveTerrainSetPressed(terrainSet.Id);
+            row.AddChild(delete);
+            columns.Add(delete);
+
+            return columns;
+        }
+
+        List<Control> BuildAddTerrainRow(EditableTerrainSet terrainSet) {
+            HBoxContainer row = new HBoxContainer();
+            listBox.AddChild(row);
+            List<Control> columns = new List<Control>();
+
+            Label indent = new Label { Text = "    " };
+            row.AddChild(indent);
+
+            Button add = new Button { Text = $"+ Add Terrain to “{terrainSet.Name}”…" };
+            add.Pressed += () => OnAddTerrainPressed(terrainSet.Id);
+            row.AddChild(add);
+            columns.Add(add);
+
+            return columns;
+        }
+
+        List<Control> BuildTerrainRow(EditableTerrainSet terrainSet, EditableTerrain terrain) {
+            HBoxContainer row = new HBoxContainer();
+            listBox.AddChild(row);
+            List<Control> columns = new List<Control>();
+
+            Label indent = new Label { Text = "        " };
+            row.AddChild(indent);
+
+            Button header = new Button { Text = $"{terrain.Name} (#{terrain.Id})", SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            header.Pressed += () => OnRenameTerrainPressed(terrainSet.Id, terrain.Id);
+            if (terrain.Color != null)
+                header.AddThemeColorOverride("font_color", Godot.Color.FromString(terrain.Color, EditorTheme.Text));
+            row.AddChild(header);
+            columns.Add(header);
+
+            Button color = new Button { Text = "Colour ►" };
+            color.Pressed += () => OnCycleTerrainColorPressed(terrainSet.Id, terrain.Id, terrain.Color);
+            row.AddChild(color);
+            columns.Add(color);
+
+            bool pendingThisTerrain = pendingRemoveTerrainSetId == terrainSet.Id && pendingRemoveTerrainSetTerrainId == terrain.Id;
+            Button delete = new Button { Text = pendingThisTerrain ? "Confirm Remove?" : "Remove" };
+            delete.Pressed += () => OnRemoveTerrainPressed(terrainSet.Id, terrain.Id);
+            row.AddChild(delete);
+            columns.Add(delete);
+
+            return columns;
+        }
+
+        // The 3×3 peering-bit grid (design #7580 §14): three focusable rows (NW/N/NE, W/[tile]/E, SW/S/SE)
+        // of toggle buttons — the centre cell is a plain (non-focusable) label naming the tile, not a
+        // control, so FocusGrid's column count for this row stays at the two real toggles either side of it.
+        // Each toggle commits the WHOLE bitmask on press (TileSetEditSession.SetTilePeeringBits takes the
+        // full mask, mirroring how a preset would commit multiple bits at once — the seam is already
+        // preset-ready even though no presets ship this increment).
+        IEnumerable<List<Control>> BuildPeeringBitRows(EditableTile tile) {
+            (TerrainPeering Bit, string Label)[][] grid = {
+                new[] { (TerrainPeering.NorthWest, "NW"), (TerrainPeering.North, "N"), (TerrainPeering.NorthEast, "NE") },
+                new[] { (TerrainPeering.West, "W"), (TerrainPeering.None, "•"), (TerrainPeering.East, "E") },
+                new[] { (TerrainPeering.SouthWest, "SW"), (TerrainPeering.South, "S"), (TerrainPeering.SouthEast, "SE") },
+            };
+
+            foreach (var gridRow in grid) {
+                HBoxContainer row = new HBoxContainer();
+                listBox.AddChild(row);
+                List<Control> columns = new List<Control>();
+
+                Label indent = new Label { Text = "    " };
+                row.AddChild(indent);
+
+                foreach (var cell in gridRow) {
+                    if (cell.Bit == TerrainPeering.None) {
+                        Label center = new Label { Text = cell.Label, CustomMinimumSize = new Vector2(36f, 0f), HorizontalAlignment = HorizontalAlignment.Center };
+                        row.AddChild(center);
+                        continue; // the centre cell is not a peering direction — no toggle, not a focus column
+                    }
+
+                    bool on = (tile.PeeringBits & cell.Bit) != 0;
+                    Button toggle = new Button { Text = cell.Label, ToggleMode = true, ButtonPressed = on, CustomMinimumSize = new Vector2(36f, 0f) };
+                    toggle.Pressed += () => OnPeeringBitTogglePressed(tile.Id, cell.Bit);
+                    row.AddChild(toggle);
+                    columns.Add(toggle);
+                }
+
+                yield return columns;
+            }
+        }
+
+        EditableTerrain FindTerrain(int terrainId) {
+            if (session == null)
+                return null;
+            foreach (EditableTerrainSet terrainSet in session.TileSet.TerrainSets)
+                foreach (EditableTerrain terrain in terrainSet.Terrains)
+                    if (terrain.Id == terrainId)
+                        return terrain;
+            return null;
+        }
+
+        void OnAddTerrainSetPressed() {
+            ClearPendingConfirms();
+            if (keyboard == null || session == null)
+                return;
+            keyboard.RequestText("New terrain set name", "Terrain Set", name => {
+                if (!string.IsNullOrWhiteSpace(name)) {
+                    int id = session.AddTerrainSet(name, Content.TerrainMatchMode.CornersAndSides);
+                    GD.Print($"TileSetEditor: added terrain set '{name}' (#{id}).");
+                    TileSetModelChanged?.Invoke();
+                }
+                Rebuild();
+            });
+        }
+
+        void OnRenameTerrainSetPressed(int terrainSetId) {
+            ClearPendingConfirms();
+            if (keyboard == null || session == null)
+                return;
+            EditableTerrainSet current = session.TileSet.TerrainSets.FirstOrDefault(set => set.Id == terrainSetId);
+            keyboard.RequestText($"Rename terrain set #{terrainSetId}", current?.Name ?? string.Empty, newName => {
+                if (session.RenameTerrainSet(terrainSetId, newName)) {
+                    GD.Print($"TileSetEditor: renamed terrain set #{terrainSetId} to '{newName}'.");
+                    TileSetModelChanged?.Invoke();
+                }
+                Rebuild();
+            });
+        }
+
+        static readonly Content.TerrainMatchMode[] MatchingModeCycle = {
+            Content.TerrainMatchMode.CornersAndSides, Content.TerrainMatchMode.Corners, Content.TerrainMatchMode.Sides,
+        };
+
+        void OnCycleMatchingModePressed(int terrainSetId, Content.TerrainMatchMode current) {
+            ClearPendingConfirms();
+            int index = Array.IndexOf(MatchingModeCycle, current);
+            Content.TerrainMatchMode next = MatchingModeCycle[(index + 1) % MatchingModeCycle.Length];
+            if (session.SetTerrainSetMatchingMode(terrainSetId, next)) {
+                GD.Print($"TileSetEditor: terrain set #{terrainSetId} matching mode set to {next}.");
+                TileSetModelChanged?.Invoke();
+            }
+            Rebuild();
+        }
+
+        void OnRemoveTerrainSetPressed(int terrainSetId) {
+            if (pendingRemoveTerrainSetId != terrainSetId || pendingRemoveTerrainSetTerrainId != -1) {
+                ClearPendingConfirms();
+                pendingRemoveTerrainSetId = terrainSetId;
+                pendingRemoveTerrainSetTerrainId = -1;
+                Rebuild();
+                return;
+            }
+
+            ClearPendingConfirms();
+            if (session.RemoveTerrainSet(terrainSetId)) {
+                GD.Print($"TileSetEditor: removed terrain set #{terrainSetId}.");
+                TileSetModelChanged?.Invoke();
+            }
+            Rebuild();
+        }
+
+        void OnAddTerrainPressed(int terrainSetId) {
+            ClearPendingConfirms();
+            if (keyboard == null || session == null)
+                return;
+            keyboard.RequestText("New terrain name", "Terrain", name => {
+                if (!string.IsNullOrWhiteSpace(name)) {
+                    string color = TerrainColorPalette[session.TileSet.TerrainSets.SelectMany(set => set.Terrains).Count() % TerrainColorPalette.Length];
+                    int id = session.AddTerrain(terrainSetId, name, color);
+                    if (id >= 0) {
+                        GD.Print($"TileSetEditor: added terrain '{name}' (#{id}) to terrain set #{terrainSetId}.");
+                        TileSetModelChanged?.Invoke();
+                    }
+                }
+                Rebuild();
+            });
+        }
+
+        void OnRenameTerrainPressed(int terrainSetId, int terrainId) {
+            ClearPendingConfirms();
+            if (keyboard == null || session == null)
+                return;
+            EditableTerrain current = FindTerrain(terrainId);
+            keyboard.RequestText($"Rename terrain #{terrainId}", current?.Name ?? string.Empty, newName => {
+                if (session.RenameTerrain(terrainSetId, terrainId, newName)) {
+                    GD.Print($"TileSetEditor: renamed terrain #{terrainId} to '{newName}'.");
+                    TileSetModelChanged?.Invoke();
+                }
+                Rebuild();
+            });
+        }
+
+        void OnCycleTerrainColorPressed(int terrainSetId, int terrainId, string currentColor) {
+            ClearPendingConfirms();
+            int index = Array.IndexOf(TerrainColorPalette, currentColor);
+            string next = TerrainColorPalette[(index + 1) % TerrainColorPalette.Length];
+            if (session.SetTerrainColor(terrainSetId, terrainId, next)) {
+                GD.Print($"TileSetEditor: terrain #{terrainId} colour set to {next}.");
+                TileSetModelChanged?.Invoke();
+            }
+            Rebuild();
+        }
+
+        void OnRemoveTerrainPressed(int terrainSetId, int terrainId) {
+            if (pendingRemoveTerrainSetId != terrainSetId || pendingRemoveTerrainSetTerrainId != terrainId) {
+                ClearPendingConfirms();
+                pendingRemoveTerrainSetId = terrainSetId;
+                pendingRemoveTerrainSetTerrainId = terrainId;
+                Rebuild();
+                return;
+            }
+
+            ClearPendingConfirms();
+            if (session.RemoveTerrain(terrainSetId, terrainId)) {
+                GD.Print($"TileSetEditor: removed terrain #{terrainId} from terrain set #{terrainSetId}.");
+                TileSetModelChanged?.Invoke();
+            }
+            Rebuild();
+        }
+
+        // Cycles a tile's terrain assignment: none -> first declared terrain -> ... -> last -> none. With no
+        // terrains declared anywhere, this is a no-op (nothing to cycle to) — the author must define a
+        // terrain set + terrain first, exactly the authoring order the panel lists them in.
+        void OnAssignTerrainPressed(int tileId) {
+            ClearPendingConfirms();
+            EditableTile tile = Find(tileId);
+            if (tile == null || session == null)
+                return;
+
+            List<int> allTerrainIds = session.TileSet.TerrainSets.SelectMany(set => set.Terrains).Select(terrain => terrain.Id).ToList();
+            if (allTerrainIds.Count == 0)
+                return;
+
+            int? next;
+            if (tile.Terrain is not { } currentId) {
+                next = allTerrainIds[0];
+            } else {
+                int index = allTerrainIds.IndexOf(currentId);
+                next = index >= 0 && index + 1 < allTerrainIds.Count ? allTerrainIds[index + 1] : null; // wraps back to "none"
+            }
+
+            if (session.SetTileTerrain(tileId, next)) {
+                GD.Print($"TileSetEditor: tile #{tileId} terrain set to {(next?.ToString() ?? "none")}.");
+                TileSetModelChanged?.Invoke();
+            }
+            Rebuild();
+        }
+
+        void OnPeeringBitTogglePressed(int tileId, TerrainPeering bit) {
+            ClearPendingConfirms();
+            EditableTile tile = Find(tileId);
+            if (tile == null || session == null)
+                return;
+
+            TerrainPeering next = tile.PeeringBits ^ bit; // toggle just this one bit, keep the rest
+            if (session.SetTilePeeringBits(tileId, next)) {
+                GD.Print($"TileSetEditor: tile #{tileId} peering bits set to {next}.");
+                TileSetModelChanged?.Invoke();
+            }
+            Rebuild();
+        }
+
+        // Every destructive/confirm-gated action in this panel clears every OTHER pending confirm first
+        // (mirrors the existing tile/frame confirm fields never being combined) so at most one "Confirm
+        // Remove?" is ever showing at a time.
+        void ClearPendingConfirms() {
+            pendingDeleteId = -1;
+            pendingFrameTileId = -1;
+            pendingRemoveFrameTileId = -1;
+            pendingRemoveFrameIndex = -1;
+            pendingRemoveTerrainSetId = -1;
+            pendingRemoveTerrainSetTerrainId = -1;
         }
 
         static ImageTexture LoadTexture(byte[] png) {
@@ -484,6 +837,8 @@ namespace Uberkarl {
             pendingFrameTileId = -1;
             pendingRemoveFrameTileId = -1;
             pendingRemoveFrameIndex = -1;
+            pendingRemoveTerrainSetId = -1;
+            pendingRemoveTerrainSetTerrainId = -1;
             Closed?.Invoke();
         }
     }

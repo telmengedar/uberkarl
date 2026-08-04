@@ -59,17 +59,25 @@ public static class EditableLevelReader
         var levelDefinition = LevelContentSerializer.ReadLevel(package.ReadBytes(levelPath));
 
         var tileSetReference = levelDefinition.TileSet;
-        var tiles = EditableTileSetReader.FromPackage(package, tileSetReference).Tiles;
+        var boundTileSet = EditableTileSetReader.FromPackage(package, tileSetReference);
+        var tiles = boundTileSet.Tiles;
+        var terrainSets = boundTileSet.TerrainSets;
 
+        var expectedCells = levelDefinition.Width * levelDefinition.Height;
         var layers = new List<EditableLayer>(levelDefinition.Layers.Count);
         foreach (var layer in levelDefinition.Layers)
         {
+            // DiVoid #7551 Phase 3: an omitted/empty Terrain channel means "nothing painted" — pad it to a
+            // full all-empty array so EditableLayer's invariant (Terrain.Length == Cells.Length) holds for
+            // every loaded level, old or new.
+            var terrain = layer.Terrain.Count == expectedCells ? layer.Terrain.ToArray() : null;
             layers.Add(new EditableLayer(
                 layer.Name,
                 layer.Collision,
                 layer.ScrollSpeed,
                 layer.Repeat,
-                layer.Cells.ToArray()));
+                layer.Cells.ToArray(),
+                terrain));
         }
 
         // Loaded from a real package resource, so this level already occupies a stable slot: isAttached
@@ -94,7 +102,8 @@ public static class EditableLevelReader
             levelDefinition.DefaultSpawn,
             tiles,
             layers,
-            isAttached: true);
+            isAttached: true,
+            terrainSets: terrainSets);
     }
 
     private static ResourcePath FindLevelPath(Package package)

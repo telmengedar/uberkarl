@@ -73,14 +73,25 @@ public static class EditableTileSetReader
                 frames.Add(new EditableTileFrame(frame.Path, package.ReadBytes(frame.Path)));
             }
 
-            tiles.Add(new EditableTile(tile.Id, tile.Graphic.Path, graphicBytes, tile.Collides, tile.Name, frames, tile.AnimationSpeed));
+            tiles.Add(new EditableTile(tile.Id, tile.Graphic.Path, graphicBytes, tile.Collides, tile.Name, frames, tile.AnimationSpeed, tile.Terrain, tile.PeeringBits));
         }
+
+        // DiVoid #7551 Phase 3: rehydrate the tile set's terrain sets/terrains from the definition, in
+        // declaration order — the same order TileSetBuilder maps onto Godot's index-based terrain sets, so
+        // round-tripping through the editor never reorders them.
+        var terrainSets = tileSetDefinition.TerrainSets
+            .Select(terrainSet => new EditableTerrainSet(
+                terrainSet.Id,
+                terrainSet.Name,
+                terrainSet.MatchingMode,
+                terrainSet.Terrains.Select(terrain => new EditableTerrain(terrain.Id, terrain.Name, terrain.Color)).ToList()))
+            .ToList();
 
         // Loaded from a real package resource, so this tile set already occupies a stable slot — isAttached
         // is true and tileSetPath is preserved verbatim, even if it predates the per-resource namespacing
         // scheme (a legacy fixed-constant path like "tileset.json" still round-trips fine). The tile set's
         // own display name comes from ITS resource path, mirroring EditableLevelReader's DisplayNameFromPath.
-        return new EditableTileSet(DisplayNameFromPath(tileSetPath), tileSetPath, tiles, isAttached: true);
+        return new EditableTileSet(DisplayNameFromPath(tileSetPath), tileSetPath, tiles, isAttached: true, terrainSets: terrainSets);
     }
 
     private static ResourcePath FindTileSetPath(Package package)

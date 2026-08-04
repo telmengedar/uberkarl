@@ -48,6 +48,13 @@ public static class LevelMergeWriter
                     ScrollSpeed = layer.ScrollSpeed,
                     Repeat = layer.Repeat,
                     Cells = layer.Cells.ToArray(),
+                    // DiVoid #7551 Phase 3: EditableLayer.Terrain is ALWAYS fully populated (every entry
+                    // EmptyCell for "nothing painted") so edit commands can index it unconditionally — but
+                    // LayerDefinition.Terrain's own convention is "empty means nothing painted" (design
+                    // #7580 §7, mirrors Frames' omit-when-default). Write the real array only when at least
+                    // one cell is actually terrain-painted, so a level that never touches terrains still
+                    // round-trips byte-for-byte like before this phase.
+                    Terrain = layer.Terrain.Any(id => id != LayerDefinition.EmptyCell) ? layer.Terrain.ToArray() : Array.Empty<int>(),
                 })
                 .ToArray(),
         };

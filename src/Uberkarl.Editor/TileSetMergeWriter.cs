@@ -44,6 +44,19 @@ public static class TileSetMergeWriter
                     Collides = tile.Collides,
                     Frames = tile.Frames.Select(frame => ResourceReference.ToSelf(frame.GraphicPath)).ToArray(),
                     AnimationSpeed = tile.AnimationSpeed,
+                    Terrain = tile.Terrain,
+                    PeeringBits = tile.PeeringBits,
+                })
+                .ToArray(),
+            TerrainSets = tileSet.TerrainSets
+                .Select(terrainSet => new TerrainSetDefinition
+                {
+                    Id = terrainSet.Id,
+                    Name = terrainSet.Name,
+                    MatchingMode = terrainSet.MatchingMode,
+                    Terrains = terrainSet.Terrains
+                        .Select(terrain => new TerrainDefinition { Id = terrain.Id, Name = terrain.Name, Color = terrain.Color })
+                        .ToArray(),
                 })
                 .ToArray(),
         };

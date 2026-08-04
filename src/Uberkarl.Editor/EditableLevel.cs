@@ -37,6 +37,7 @@ public sealed class EditableLevel
     // exposes the same list as IReadOnlyList so every existing reader keeps working unchanged.
     private readonly List<EditableLayer> layers;
     private IReadOnlyList<EditableTile> tiles;
+    private IReadOnlyList<EditableTerrainSet> terrainSets;
 
     public EditableLevel(
         string name,
@@ -50,7 +51,8 @@ public sealed class EditableLevel
         string? defaultSpawn,
         IReadOnlyList<EditableTile> tiles,
         IReadOnlyList<EditableLayer> layers,
-        bool isAttached = false)
+        bool isAttached = false,
+        IReadOnlyList<EditableTerrainSet>? terrainSets = null)
     {
         if (tileSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(tileSize));
@@ -67,6 +69,7 @@ public sealed class EditableLevel
         Spawns = spawns ?? throw new ArgumentNullException(nameof(spawns));
         DefaultSpawn = defaultSpawn;
         this.tiles = tiles ?? throw new ArgumentNullException(nameof(tiles));
+        this.terrainSets = terrainSets ?? Array.Empty<EditableTerrainSet>();
         if (layers is null)
             throw new ArgumentNullException(nameof(layers));
         this.layers = new List<EditableLayer>(layers);
@@ -111,6 +114,15 @@ public sealed class EditableLevel
     public IReadOnlyList<EditableTile> Tiles => tiles;
 
     /// <summary>
+    /// The bound tile set's terrain sets, cached here exactly like <see cref="Tiles"/> — kept in sync via
+    /// <see cref="BindTileSet"/>/<see cref="RefreshTiles"/> (DiVoid #7551 Phase 3). Used by
+    /// <see cref="IsPlaceableTerrain"/> to validate a terrain paint and by <see cref="EditableLevelSnapshot"/>
+    /// to build the live canvas preview's terrain data — the same "editor preview must resolve terrains
+    /// exactly like the runtime" requirement animation already established (design #7580 §9).
+    /// </summary>
+    public IReadOnlyList<EditableTerrainSet> TerrainSets => terrainSets;
+
+    /// <summary>
     /// Whether this level already occupies a stable, namespaced resource slot in some package — true for
     /// a level just loaded via <see cref="EditableLevelReader"/>, or one that has completed at least one
     /// merge-save via <see cref="Attach"/>. False for a freshly <see cref="CreateBlank"/> level: it has
@@ -147,6 +159,23 @@ public sealed class EditableLevel
         {
             if (tile.Id == tileId)
                 return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>True when <paramref name="terrainId"/> is the empty marker or a declared terrain of the currently-bound tile set (DiVoid #7551 Phase 3).</summary>
+    public bool IsPlaceableTerrain(int terrainId)
+    {
+        if (terrainId == LayerDefinition.EmptyCell)
+            return true;
+        foreach (var terrainSet in terrainSets)
+        {
+            foreach (var terrain in terrainSet.Terrains)
+            {
+                if (terrain.Id == terrainId)
+                    return true;
+            }
         }
 
         return false;
@@ -228,7 +257,7 @@ public sealed class EditableLevel
         if (string.Equals(current.Name, name, StringComparison.Ordinal))
             return false;
 
-        layers[index] = new EditableLayer(name, current.Collision, current.ScrollSpeed, current.Repeat, current.Cells);
+        layers[index] = new EditableLayer(name, current.Collision, current.ScrollSpeed, current.Repeat, current.Cells, current.Terrain);
         return true;
     }
 
@@ -250,7 +279,7 @@ public sealed class EditableLevel
         if (current.Collision == coerced.Collision && current.ScrollSpeed == coerced.ScrollSpeed && current.Repeat == coerced.Repeat)
             return false;
 
-        layers[index] = new EditableLayer(current.Name, coerced.Collision, coerced.ScrollSpeed, coerced.Repeat, current.Cells);
+        layers[index] = new EditableLayer(current.Name, coerced.Collision, coerced.ScrollSpeed, coerced.Repeat, current.Cells, current.Terrain);
         return true;
     }
 
@@ -275,8 +304,15 @@ public sealed class EditableLevel
             {
                 for (var x = 0; x < Width; x++)
                 {
-                    if ((x >= width || y >= height) && layer.Cells[y * Width + x] != LayerDefinition.EmptyCell)
-                        return true;
+                    if (x >= width || y >= height)
+                    {
+                        var index = y * Width + x;
+                        // DiVoid #7551 Phase 3: a terrain-painted cell has Cells==EmptyCell by the two-channel
+                        // invariant, so it must be checked separately or a shrink could silently crop painted
+                        // terrain without the confirm prompt this query exists to trigger.
+                        if (layer.Cells[index] != LayerDefinition.EmptyCell || layer.Terrain[index] != LayerDefinition.EmptyCell)
+                            return true;
+                    }
                 }
             }
         }
@@ -310,14 +346,19 @@ public sealed class EditableLevel
         {
             var layer = layers[i];
             var cells = new int[width * height];
+            var terrain = new int[width * height];
             Array.Fill(cells, LayerDefinition.EmptyCell);
+            Array.Fill(terrain, LayerDefinition.EmptyCell);
             for (var y = 0; y < copyHeight; y++)
             {
                 for (var x = 0; x < copyWidth; x++)
+                {
                     cells[y * width + x] = layer.Cells[y * Width + x];
+                    terrain[y * width + x] = layer.Terrain[y * Width + x];
+                }
             }
 
-            layers[i] = new EditableLayer(layer.Name, layer.Collision, layer.ScrollSpeed, layer.Repeat, cells);
+            layers[i] = new EditableLayer(layer.Name, layer.Collision, layer.ScrollSpeed, layer.Repeat, cells, terrain);
         }
 
         Width = width;
@@ -378,18 +419,24 @@ public sealed class EditableLevel
     /// cache in sync after an in-place edit to the SAME bound tile set (add/remove/rename a tile via
     /// <c>TileSetEditor</c> without rebinding to a different resource).
     /// </summary>
-    public void BindTileSet(ResourceReference tileSetReference, IReadOnlyList<EditableTile> tiles)
+    public void BindTileSet(ResourceReference tileSetReference, IReadOnlyList<EditableTile> tiles, IReadOnlyList<EditableTerrainSet>? terrainSets = null)
     {
         TileSetReference = tileSetReference;
         this.tiles = tiles ?? throw new ArgumentNullException(nameof(tiles));
+        this.terrainSets = terrainSets ?? Array.Empty<EditableTerrainSet>();
     }
 
     /// <summary>
-    /// Re-syncs the palette cache from the currently-bound tile set's live tile list, without changing
-    /// which tile set is bound — the seam a mutation made through <c>TileSetEditor</c> (add/remove/rename
-    /// a tile in the tile set this level already has open) uses to keep <see cref="Tiles"/> current.
+    /// Re-syncs the palette cache from the currently-bound tile set's live tile list (and, DiVoid #7551
+    /// Phase 3, its terrain sets), without changing which tile set is bound — the seam a mutation made
+    /// through <c>TileSetEditor</c> (add/remove/rename a tile, define/edit a terrain, in the tile set this
+    /// level already has open) uses to keep <see cref="Tiles"/>/<see cref="TerrainSets"/> current.
     /// </summary>
-    public void RefreshTiles(IReadOnlyList<EditableTile> tiles) => this.tiles = tiles ?? throw new ArgumentNullException(nameof(tiles));
+    public void RefreshTiles(IReadOnlyList<EditableTile> tiles, IReadOnlyList<EditableTerrainSet>? terrainSets = null)
+    {
+        this.tiles = tiles ?? throw new ArgumentNullException(nameof(tiles));
+        this.terrainSets = terrainSets ?? Array.Empty<EditableTerrainSet>();
+    }
 
     /// <summary>
     /// Creates an empty level: one collision layer of the given size filled with empty cells, bound to
