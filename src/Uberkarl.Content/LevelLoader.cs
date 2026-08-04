@@ -16,6 +16,7 @@ public static class LevelLoader
         var tileSet = LevelContentSerializer.ReadTileSet(Resolve(resolver, level.TileSet, "tile set"));
         var graphics = ResolveGraphics(resolver, tileSet);
         var collidingTileIds = CollectCollidingTileIds(tileSet);
+        var animations = ResolveAnimations(resolver, tileSet, graphics);
         ValidateSpawns(level);
         var backgroundColor = ParseBackgroundColor(level);
 
@@ -41,6 +42,7 @@ public static class LevelLoader
             Layers = layers,
             TileGraphics = graphics,
             CollidingTileIds = collidingTileIds,
+            TileAnimations = animations,
             Spawns = level.Spawns,
             DefaultSpawn = level.DefaultSpawn,
             BackgroundColor = backgroundColor,
@@ -125,6 +127,37 @@ public static class LevelLoader
         }
 
         return graphics;
+    }
+
+    /// <summary>
+    /// Resolves every animated tile's ordered frame bytes (frame 0 = <see cref="TileDefinition.Graphic"/>,
+    /// already in <paramref name="graphics"/>; the rest from <see cref="TileDefinition.Frames"/>) plus its
+    /// playback speed (DiVoid #7551 Phase 2, design #7580 §8 — the loader validates a positive speed and
+    /// that every frame reference resolves, typed as <see cref="LevelContentException"/>, exactly like
+    /// every other content-boundary failure). A simple tile (<see cref="TileDefinition.IsAnimated"/> false)
+    /// contributes no entry.
+    /// </summary>
+    private static Dictionary<int, ResolvedAnimation> ResolveAnimations(
+        IResourceResolver resolver, TileSetDefinition tileSet, IReadOnlyDictionary<int, byte[]> graphics)
+    {
+        var animations = new Dictionary<int, ResolvedAnimation>();
+        foreach (var tile in tileSet.Tiles)
+        {
+            if (!tile.IsAnimated)
+                continue;
+
+            if (tile.AnimationSpeed <= 0)
+                throw new LevelContentException(
+                    $"Tile {tile.Id} is animated but its animation speed is {tile.AnimationSpeed}; it must be positive.");
+
+            var frames = new List<byte[]>(tile.Frames.Count + 1) { graphics[tile.Id] };
+            foreach (var frame in tile.Frames)
+                frames.Add(Resolve(resolver, frame, "tile animation frame"));
+
+            animations[tile.Id] = new ResolvedAnimation { Frames = frames, Speed = tile.AnimationSpeed };
+        }
+
+        return animations;
     }
 
     private static void ValidateLayer(LevelDefinition level, LayerDefinition layer, IReadOnlyCollection<int> knownTileIds)

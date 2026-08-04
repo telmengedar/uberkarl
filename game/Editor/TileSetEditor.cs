@@ -6,12 +6,18 @@ using Uberkarl.Editor;
 namespace Uberkarl {
 
     /// <summary>
-    /// The summoned, gamepad-first tile set authoring surface (DiVoid #7551 Phase 1b, design #7580):
+    /// The summoned, gamepad-first tile set authoring surface (DiVoid #7551 Phase 1b/2, design #7580):
     /// add/remove/rename simple tiles, toggle full-tile collision, and import a graphic via Godot's
     /// standard <see cref="FileDialog"/>. Reuses <see cref="LayerManagerPanel"/>'s scaffolding verbatim —
     /// full-rect dim backdrop, centered panel, 2D <see cref="FocusGrid"/> row layout, grab-focus-on-summon,
     /// <c>ui_cancel</c> closes — and the same "panel calls the session directly, then rebuilds its own rows
     /// from the model's current truth" pattern. It holds no edit logic of its own.
+    ///
+    /// <b>Animation</b> (DiVoid #7551 Phase 2): the same "+ Add Frame…" import flow every tile row offers
+    /// appends the tile's next animation frame — a tile with 0 extra frames is simple, 1+ is animated
+    /// (structural, no separate toggle, design #7580 §7/§10). An animated tile grows a speed row (step
+    /// through <see cref="AnimationSpeedLadder"/>) and one row per extra frame with its own "Remove Frame".
+    /// Removing the last extra frame reverts the tile to simple.
     ///
     /// <b>Graphic import</b> (design #7580 D1, ratified): Godot's built-in <see cref="FileDialog"/> — now
     /// pad-navigable since PR #13 bound <c>ui_accept</c>/<c>ui_cancel</c> to gamepad A/B, which is what
@@ -32,6 +38,20 @@ namespace Uberkarl {
         int tileSize = 1;
 
         int pendingDeleteId = -1;
+
+        // Which tile a graphic picked from importDialog becomes: -1 means "a brand-new tile"
+        // (OnAddTilePressed's flow, unchanged from Phase 1b); any other value means "the next animation
+        // frame for THAT tile id" (DiVoid #7551 Phase 2 — OnAddFramePressed's flow). The dialog itself is
+        // one shared instance either way (mirrors the rest of the editor's "build once, reconfigure on
+        // summon" convention), so OnGraphicFileSelected branches on this field to know which session call
+        // to make once a file is actually picked.
+        int pendingFrameTileId = -1;
+
+        // Confirm-gated frame removal (mirrors pendingDeleteId's full-tile confirm): frame edits are not on
+        // an undo stack this increment, same as every other tile-set mutation in this panel.
+        int pendingRemoveFrameTileId = -1;
+        int pendingRemoveFrameIndex = -1;
+
         int lastFocusedRow;
         int lastFocusedCol;
 
@@ -109,6 +129,9 @@ namespace Uberkarl {
             session = editSession;
             tileSize = levelTileSize;
             pendingDeleteId = -1;
+            pendingFrameTileId = -1;
+            pendingRemoveFrameTileId = -1;
+            pendingRemoveFrameIndex = -1;
             lastFocusedRow = 0;
             lastFocusedCol = 0;
             Visible = true;
@@ -131,8 +154,14 @@ namespace Uberkarl {
             rows.Add(new List<Control> { addButton });
 
             if (session != null) {
-                foreach (EditableTile tile in session.TileSet.Tiles)
+                foreach (EditableTile tile in session.TileSet.Tiles) {
                     rows.Add(BuildTileRow(tile));
+                    if (tile.IsAnimated) {
+                        rows.Add(BuildAnimationSpeedRow(tile));
+                        for (int frameIndex = 0; frameIndex < tile.Frames.Count; frameIndex++)
+                            rows.Add(BuildFrameRow(tile, frameIndex));
+                    }
+                }
             }
 
             FocusGrid.Contain(rows);
@@ -172,7 +201,10 @@ namespace Uberkarl {
             };
             row.AddChild(thumb);
 
-            string label = string.IsNullOrEmpty(tile.Name) ? $"Tile #{tile.Id}" : $"{tile.Name} (#{tile.Id})";
+            string label = string.IsNullOrEmpty(tile.Name)
+                ? $"Tile #{tile.Id}"
+                : $"{tile.Name} (#{tile.Id})";
+            label = tile.IsAnimated ? $"{label} — animated, {tile.Frames.Count + 1} frames" : label;
             Button header = new Button { Text = label, SizeFlagsHorizontal = SizeFlags.ExpandFill };
             header.Pressed += () => OnRenamePressed(tile.Id);
             row.AddChild(header);
@@ -187,10 +219,79 @@ namespace Uberkarl {
             row.AddChild(collidesToggle);
             columns.Add(collidesToggle);
 
+            // DiVoid #7551 Phase 2: appending a frame is what turns a simple tile animated (structural —
+            // design #7580 §7/§10), so this is offered on every tile, not gated behind an "animate" toggle.
+            Button addFrame = new Button { Text = "+ Add Frame…" };
+            addFrame.Pressed += () => OnAddFramePressed(tile.Id);
+            row.AddChild(addFrame);
+            columns.Add(addFrame);
+
             Button delete = new Button { Text = pendingDeleteId == tile.Id ? "Confirm Remove?" : "Remove" };
             delete.Pressed += () => OnRemovePressed(tile.Id);
             row.AddChild(delete);
             columns.Add(delete);
+
+            return columns;
+        }
+
+        // DiVoid #7551 Phase 2: an animated tile's speed row — a display label plus two focusable buttons
+        // that immediately step AnimationSpeedLadder and commit (no two-press edit-lock like the layer
+        // panel's Scroll stepper needs: these buttons don't double-book left/right for spatial nav, they
+        // are just ordinary grid stops, so a plain press-to-commit button is enough).
+        List<Control> BuildAnimationSpeedRow(EditableTile tile) {
+            HBoxContainer row = new HBoxContainer();
+            listBox.AddChild(row);
+
+            List<Control> columns = new List<Control>();
+
+            Label indent = new Label { Text = "    " };
+            row.AddChild(indent);
+
+            Button slower = new Button { Text = "◄ Slower" };
+            slower.Pressed += () => OnAnimationSpeedStepPressed(tile.Id, -1);
+            row.AddChild(slower);
+            columns.Add(slower);
+
+            Label speed = new Label { Text = $"{tile.AnimationSpeed:0.#} fps" };
+            speed.AddThemeColorOverride("font_color", EditorTheme.Text);
+            row.AddChild(speed);
+
+            Button faster = new Button { Text = "Faster ►" };
+            faster.Pressed += () => OnAnimationSpeedStepPressed(tile.Id, +1);
+            row.AddChild(faster);
+            columns.Add(faster);
+
+            return columns;
+        }
+
+        // DiVoid #7551 Phase 2: one row per animation frame beyond the tile's primary graphic (frame 0).
+        // frameIndex is 0-based into EditableTile.Frames — overall animation frame frameIndex + 2.
+        List<Control> BuildFrameRow(EditableTile tile, int frameIndex) {
+            HBoxContainer row = new HBoxContainer();
+            listBox.AddChild(row);
+
+            List<Control> columns = new List<Control>();
+            EditableTileFrame frame = tile.Frames[frameIndex];
+
+            Label indent = new Label { Text = "    " };
+            row.AddChild(indent);
+
+            TextureRect thumb = new TextureRect {
+                CustomMinimumSize = new Vector2(24f, 24f),
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                Texture = LoadTexture(frame.Graphic),
+            };
+            row.AddChild(thumb);
+
+            Label label = new Label { Text = $"Frame {frameIndex + 2}", SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            row.AddChild(label);
+
+            bool pendingThisFrame = pendingRemoveFrameTileId == tile.Id && pendingRemoveFrameIndex == frameIndex;
+            Button remove = new Button { Text = pendingThisFrame ? "Confirm Remove?" : "Remove Frame" };
+            remove.Pressed += () => OnRemoveFramePressed(tile.Id, frameIndex);
+            row.AddChild(remove);
+            columns.Add(remove);
 
             return columns;
         }
@@ -204,10 +305,27 @@ namespace Uberkarl {
 
         void OnAddTilePressed() {
             pendingDeleteId = -1;
+            pendingFrameTileId = -1;
             importDialog.PopupCentered();
         }
 
-        /// <summary>Imports a graphic as a new tile, scaled to <see cref="tileSize"/> per <see cref="TileGraphicImport"/>.</summary>
+        /// <summary>
+        /// Opens the same import dialog as "+ Add Tile", but the picked graphic becomes the tile's NEXT
+        /// animation frame instead of a new tile (DiVoid #7551 Phase 2) — see <see cref="pendingFrameTileId"/>.
+        /// </summary>
+        void OnAddFramePressed(int tileId) {
+            pendingDeleteId = -1;
+            pendingRemoveFrameTileId = -1;
+            pendingRemoveFrameIndex = -1;
+            pendingFrameTileId = tileId;
+            importDialog.PopupCentered();
+        }
+
+        /// <summary>
+        /// Imports a graphic (scaled to <see cref="tileSize"/> per <see cref="TileGraphicImport"/>, same as
+        /// "+ Add Tile") and routes it to either a new tile or the next animation frame of an existing tile,
+        /// depending on which button opened the dialog (<see cref="pendingFrameTileId"/>).
+        /// </summary>
         void OnGraphicFileSelected(string path) {
             if (session == null)
                 return;
@@ -232,9 +350,50 @@ namespace Uberkarl {
                 GD.Print($"TileSetEditor: '{path}' was {sourceWidth}x{sourceHeight}, scaled to {tileSize}x{tileSize} to fill the tile.");
             }
 
-            int id = session.AddTile(bytes, collides: false);
-            GD.Print($"TileSetEditor: imported tile #{id} from '{path}'.");
+            if (pendingFrameTileId == -1) {
+                int id = session.AddTile(bytes, collides: false);
+                GD.Print($"TileSetEditor: imported tile #{id} from '{path}'.");
+            } else if (session.AddFrame(pendingFrameTileId, bytes)) {
+                GD.Print($"TileSetEditor: added an animation frame to tile #{pendingFrameTileId} from '{path}'.");
+            } else {
+                GD.PrintErr($"TileSetEditor: could not add a frame to tile #{pendingFrameTileId} (it no longer exists).");
+            }
+
             TileSetModelChanged?.Invoke();
+            Rebuild();
+        }
+
+        void OnAnimationSpeedStepPressed(int tileId, int direction) {
+            pendingDeleteId = -1;
+            EditableTile tile = Find(tileId);
+            if (tile == null)
+                return;
+
+            double stepped = AnimationSpeedLadder.Step(tile.AnimationSpeed, direction);
+            if (session.SetAnimationSpeed(tileId, stepped)) {
+                GD.Print($"TileSetEditor: tile #{tileId} animation speed set to {stepped:0.#} fps.");
+                TileSetModelChanged?.Invoke();
+            }
+            Rebuild();
+        }
+
+        // Confirm-gated (mirrors OnRemovePressed): frame removal is not undoable this increment. Removing
+        // the tile's last extra frame is the animated→simple structural transition (design #7580 §7/§10).
+        void OnRemoveFramePressed(int tileId, int frameIndex) {
+            pendingDeleteId = -1;
+            if (pendingRemoveFrameTileId != tileId || pendingRemoveFrameIndex != frameIndex) {
+                pendingRemoveFrameTileId = tileId;
+                pendingRemoveFrameIndex = frameIndex;
+                Rebuild();
+                return;
+            }
+
+            pendingRemoveFrameTileId = -1;
+            pendingRemoveFrameIndex = -1;
+            if (session.RemoveFrame(tileId, frameIndex)) {
+                GD.Print($"TileSetEditor: removed animation frame {frameIndex + 2} from tile #{tileId}.");
+                TileSetModelChanged?.Invoke();
+            }
             Rebuild();
         }
 
@@ -245,6 +404,8 @@ namespace Uberkarl {
                 return;
 
             pendingDeleteId = -1;
+            pendingRemoveFrameTileId = -1;
+            pendingRemoveFrameIndex = -1;
             EditableTile tile = Find(id);
             string currentName = tile?.Name ?? string.Empty;
             keyboard.RequestText($"Rename tile #{id}", currentName, newName => ApplyRename(id, newName));
@@ -260,6 +421,8 @@ namespace Uberkarl {
 
         void OnCollidesPressed(int id, Button toggle) {
             pendingDeleteId = -1;
+            pendingRemoveFrameTileId = -1;
+            pendingRemoveFrameIndex = -1;
             if (session.SetTileCollides(id, toggle.ButtonPressed)) {
                 GD.Print($"TileSetEditor: tile #{id} collides set to {toggle.ButtonPressed}.");
                 TileSetModelChanged?.Invoke();
@@ -278,6 +441,8 @@ namespace Uberkarl {
             }
 
             pendingDeleteId = -1;
+            pendingRemoveFrameTileId = -1;
+            pendingRemoveFrameIndex = -1;
             if (session.RemoveTile(id)) {
                 GD.Print($"TileSetEditor: removed tile #{id}.");
                 TileSetModelChanged?.Invoke();
@@ -316,6 +481,9 @@ namespace Uberkarl {
         void Close() {
             Visible = false;
             pendingDeleteId = -1;
+            pendingFrameTileId = -1;
+            pendingRemoveFrameTileId = -1;
+            pendingRemoveFrameIndex = -1;
             Closed?.Invoke();
         }
     }

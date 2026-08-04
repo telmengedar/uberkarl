@@ -113,7 +113,7 @@ public sealed class EditableTileSet
         if (string.Equals(current.Name, normalized, StringComparison.Ordinal))
             return false;
 
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, normalized);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, normalized, current.Frames, current.AnimationSpeed);
         return true;
     }
 
@@ -128,7 +128,80 @@ public sealed class EditableTileSet
         if (current.Collides == collides)
             return false;
 
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, collides, current.Name);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, collides, current.Name, current.Frames, current.AnimationSpeed);
+        return true;
+    }
+
+    /// <summary>
+    /// Appends a new animation frame to the tile at <paramref name="id"/> — the frame goes on the END of
+    /// <see cref="EditableTile.Frames"/> (frame index <c>Frames.Count + 1</c> overall, since
+    /// <see cref="EditableTile.Graphic"/> is always frame 0). A tile with zero frames going to one is the
+    /// simple→animated structural transition (design #7580 §7/§10 — no separate flag). Mints a provisional
+    /// path from this tile set's current name, remapped for real by <see cref="Attach"/>, exactly like
+    /// <see cref="AddTile"/>. Returns <c>false</c> (no-op) when <paramref name="id"/> is not a declared tile.
+    /// </summary>
+    public bool AddFrame(int id, byte[] graphic)
+    {
+        if (graphic is null || graphic.Length == 0)
+            throw new ArgumentException("Frame graphic must not be empty.", nameof(graphic));
+
+        var index = tiles.FindIndex(tile => tile.Id == id);
+        if (index < 0)
+            return false;
+
+        var current = tiles[index];
+        var overallFrameNumber = current.Frames.Count + 2; // overall frame 1 is current.Graphic
+        var provisionalSlug = TileSetResourcePaths.Slugify(Name);
+        var path = TileSetResourcePaths.FramePath(provisionalSlug, id, overallFrameNumber);
+        var frames = new List<EditableTileFrame>(current.Frames) { new EditableTileFrame(path, graphic) };
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, current.Name, frames, current.AnimationSpeed);
+        return true;
+    }
+
+    /// <summary>
+    /// Removes the animation frame at <paramref name="frameIndex"/> (0-based into <see cref="EditableTile.Frames"/>
+    /// — i.e. overall animation frame <c>frameIndex + 2</c>; <see cref="EditableTile.Graphic"/>, overall
+    /// frame 1, is never removable this way). Going from one frame back to zero is the animated→simple
+    /// structural transition (design #7580 §7/§10, task-scoped: "removing frames back to one ⇒ simple tile
+    /// again"). Returns <c>false</c> (no-op) when <paramref name="id"/> is not a declared tile or
+    /// <paramref name="frameIndex"/> is out of range.
+    /// </summary>
+    public bool RemoveFrame(int id, int frameIndex)
+    {
+        var index = tiles.FindIndex(tile => tile.Id == id);
+        if (index < 0)
+            return false;
+
+        var current = tiles[index];
+        if (frameIndex < 0 || frameIndex >= current.Frames.Count)
+            return false;
+
+        var frames = new List<EditableTileFrame>(current.Frames);
+        frames.RemoveAt(frameIndex);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, current.Name, frames, current.AnimationSpeed);
+        return true;
+    }
+
+    /// <summary>
+    /// Sets the animation speed (frames per second) of the tile at <paramref name="id"/>. Meaningful only
+    /// once the tile <see cref="EditableTile.IsAnimated"/>, but settable regardless — an author may set the
+    /// speed before or after adding the second frame. Returns <c>false</c> (no-op) when the tile does not
+    /// exist or the speed is unchanged.
+    /// </summary>
+    public bool SetAnimationSpeed(int id, double speed)
+    {
+        if (speed <= 0)
+            throw new ArgumentException("Animation speed must be positive.", nameof(speed));
+
+        var index = tiles.FindIndex(tile => tile.Id == id);
+        if (index < 0)
+            return false;
+
+        var current = tiles[index];
+        if (current.AnimationSpeed == speed)
+            return false;
+
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.Collides, current.Name, current.Frames, speed);
         return true;
     }
 
@@ -160,7 +233,12 @@ public sealed class EditableTileSet
         for (var i = 0; i < tiles.Count; i++)
         {
             var tile = tiles[i];
-            tiles[i] = new EditableTile(tile.Id, TileSetResourcePaths.GraphicPath(slug, tile.Id), tile.Graphic, tile.Collides, tile.Name);
+            var frames = tile.Frames.Count == 0
+                ? tile.Frames
+                : tile.Frames
+                    .Select((frame, frameIndex) => new EditableTileFrame(TileSetResourcePaths.FramePath(slug, tile.Id, frameIndex + 2), frame.Graphic))
+                    .ToArray();
+            tiles[i] = new EditableTile(tile.Id, TileSetResourcePaths.GraphicPath(slug, tile.Id), tile.Graphic, tile.Collides, tile.Name, frames, tile.AnimationSpeed);
         }
 
         IsAttached = true;

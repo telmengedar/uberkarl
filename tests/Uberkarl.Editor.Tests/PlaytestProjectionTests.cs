@@ -94,6 +94,52 @@ public sealed class PlaytestProjectionTests
         });
     }
 
+    // ----- animation carries through the live-preview/playtest projection (DiVoid #7551 Phase 2) -----
+    // Regression coverage: this projection is the SAME one the editor canvas rebuilds from on every
+    // TileSetModelChanged AND the one Play launches from (LevelEditor.OnTileSetModelChanged /
+    // StartPlaytest both call EditableLevelSnapshot.ToResolvedLevel) — a caught-live bug had this
+    // projection silently drop animation data (TileAnimations defaulted empty), so an author who just
+    // added a second frame saw it render as simple in both the canvas AND playtest until the level was
+    // reloaded from a saved package. Frame 0 = EditableTile.Graphic, matching LevelLoader's own contract.
+
+    [Test]
+    public void ToResolvedLevel_CarriesAnimationFrames_ForAnAnimatedTile()
+    {
+        var frame0 = Encoding.UTF8.GetBytes("GRASS-PNG");
+        var frame1 = Encoding.UTF8.GetBytes("FRAME-2");
+        var animatedGrass = new EditableTile(
+            1, GrassPath, frame0, collides: true, name: null,
+            frames: new[] { new EditableTileFrame(ResourcePath.Create("tiles/grass-2.png"), frame1) },
+            animationSpeed: 12.0);
+        var cells = new int[Width * Height];
+        Array.Fill(cells, LayerDefinition.EmptyCell);
+        var level = new EditableLevel(
+            "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
+            TileSize, Width, Height, backgroundColor: null,
+            new System.Collections.Generic.Dictionary<string, GridPosition>(), defaultSpawn: null,
+            new[] { animatedGrass }, new[] { new EditableLayer("terrain", true, 1f, false, cells) });
+
+        var resolved = EditableLevelSnapshot.ToResolvedLevel(level);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(resolved.TileAnimations, Contains.Key(1));
+            var animation = resolved.TileAnimations[1];
+            Assert.That(animation.Frames, Is.EqualTo(new[] { frame0, frame1 }));
+            Assert.That(animation.Speed, Is.EqualTo(12.0));
+        });
+    }
+
+    [Test]
+    public void ToResolvedLevel_SimpleTile_HasNoAnimationEntry()
+    {
+        var level = SampleLevel();
+
+        var resolved = EditableLevelSnapshot.ToResolvedLevel(level);
+
+        Assert.That(resolved.TileAnimations, Is.Empty);
+    }
+
     // ----- projecting for playtest never mutates the buffer (the "edits intact on return" guarantee) -----
 
     [Test]
