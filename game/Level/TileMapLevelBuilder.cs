@@ -6,8 +6,9 @@ namespace Uberkarl {
 
     /// <summary>
     /// Translates a Godot-free <see cref="ResolvedLevel"/> into a tree of <see cref="TileMapLayer"/>s.
-    /// All layers share ONE <see cref="TileSet"/> (a physics layer with a full-tile collision polygon
-    /// on each colliding tile); each <see cref="TileMapLayer"/> sets <c>CollisionEnabled</c> from its
+    /// All layers share ONE <see cref="TileSet"/> (a physics layer with each colliding tile's own
+    /// collision polygon, built from its <see cref="Uberkarl.Content.CollisionShapeDefinition"/> — DiVoid
+    /// #7551 Phase 4); each <see cref="TileMapLayer"/> sets <c>CollisionEnabled</c> from its
     /// layer's collision flag, so a non-collision layer never blocks the player even when it places a
     /// solid tile. Draw order is the layer array order (back to front), independent of collision.
     /// A layer whose <c>ScrollSpeed != 1.0</c> or that opts into <c>Repeat</c> is wrapped in a
@@ -20,7 +21,7 @@ namespace Uberkarl {
 
         public static Node2D Build(ResolvedLevel level) {
             TileSetBuilder.BuiltTileSet shared = TileSetBuilder.Build(
-                level.TileGraphics, level.CollidingTileIds, level.TileAnimations, level.TerrainSets, level.TileTerrains, level.TileSize);
+                level.TileGraphics, level.TileCollisionShapes, level.TileAnimations, level.TerrainSets, level.TileTerrains, level.TileSize);
 
             // The layer's content size in pixels — used as the repeat period for a repeating layer so
             // its content tiles seamlessly across the scroll extent.
@@ -50,7 +51,7 @@ namespace Uberkarl {
         /// </summary>
         public static BuiltLevel BuildEditable(ResolvedLevel level) {
             TileSetBuilder.BuiltTileSet shared = TileSetBuilder.Build(
-                level.TileGraphics, level.CollidingTileIds, level.TileAnimations, level.TerrainSets, level.TileTerrains, level.TileSize);
+                level.TileGraphics, level.TileCollisionShapes, level.TileAnimations, level.TerrainSets, level.TileTerrains, level.TileSize);
 
             Node2D root = new Node2D { Name = "Level" };
             List<TileMapLayer> layers = new List<TileMapLayer>(level.Layers.Count);

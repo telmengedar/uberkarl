@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Godot;
+using Uberkarl.Content;
 using Uberkarl.Editor;
 using Uberkarl.Packages;
 
@@ -13,7 +14,7 @@ namespace Uberkarl {
     /// </summary>
     public static class DefaultPalette {
 
-        static readonly (int Id, string File, byte R, byte G, byte B, bool Collides)[] Entries = {
+        static readonly (int Id, string File, byte R, byte G, byte B, bool Solid)[] Entries = {
             (1, "tiles/grass.png", 78, 168, 66, true),
             (2, "tiles/dirt.png", 138, 92, 52, true),
             (3, "tiles/stone.png", 128, 130, 138, true),
@@ -25,7 +26,8 @@ namespace Uberkarl {
             List<EditableTile> tiles = new List<EditableTile>(Entries.Length);
             foreach (var entry in Entries) {
                 byte[] png = EncodeSolidTile(tileSize, entry.R, entry.G, entry.B);
-                tiles.Add(new EditableTile(entry.Id, ResourcePath.Create(entry.File), png, entry.Collides));
+                CollisionShapeDefinition collisionShape = entry.Solid ? CollisionShapeDefinition.Full : CollisionShapeDefinition.None;
+                tiles.Add(new EditableTile(entry.Id, ResourcePath.Create(entry.File), png, collisionShape));
             }
 
             return tiles;

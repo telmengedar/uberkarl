@@ -19,8 +19,17 @@ public sealed class ResolvedLevel
 
     public IReadOnlyDictionary<int, byte[]> TileGraphics { get; init; } = new Dictionary<int, byte[]>();
 
-    /// <summary>Tile ids flagged as solid in the tile set. Only enforced on layers whose <see cref="ResolvedLayer.Collision"/> is true.</summary>
+    /// <summary>Tile ids whose <see cref="TileCollisionShapes"/> entry is not <see cref="CollisionShapeKind.None"/>. Only enforced on layers whose <see cref="ResolvedLayer.Collision"/> is true.</summary>
     public IReadOnlySet<int> CollidingTileIds { get; init; } = new HashSet<int>();
+
+    /// <summary>
+    /// Every declared tile id's resolved collision footprint (DiVoid #7551 Phase 4, design #7580) — the
+    /// authority <c>TileSetBuilder</c> reads to build each tile's physics-layer collision polygon (full
+    /// square, rect, explicit polygon, or a named preset's polygon). <see cref="CollidingTileIds"/> is a
+    /// derived convenience over this same data (every id whose shape's <see cref="CollisionShapeDefinition.Kind"/>
+    /// is not <see cref="CollisionShapeKind.None"/>).
+    /// </summary>
+    public IReadOnlyDictionary<int, CollisionShapeDefinition> TileCollisionShapes { get; init; } = new Dictionary<int, CollisionShapeDefinition>();
 
     /// <summary>
     /// Resolved animation data (ordered frame bytes + speed) keyed by tile id, for exactly the tiles

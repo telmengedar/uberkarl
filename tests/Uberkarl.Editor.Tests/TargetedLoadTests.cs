@@ -70,7 +70,7 @@ public sealed class TargetedLoadTests
     {
         var tileSet = new TileSetDefinition
         {
-            Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), Collides = true } },
+            Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.Full } },
         };
 
         var first = new LevelDefinition

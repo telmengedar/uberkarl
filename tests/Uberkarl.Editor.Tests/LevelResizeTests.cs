@@ -325,8 +325,8 @@ public sealed class LevelResizeTests
 
     private static IReadOnlyList<EditableTile> Palette() => new[]
     {
-        new EditableTile(1, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), collides: true),
-        new EditableTile(5, WaterPath, Encoding.UTF8.GetBytes("WATER-PNG"), collides: false),
+        new EditableTile(1, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full),
+        new EditableTile(5, WaterPath, Encoding.UTF8.GetBytes("WATER-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None),
     };
 
     private static EditableLevel SampleLevel()
@@ -356,7 +356,7 @@ public sealed class LevelResizeTests
 
         var tileSet = new TileSetDefinition
         {
-            Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), Collides = true } },
+            Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.Full } },
         };
         var level = new LevelDefinition
         {

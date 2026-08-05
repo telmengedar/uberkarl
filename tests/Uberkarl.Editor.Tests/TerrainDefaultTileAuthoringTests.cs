@@ -30,7 +30,7 @@ public sealed class TerrainDefaultTileAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = tileSet.AddTerrain(setId, "Earth");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(tileId, terrainId);
 
         var happened = tileSet.SetTerrainDefaultTile(setId, terrainId, tileId);
@@ -48,7 +48,7 @@ public sealed class TerrainDefaultTileAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = tileSet.AddTerrain(setId, "Earth");
-        var plainTileId = tileSet.AddTile(Png("A"), collides: false); // never assigned to any terrain
+        var plainTileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None); // never assigned to any terrain
 
         var happened = tileSet.SetTerrainDefaultTile(setId, terrainId, plainTileId);
 
@@ -66,7 +66,7 @@ public sealed class TerrainDefaultTileAuthoringTests
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var earthId = tileSet.AddTerrain(setId, "Earth");
         var sandId = tileSet.AddTerrain(setId, "Sand");
-        var sandTileId = tileSet.AddTile(Png("A"), collides: false);
+        var sandTileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(sandTileId, sandId);
 
         var happened = tileSet.SetTerrainDefaultTile(setId, earthId, sandTileId);
@@ -87,7 +87,7 @@ public sealed class TerrainDefaultTileAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = tileSet.AddTerrain(setId, "Earth");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(tileId, terrainId);
         tileSet.SetTerrainDefaultTile(setId, terrainId, tileId);
 
@@ -106,7 +106,7 @@ public sealed class TerrainDefaultTileAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = tileSet.AddTerrain(setId, "Earth");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(tileId, terrainId);
         tileSet.SetTerrainDefaultTile(setId, terrainId, tileId);
 
@@ -123,7 +123,7 @@ public sealed class TerrainDefaultTileAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = tileSet.AddTerrain(setId, "Earth");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(tileId, terrainId);
         tileSet.SetTerrainDefaultTile(setId, terrainId, tileId);
 
@@ -140,7 +140,7 @@ public sealed class TerrainDefaultTileAuthoringTests
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var earthId = tileSet.AddTerrain(setId, "Earth");
         var sandId = tileSet.AddTerrain(setId, "Sand");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(tileId, earthId);
         tileSet.SetTerrainDefaultTile(setId, earthId, tileId);
 
@@ -157,7 +157,7 @@ public sealed class TerrainDefaultTileAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = tileSet.AddTerrain(setId, "Earth");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(tileId, terrainId);
         tileSet.SetTerrainDefaultTile(setId, terrainId, tileId);
 
@@ -174,7 +174,7 @@ public sealed class TerrainDefaultTileAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = tileSet.AddTerrain(setId, "Earth");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(tileId, terrainId);
         tileSet.SetTerrainDefaultTile(setId, terrainId, tileId);
 
@@ -189,7 +189,7 @@ public sealed class TerrainDefaultTileAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = tileSet.AddTerrain(setId, "Earth");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(tileId, terrainId);
         tileSet.SetTerrainDefaultTile(setId, terrainId, tileId);
 
@@ -207,7 +207,7 @@ public sealed class TerrainDefaultTileAuthoringTests
         var session = new TileSetEditSession(tileSet);
         var setId = session.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = session.AddTerrain(setId, "Earth");
-        var tileId = session.AddTile(Png("A"), collides: false);
+        var tileId = session.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         session.SetTileTerrain(tileId, terrainId);
         session.MarkSaved();
 
@@ -251,7 +251,7 @@ public sealed class TerrainDefaultTileAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Ground Set");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.Sides);
         var terrainId = tileSet.AddTerrain(setId, "Earth", "#8a5c34");
-        var tileId = tileSet.AddTile(Png("EARTH"), collides: true);
+        var tileId = tileSet.AddTile(Png("EARTH"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full);
         tileSet.SetTileTerrain(tileId, terrainId);
         tileSet.SetTilePeeringBits(tileId, TerrainPeering.All);
         tileSet.SetTerrainDefaultTile(setId, terrainId, tileId);
@@ -297,8 +297,8 @@ public sealed class TerrainDefaultTileAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         terrainId = tileSet.AddTerrain(setId, "Earth", "#8a5c34");
-        tileSet.AddTile(Encoding.UTF8.GetBytes("GRASS-PNG"), collides: true, name: "grass"); // id 1
-        var earthTileId = tileSet.AddTile(Encoding.UTF8.GetBytes("EARTH-PNG"), collides: true, name: "earth"); // id 2
+        tileSet.AddTile(Encoding.UTF8.GetBytes("GRASS-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full, name: "grass"); // id 1
+        var earthTileId = tileSet.AddTile(Encoding.UTF8.GetBytes("EARTH-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full, name: "earth"); // id 2
         tileSet.SetTileTerrain(earthTileId, terrainId);
         tileSet.SetTilePeeringBits(earthTileId, TerrainPeering.All);
         if (declareDefault)

@@ -41,7 +41,7 @@ public static class TileSetMergeWriter
                     Id = tile.Id,
                     Name = tile.Name,
                     Graphic = ResourceReference.ToSelf(tile.GraphicPath),
-                    Collides = tile.Collides,
+                    CollisionShape = tile.CollisionShape,
                     Frames = tile.Frames.Select(frame => ResourceReference.ToSelf(frame.GraphicPath)).ToArray(),
                     AnimationSpeed = tile.AnimationSpeed,
                     Terrain = tile.Terrain,

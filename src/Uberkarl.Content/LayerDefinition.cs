@@ -8,7 +8,8 @@ public sealed class LayerDefinition
 
     /// <summary>
     /// Whether this layer is a collision layer. When <c>false</c> the layer never collides,
-    /// even for a tile flagged <see cref="TileDefinition.Collides"/>. Draw order is the layer
+    /// even for a tile with a non-<see cref="CollisionShapeKind.None"/> <see cref="TileDefinition.CollisionShape"/>.
+    /// Draw order is the layer
     /// array order (back to front) and is independent of this flag. Defaults to <c>false</c>
     /// so a layer is display-only unless it opts in.
     /// </summary>

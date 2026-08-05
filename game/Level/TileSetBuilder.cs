@@ -8,13 +8,15 @@ namespace Uberkarl {
     /// <summary>
     /// Builds the shared Godot <see cref="TileSet"/> a level's layers are placed onto (DiVoid #7551 Phase
     /// 1a — split out of <see cref="TileMapLevelBuilder"/>, pure refactor, behaviour identical). One atlas
-    /// source per tile graphic, a single physics layer, and a full-tile collision polygon on every
-    /// colliding tile id — exactly what <c>TileMapLevelBuilder.BuildTileSet</c> did inline before this
+    /// source per tile graphic, a single physics layer, and a collision polygon built from each tile's
+    /// <see cref="CollisionShapeDefinition"/> (DiVoid #7551 Phase 4 — full tile, rect, explicit polygon, or
+    /// a named preset's polygon; <see cref="AddCollision"/>/<see cref="CollisionShapeResolver"/>) — exactly
+    /// what <c>TileMapLevelBuilder.BuildTileSet</c> did inline (as an always-full-tile square) before this
     /// split. Extracted as its own single-responsibility unit so the tile set half of level-building can
-    /// grow (animation, terrains — later phases per design #7580) without <c>TileMapLevelBuilder</c> doing
-    /// double duty, and so the editor's <c>TileSetEditor</c> can reuse the SAME builder for a live preview
-    /// without also building a level (design #7580 §9 — "editor preview must use the same TileSetBuilder…
-    /// else author-sees ≠ player-gets").
+    /// grow (animation, terrains, collision shapes — later phases per design #7580) without
+    /// <c>TileMapLevelBuilder</c> doing double duty, and so the editor's <c>TileSetEditor</c> can reuse the
+    /// SAME builder for a live preview without also building a level (design #7580 §9 — "editor preview
+    /// must use the same TileSetBuilder… else author-sees ≠ player-gets").
     /// </summary>
     public static class TileSetBuilder {
 
@@ -38,10 +40,10 @@ namespace Uberkarl {
         /// </summary>
         public static BuiltTileSet Build(
             IReadOnlyDictionary<int, byte[]> tileGraphics,
-            IReadOnlySet<int> collidingTileIds,
+            IReadOnlyDictionary<int, CollisionShapeDefinition> tileCollisionShapes,
             IReadOnlyDictionary<int, ResolvedAnimation> tileAnimations,
             int tileSize) {
-            return Build(tileGraphics, collidingTileIds, tileAnimations, Array.Empty<ResolvedTerrainSet>(), new Dictionary<int, ResolvedTileTerrain>(), tileSize);
+            return Build(tileGraphics, tileCollisionShapes, tileAnimations, Array.Empty<ResolvedTerrainSet>(), new Dictionary<int, ResolvedTileTerrain>(), tileSize);
         }
 
         /// <summary>
@@ -56,7 +58,7 @@ namespace Uberkarl {
         /// </summary>
         public static BuiltTileSet Build(
             IReadOnlyDictionary<int, byte[]> tileGraphics,
-            IReadOnlySet<int> collidingTileIds,
+            IReadOnlyDictionary<int, CollisionShapeDefinition> tileCollisionShapes,
             IReadOnlyDictionary<int, ResolvedAnimation> tileAnimations,
             IReadOnlyList<ResolvedTerrainSet> terrainSets,
             IReadOnlyDictionary<int, ResolvedTileTerrain> tileTerrains,
@@ -75,8 +77,8 @@ namespace Uberkarl {
 
                 sourceByTile[tileId] = tileSet.AddSource(source);
 
-                if (collidingTileIds.Contains(tileId))
-                    AddFullTileCollision(source, tileSize);
+                if (tileCollisionShapes.TryGetValue(tileId, out CollisionShapeDefinition shape))
+                    AddCollision(source, tileSize, shape);
 
                 if (tileTerrains.TryGetValue(tileId, out ResolvedTileTerrain membership) &&
                     terrainIndexByTerrainId.TryGetValue(membership.TerrainId, out TerrainIndex index))
@@ -205,17 +207,30 @@ namespace Uberkarl {
             return image;
         }
 
-        static void AddFullTileCollision(TileSetAtlasSource source, int tileSize) {
+        /// <summary>
+        /// Builds this tile's physics-layer collision polygon from its <see cref="CollisionShapeDefinition"/>
+        /// (DiVoid #7551 Phase 4, design #7580): <see cref="CollisionShapeResolver.ResolvePoints"/> is the
+        /// single, Godot-free place a shape (full/rect/polygon/preset) resolves to normalized (0..1) tile-
+        /// fraction points — this method's only job is to scale those points by <paramref name="tileSize"/>
+        /// and re-center them the same way the old always-full-tile square was centered (a normalized
+        /// coordinate <c>c</c> maps to <c>(c - 0.5) * tileSize</c>, so (0,0)/(1,1) land on the old square's
+        /// own (-half,-half)/(half,half) corners). A <see cref="CollisionShapeKind.None"/> shape resolves to
+        /// zero points and adds no collision at all — identical to a non-colliding tile before this phase.
+        /// </summary>
+        static void AddCollision(TileSetAtlasSource source, int tileSize, CollisionShapeDefinition shape) {
+            IReadOnlyList<CollisionPointDefinition> normalized = CollisionShapeResolver.ResolvePoints(shape);
+            if (normalized.Count == 0)
+                return;
+
+            Vector2[] points = new Vector2[normalized.Count];
+            for (int i = 0; i < normalized.Count; i++) {
+                CollisionPointDefinition point = normalized[i];
+                points[i] = new Vector2((point.X - 0.5f) * tileSize, (point.Y - 0.5f) * tileSize);
+            }
+
             TileData data = source.GetTileData(Vector2I.Zero, 0);
-            float half = tileSize / 2f;
-            Vector2[] square = {
-                new Vector2(-half, -half),
-                new Vector2(half, -half),
-                new Vector2(half, half),
-                new Vector2(-half, half),
-            };
             data.AddCollisionPolygon(0);
-            data.SetCollisionPolygonPoints(0, 0, square);
+            data.SetCollisionPolygonPoints(0, 0, points);
         }
 
         /// <summary>

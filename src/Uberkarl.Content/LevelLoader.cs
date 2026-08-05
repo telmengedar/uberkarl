@@ -15,7 +15,8 @@ public static class LevelLoader
 
         var tileSet = LevelContentSerializer.ReadTileSet(Resolve(resolver, level.TileSet, "tile set"));
         var graphics = ResolveGraphics(resolver, tileSet);
-        var collidingTileIds = CollectCollidingTileIds(tileSet);
+        var tileCollisionShapes = ResolveCollisionShapes(tileSet);
+        var collidingTileIds = CollectCollidingTileIds(tileCollisionShapes);
         var animations = ResolveAnimations(resolver, tileSet, graphics);
         var terrainSets = ResolveTerrainSets(tileSet);
         var declaredTerrainIds = CollectDeclaredTerrainIds(terrainSets);
@@ -47,6 +48,7 @@ public static class LevelLoader
             Layers = layers,
             TileGraphics = graphics,
             CollidingTileIds = collidingTileIds,
+            TileCollisionShapes = tileCollisionShapes,
             TileAnimations = animations,
             TerrainSets = terrainSets,
             TileTerrains = tileTerrains,
@@ -87,13 +89,55 @@ public static class LevelLoader
             throw new LevelContentException($"Level dimensions must be positive but were {level.Width}x{level.Height}.");
     }
 
-    private static HashSet<int> CollectCollidingTileIds(TileSetDefinition tileSet)
+    /// <summary>
+    /// Resolves every declared tile's collision shape (DiVoid #7551 Phase 4, design #7580), validating it
+    /// as it goes: a <see cref="CollisionShapeKind.Rect"/> must have a positive width and height, a
+    /// <see cref="CollisionShapeKind.Polygon"/> must declare at least three points, and a
+    /// <see cref="CollisionShapeKind.Preset"/> must name a preset — a degenerate shape fails typed
+    /// (design #7580 §8's "fails typed... if a collision polygon is degenerate") rather than reaching
+    /// <c>TileSetBuilder</c> and building a broken or empty Godot collision polygon.
+    /// </summary>
+    private static Dictionary<int, CollisionShapeDefinition> ResolveCollisionShapes(TileSetDefinition tileSet)
     {
-        var colliding = new HashSet<int>();
+        var shapes = new Dictionary<int, CollisionShapeDefinition>(tileSet.Tiles.Count);
         foreach (var tile in tileSet.Tiles)
         {
-            if (tile.Collides)
-                colliding.Add(tile.Id);
+            ValidateCollisionShape(tile);
+            shapes[tile.Id] = tile.CollisionShape;
+        }
+
+        return shapes;
+    }
+
+    private static void ValidateCollisionShape(TileDefinition tile)
+    {
+        var shape = tile.CollisionShape;
+        switch (shape.Kind)
+        {
+            case CollisionShapeKind.Rect:
+                if (shape.RectWidth <= 0 || shape.RectHeight <= 0)
+                    throw new LevelContentException(
+                        $"Tile {tile.Id} has a rect collision shape with non-positive size ({shape.RectWidth}x{shape.RectHeight}).");
+                break;
+            case CollisionShapeKind.Polygon:
+                if (shape.Points.Count < 3)
+                    throw new LevelContentException(
+                        $"Tile {tile.Id} has a polygon collision shape with only {shape.Points.Count} point(s); at least 3 are required.");
+                break;
+            case CollisionShapeKind.Preset:
+                if (shape.Preset is null)
+                    throw new LevelContentException($"Tile {tile.Id} has a preset collision shape that names no preset.");
+                break;
+        }
+    }
+
+    private static HashSet<int> CollectCollidingTileIds(IReadOnlyDictionary<int, CollisionShapeDefinition> tileCollisionShapes)
+    {
+        var colliding = new HashSet<int>();
+        foreach (var (tileId, shape) in tileCollisionShapes)
+        {
+            if (shape.Kind != CollisionShapeKind.None)
+                colliding.Add(tileId);
         }
 
         return colliding;

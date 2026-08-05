@@ -91,7 +91,7 @@ public sealed class TerrainAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = tileSet.AddTerrain(setId, "Earth");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(tileId, terrainId);
         tileSet.SetTilePeeringBits(tileId, TerrainPeering.All);
 
@@ -111,7 +111,7 @@ public sealed class TerrainAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = tileSet.AddTerrain(setId, "Earth");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(tileId, terrainId);
 
         tileSet.RemoveTerrain(setId, terrainId);
@@ -123,7 +123,7 @@ public sealed class TerrainAuthoringTests
     public void SetTileTerrain_ToUndeclaredTerrainId_IsNoOp()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         var happened = tileSet.SetTileTerrain(tileId, 999);
 
@@ -140,7 +140,7 @@ public sealed class TerrainAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = tileSet.AddTerrain(setId, "Earth");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(tileId, terrainId);
         tileSet.SetTilePeeringBits(tileId, TerrainPeering.All);
 
@@ -157,7 +157,7 @@ public sealed class TerrainAuthoringTests
     public void SetTilePeeringBits_OnAPlainTile_IsNoOp()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         var happened = tileSet.SetTilePeeringBits(tileId, TerrainPeering.North);
 
@@ -168,16 +168,16 @@ public sealed class TerrainAuthoringTests
     public void AddTile_ThenRename_PreservesTerrainMembership()
     {
         // Regression guard mirroring the animation fields' preservation across the tile's every other
-        // mutation (RenameTile/SetTileCollides/AddFrame/etc all thread Terrain/PeeringBits through).
+        // mutation (RenameTile/SetTileCollisionShape/AddFrame/etc all thread Terrain/PeeringBits through).
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = tileSet.AddTerrain(setId, "Earth");
-        var tileId = tileSet.AddTile(Png("A"), collides: false);
+        var tileId = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.SetTileTerrain(tileId, terrainId);
         tileSet.SetTilePeeringBits(tileId, TerrainPeering.All);
 
         tileSet.RenameTile(tileId, "Earth Interior");
-        tileSet.SetTileCollides(tileId, true);
+        tileSet.SetTileCollisionShape(tileId, Uberkarl.Content.CollisionShapeDefinition.Full);
 
         Assert.Multiple(() =>
         {
@@ -208,7 +208,7 @@ public sealed class TerrainAuthoringTests
         var session = new TileSetEditSession(tileSet);
         var setId = session.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         var terrainId = session.AddTerrain(setId, "Earth");
-        var tileId = session.AddTile(Png("A"), collides: false);
+        var tileId = session.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         session.SetTileTerrain(tileId, terrainId);
 
         var happened = session.SetTilePeeringBits(tileId, TerrainPeering.North | TerrainPeering.South);
@@ -408,7 +408,7 @@ public sealed class TerrainAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Ground Set");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.Sides);
         var terrainId = tileSet.AddTerrain(setId, "Earth", "#8a5c34");
-        var tileId = tileSet.AddTile(Png("EARTH"), collides: true);
+        var tileId = tileSet.AddTile(Png("EARTH"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full);
         tileSet.SetTileTerrain(tileId, terrainId);
         tileSet.SetTilePeeringBits(tileId, TerrainPeering.All);
 
@@ -474,7 +474,7 @@ public sealed class TerrainAuthoringTests
 
     private static IReadOnlyList<EditableTile> Palette() => new[]
     {
-        new EditableTile(1, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), collides: true),
+        new EditableTile(1, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full),
     };
 
     private static EditableLevel SampleLevel()
@@ -497,8 +497,8 @@ public sealed class TerrainAuthoringTests
         var tileSet = EditableTileSet.CreateBlank("Untitled");
         var setId = tileSet.AddTerrainSet("Ground", TerrainMatchMode.CornersAndSides);
         terrainId = tileSet.AddTerrain(setId, "Earth", "#8a5c34");
-        tileSet.AddTile(Encoding.UTF8.GetBytes("GRASS-PNG"), collides: true, name: "grass"); // id 1
-        var earthTileId = tileSet.AddTile(Encoding.UTF8.GetBytes("EARTH-PNG"), collides: true, name: "earth"); // id 2
+        tileSet.AddTile(Encoding.UTF8.GetBytes("GRASS-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full, name: "grass"); // id 1
+        var earthTileId = tileSet.AddTile(Encoding.UTF8.GetBytes("EARTH-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full, name: "earth"); // id 2
         tileSet.SetTileTerrain(earthTileId, terrainId);
         tileSet.SetTilePeeringBits(earthTileId, TerrainPeering.All);
 

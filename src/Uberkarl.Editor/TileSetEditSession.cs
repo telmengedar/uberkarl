@@ -5,7 +5,7 @@ namespace Uberkarl.Editor;
 /// <summary>
 /// The façade the <c>TileSetEditor</c> UI drives (DiVoid #7551 Phase 1b) — the counterpart to
 /// <see cref="LevelEditSession"/> but for a shared <see cref="EditableTileSet"/>. Exposes add/remove/
-/// rename/set-collides as intent-level calls and the attach/save surface that namespaces the tile set's
+/// rename/set-collision-shape as intent-level calls and the attach/save surface that namespaces the tile set's
 /// resources the first time it is actually persisted. Tile edits are not on an undo stack this increment
 /// (mirrors the layer-management panel's own operations, which are likewise not undoable — only cell
 /// paint/erase is) — a destructive op (remove) requires the caller to gate it behind a confirm press, the
@@ -25,9 +25,9 @@ public sealed class TileSetEditSession
     public bool IsDirty { get; private set; }
 
     /// <summary>Imports a graphic as a new simple tile. Returns the new tile's id.</summary>
-    public int AddTile(byte[] graphic, bool collides, string? name = null)
+    public int AddTile(byte[] graphic, Content.CollisionShapeDefinition collisionShape, string? name = null)
     {
-        var id = TileSet.AddTile(graphic, collides, name);
+        var id = TileSet.AddTile(graphic, collisionShape, name);
         IsDirty = true;
         return id;
     }
@@ -50,10 +50,10 @@ public sealed class TileSetEditSession
         return happened;
     }
 
-    /// <summary>Sets whether the tile with <paramref name="id"/> is solid. No-op when unchanged.</summary>
-    public bool SetTileCollides(int id, bool collides)
+    /// <summary>Sets the collision shape of the tile with <paramref name="id"/> (DiVoid #7551 Phase 4). No-op when unchanged.</summary>
+    public bool SetTileCollisionShape(int id, Content.CollisionShapeDefinition collisionShape)
     {
-        var happened = TileSet.SetTileCollides(id, collides);
+        var happened = TileSet.SetTileCollisionShape(id, collisionShape);
         if (happened)
             IsDirty = true;
         return happened;

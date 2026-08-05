@@ -23,8 +23,8 @@ public sealed class TileSetAuthoringTests
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
 
-        var first = tileSet.AddTile(Png("A"), collides: true);
-        var second = tileSet.AddTile(Png("B"), collides: false);
+        var first = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full);
+        var second = tileSet.AddTile(Png("B"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         Assert.Multiple(() =>
         {
@@ -37,10 +37,10 @@ public sealed class TileSetAuthoringTests
     [Test]
     public void AddTile_ContinuesPastTheHighestExistingId_WhenSeededWithInitialTiles()
     {
-        var seed = new[] { new EditableTile(1, ResourcePath.Create("graphics/x/1.png"), Png("A"), true), new EditableTile(5, ResourcePath.Create("graphics/x/5.png"), Png("B"), false) };
+        var seed = new[] { new EditableTile(1, ResourcePath.Create("graphics/x/1.png"), Png("A"), Uberkarl.Content.CollisionShapeDefinition.Full), new EditableTile(5, ResourcePath.Create("graphics/x/5.png"), Png("B"), Uberkarl.Content.CollisionShapeDefinition.None) };
         var tileSet = EditableTileSet.CreateBlank("Untitled", seed);
 
-        var id = tileSet.AddTile(Png("C"), collides: true);
+        var id = tileSet.AddTile(Png("C"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full);
 
         Assert.That(id, Is.EqualTo(6), "the next id must be past the HIGHEST existing id, not the count.");
     }
@@ -49,7 +49,7 @@ public sealed class TileSetAuthoringTests
     public void AddTile_RejectsEmptyGraphic()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        Assert.Throws<ArgumentException>(() => tileSet.AddTile(Array.Empty<byte>(), collides: false));
+        Assert.Throws<ArgumentException>(() => tileSet.AddTile(Array.Empty<byte>(), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None));
     }
 
     [Test]
@@ -57,7 +57,7 @@ public sealed class TileSetAuthoringTests
     {
         var tileSet = EditableTileSet.CreateBlank("Forest Set");
 
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         Assert.That(tileSet.Tiles[0].GraphicPath, Is.EqualTo(TileSetResourcePaths.GraphicPath("forest-set", id)));
     }
@@ -68,7 +68,7 @@ public sealed class TileSetAuthoringTests
     public void RemoveTile_DropsTheTile_ReturnsTrue()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         var happened = tileSet.RemoveTile(id);
 
@@ -93,11 +93,11 @@ public sealed class TileSetAuthoringTests
         // Design #7580 §11 risk: a stale reference to a removed tile id must never silently alias onto a
         // DIFFERENT, later-added tile.
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var first = tileSet.AddTile(Png("A"), collides: false);
-        var second = tileSet.AddTile(Png("B"), collides: false);
+        var first = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
+        var second = tileSet.AddTile(Png("B"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.RemoveTile(second);
 
-        var third = tileSet.AddTile(Png("C"), collides: false);
+        var third = tileSet.AddTile(Png("C"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         Assert.That(third, Is.Not.EqualTo(second), "a removed id must never be reissued.");
         Assert.That(third, Is.EqualTo(3));
@@ -109,13 +109,13 @@ public sealed class TileSetAuthoringTests
         });
     }
 
-    // ----- RenameTile / SetTileCollides -----
+    // ----- RenameTile / SetTileCollisionShape -----
 
     [Test]
     public void RenameTile_SetsTheName_ReturnsTrue()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         var happened = tileSet.RenameTile(id, "Grass");
 
@@ -130,7 +130,7 @@ public sealed class TileSetAuthoringTests
     public void RenameTile_BlankName_NormalizesToNull()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.RenameTile(id, "Grass");
 
         tileSet.RenameTile(id, "   ");
@@ -146,20 +146,50 @@ public sealed class TileSetAuthoringTests
     }
 
     [Test]
-    public void SetTileCollides_TogglesTheFlag_NoOpWhenUnchanged()
+    public void SetTileCollisionShape_ChangesTheShape_NoOpWhenUnchanged()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
-        var changed = tileSet.SetTileCollides(id, true);
-        var noOp = tileSet.SetTileCollides(id, true);
+        var changed = tileSet.SetTileCollisionShape(id, Uberkarl.Content.CollisionShapeDefinition.Full);
+        var noOp = tileSet.SetTileCollisionShape(id, Uberkarl.Content.CollisionShapeDefinition.Full);
 
         Assert.Multiple(() =>
         {
             Assert.That(changed, Is.True);
             Assert.That(noOp, Is.False);
-            Assert.That(tileSet.Tiles[0].Collides, Is.True);
+            Assert.That(tileSet.Tiles[0].CollisionShape.Kind, Is.EqualTo(Uberkarl.Content.CollisionShapeKind.Full));
         });
+    }
+
+    [Test]
+    public void SetTileCollisionShape_ToAPreset_NoOpWhenTheSamePresetIsSetAgain_ButChangesForADifferentPreset()
+    {
+        // DiVoid #7551 Phase 4: presets carry data beyond Kind (which named preset), so the no-op check
+        // must compare the preset itself, not just Kind — this is exactly what TileSetEditor's cycle button
+        // relies on to detect "wrapped back to the same shape."
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
+
+        var changed = tileSet.SetTileCollisionShape(id, Uberkarl.Content.CollisionShapeDefinition.FromPreset(Uberkarl.Content.CollisionPreset.SlopeLeft));
+        var noOp = tileSet.SetTileCollisionShape(id, Uberkarl.Content.CollisionShapeDefinition.FromPreset(Uberkarl.Content.CollisionPreset.SlopeLeft));
+        var changedAgain = tileSet.SetTileCollisionShape(id, Uberkarl.Content.CollisionShapeDefinition.FromPreset(Uberkarl.Content.CollisionPreset.SlopeRight));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(changed, Is.True);
+            Assert.That(noOp, Is.False);
+            Assert.That(changedAgain, Is.True);
+            Assert.That(tileSet.Tiles[0].CollisionShape.Preset, Is.EqualTo(Uberkarl.Content.CollisionPreset.SlopeRight));
+        });
+    }
+
+    [Test]
+    public void SetTileCollisionShape_UnknownTileId_IsNoOp_ReturnsFalse()
+    {
+        var tileSet = EditableTileSet.CreateBlank("Untitled");
+
+        Assert.That(tileSet.SetTileCollisionShape(99, Uberkarl.Content.CollisionShapeDefinition.Full), Is.False);
     }
 
     // ----- Rename (the tile set's own display name) -----
@@ -186,7 +216,7 @@ public sealed class TileSetAuthoringTests
         var session = new TileSetEditSession(EditableTileSet.CreateBlank("Untitled"));
         Assert.That(session.IsDirty, Is.False);
 
-        session.AddTile(Png("A"), collides: false);
+        session.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         Assert.That(session.IsDirty, Is.True);
     }
@@ -209,7 +239,7 @@ public sealed class TileSetAuthoringTests
     public void Session_MarkSaved_ThenMarkDirty_RoundTrips()
     {
         var session = new TileSetEditSession(EditableTileSet.CreateBlank("Untitled"));
-        session.AddTile(Png("A"), collides: false);
+        session.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         session.MarkSaved();
         Assert.That(session.IsDirty, Is.False);
@@ -226,7 +256,7 @@ public sealed class TileSetAuthoringTests
     public void NewTile_IsNotAnimated()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         Assert.That(tileSet.Tiles.First(tile => tile.Id == id).IsAnimated, Is.False);
     }
@@ -235,7 +265,7 @@ public sealed class TileSetAuthoringTests
     public void AddFrame_ToASimpleTile_MakesItAnimated_TheSimpleToAnimatedTransition()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         var happened = tileSet.AddFrame(id, Png("B"));
 
@@ -254,7 +284,7 @@ public sealed class TileSetAuthoringTests
     public void AddFrame_Twice_KeepsFramesInAppendOrder()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         tileSet.AddFrame(id, Png("B"));
         tileSet.AddFrame(id, Png("C"));
@@ -279,7 +309,7 @@ public sealed class TileSetAuthoringTests
     public void AddFrame_RejectsEmptyGraphic()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         Assert.Throws<ArgumentException>(() => tileSet.AddFrame(id, Array.Empty<byte>()));
     }
 
@@ -287,7 +317,7 @@ public sealed class TileSetAuthoringTests
     public void AddFrame_SetsAProvisionalFramePath_DistinctFromTheGraphicPath()
     {
         var tileSet = EditableTileSet.CreateBlank("Forest Set");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         tileSet.AddFrame(id, Png("B"));
 
@@ -303,7 +333,7 @@ public sealed class TileSetAuthoringTests
     public void RemoveFrame_DropsExactlyThatFrame_KeepsOthers()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.AddFrame(id, Png("B"));
         tileSet.AddFrame(id, Png("C"));
 
@@ -322,7 +352,7 @@ public sealed class TileSetAuthoringTests
     public void RemoveFrame_TheOnlyFrame_MakesTheTileSimpleAgain_TheAnimatedToSimpleTransition()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.AddFrame(id, Png("B"));
 
         var happened = tileSet.RemoveFrame(id, 0);
@@ -348,7 +378,7 @@ public sealed class TileSetAuthoringTests
     public void RemoveFrame_OutOfRangeIndex_IsNoOp_ReturnsFalse()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.AddFrame(id, Png("B"));
 
         Assert.Multiple(() =>
@@ -362,7 +392,7 @@ public sealed class TileSetAuthoringTests
     public void SetAnimationSpeed_ChangesTheSpeed_NoOpWhenUnchanged()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         var changed = tileSet.SetAnimationSpeed(id, 12.0);
         var noOp = tileSet.SetAnimationSpeed(id, 12.0);
@@ -379,7 +409,7 @@ public sealed class TileSetAuthoringTests
     public void SetAnimationSpeed_NonPositive_Throws()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
 
         Assert.Throws<ArgumentException>(() => tileSet.SetAnimationSpeed(id, 0));
     }
@@ -395,7 +425,7 @@ public sealed class TileSetAuthoringTests
     public void Attach_RemapsFramePaths_ToTheTileSetsOwnNamespace()
     {
         var tileSet = EditableTileSet.CreateBlank("Untitled");
-        var id = tileSet.AddTile(Png("A"), collides: false);
+        var id = tileSet.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         tileSet.AddFrame(id, Png("B"));
         tileSet.AddFrame(id, Png("C"));
 
@@ -416,7 +446,7 @@ public sealed class TileSetAuthoringTests
     public void Session_AddFrame_MarksDirty()
     {
         var session = new TileSetEditSession(EditableTileSet.CreateBlank("Untitled"));
-        var id = session.AddTile(Png("A"), collides: false);
+        var id = session.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         session.MarkSaved();
 
         var happened = session.AddFrame(id, Png("B"));
@@ -447,7 +477,7 @@ public sealed class TileSetAuthoringTests
     public void Session_SetAnimationSpeed_MarksDirty()
     {
         var session = new TileSetEditSession(EditableTileSet.CreateBlank("Untitled"));
-        var id = session.AddTile(Png("A"), collides: false);
+        var id = session.AddTile(Png("A"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None);
         session.MarkSaved();
 
         var happened = session.SetAnimationSpeed(id, 16.0);
