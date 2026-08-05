@@ -75,6 +75,11 @@ namespace Uberkarl {
         int tileSize;
         bool hasLevelScript;
 
+        // The world position a died player is sent back to (DiVoid #7743 death -> respawn). Resolved once,
+        // in Configure, via the SAME lookup the initial spawn used (PlayRuntimeBuilder.SpawnWorldPosition) --
+        // "respawn" is deliberately just "go back to where you started", not a separate spawn-cell concept.
+        Vector2 respawnPosition;
+
         readonly Dictionary<string, BehaviorSubject> subjectsById = new Dictionary<string, BehaviorSubject>();
         readonly List<ScriptedTile> scriptedTiles = new List<ScriptedTile>();
         readonly List<ScriptedTrigger> scriptedTriggers = new List<ScriptedTrigger>();
@@ -113,6 +118,8 @@ namespace Uberkarl {
                 throw new ArgumentNullException(nameof(level));
             player = spawnedPlayer ?? throw new ArgumentNullException(nameof(spawnedPlayer));
             tileSize = level.TileSize;
+            respawnPosition = PlayRuntimeBuilder.SpawnWorldPosition(level);
+            player.Died += OnPlayerDied;
 
             watchdog = new BehaviorWatchdog(WatchdogBudget);
             loader = new BehaviorLoader(watchdog);
@@ -264,6 +271,15 @@ namespace Uberkarl {
                 playerFacade.State[intent.Key] = intent.Value;
             else if (subjectsById.TryGetValue(intent.SubjectId, out BehaviorSubject subject))
                 subject.SeedState(intent.Key, intent.Value);
+        }
+
+        // Death -> respawn (DiVoid #7743, design #7704 §15 Q-4): built-in and minimal for now -- no
+        // lives/game-over, just straight back to the level's spawn cell at full health. The future
+        // data-driven path (noted, not built here) is a scriptable `onDeath` facade hook so a level script
+        // could override this -- Player.Died is the seam that hook would sit behind.
+        void OnPlayerDied() {
+            GD.Print("BehaviorRuntime: player died, respawning at level spawn.");
+            player.Respawn(respawnPosition);
         }
 
         // "Logged once" falls out of BehaviorScheduler's own state machine (design #7704 §8.3) -- this is

@@ -29,9 +29,10 @@ namespace Uberkarl {
         static readonly Vector2I FallbackStart = new Vector2I(1, 1);
 
         /// <summary>
-        /// Adds the level's background fill, tile layers, player, following camera, and behavior runtime
-        /// (DiVoid #7738 -- scripted tiles/area triggers/level script, via <see cref="BehaviorRuntime"/>) as
-        /// children of <paramref name="root"/>. Returns the spawned <see cref="Player"/>.
+        /// Adds the level's background fill, tile layers, player, following camera, behavior runtime
+        /// (DiVoid #7738 -- scripted tiles/area triggers/level script, via <see cref="BehaviorRuntime"/>),
+        /// and health HUD (DiVoid #7743, via <see cref="PlayerHud"/>) as children of <paramref name="root"/>.
+        /// Returns the spawned <see cref="Player"/>.
         /// </summary>
         public static Player Populate(Node2D root, ResolvedLevel level) {
             AddBackgroundFill(root, level);
@@ -39,7 +40,24 @@ namespace Uberkarl {
             Player player = SpawnPlayer(root, level);
             AttachCamera(player, level);
             AttachBehaviorRuntime(root, level, player);
+            AttachHud(root, player);
             return player;
+        }
+
+        /// <summary>The world-pixel position a freshly-spawned or respawned player belongs at for
+        /// <paramref name="level"/> -- <see cref="ResolvedLevel.DefaultSpawnPosition"/> when the level
+        /// declares one, else <see cref="FallbackStart"/>. Shared by <see cref="SpawnPlayer"/> (initial
+        /// spawn) and <see cref="BehaviorRuntime"/> (DiVoid #7743 death -&gt; respawn) so both resolve the
+        /// same cell the same way -- respawn is deliberately "go back to where you started", not a distinct
+        /// lookup.</summary>
+        public static Vector2 SpawnWorldPosition(ResolvedLevel level) {
+            Vector2I start = level.DefaultSpawnPosition is { } cell
+                ? new Vector2I(cell.X, cell.Y)
+                : FallbackStart;
+
+            // Centre horizontally in the cell; sit near the top of the cell so gravity settles the body
+            // onto whatever solid tile is below it (proving gravity + collision).
+            return new Vector2(start.X * level.TileSize + level.TileSize / 2f, start.Y * level.TileSize);
         }
 
         // The behavior runtime is a plain child node added last, after the player exists (DiVoid #7738,
@@ -50,6 +68,15 @@ namespace Uberkarl {
             BehaviorRuntime runtime = new BehaviorRuntime { Name = "BehaviorRuntime" };
             root.AddChild(runtime);
             runtime.Configure(level, player);
+        }
+
+        // Same "shared builder, both callers get it identically" reasoning as the behavior runtime above
+        // (DiVoid #7743) -- the HUD is what makes hurt/heal intents actually observable during a playtest,
+        // not just a spike silently decrementing an invisible number.
+        static void AttachHud(Node2D root, Player player) {
+            PlayerHud hud = new PlayerHud { Name = "PlayerHud" };
+            root.AddChild(hud);
+            hud.Configure(player);
         }
 
         // Renders the level's optional solid background fill behind every layer. A full-rect ColorRect
@@ -75,15 +102,9 @@ namespace Uberkarl {
         }
 
         static Player SpawnPlayer(Node2D root, ResolvedLevel level) {
-            Vector2I start = level.DefaultSpawnPosition is { } cell
-                ? new Vector2I(cell.X, cell.Y)
-                : FallbackStart;
-
             Player player = new Player {
                 Name = "Player",
-                // Centre horizontally in the cell; sit near the top of the cell so gravity settles
-                // the body onto whatever solid tile is below it (proving gravity + collision).
-                Position = new Vector2(start.X * level.TileSize + level.TileSize / 2f, start.Y * level.TileSize),
+                Position = SpawnWorldPosition(level),
             };
             root.AddChild(player);
             return player;
