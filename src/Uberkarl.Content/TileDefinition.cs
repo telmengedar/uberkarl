@@ -26,13 +26,16 @@ public sealed class TileDefinition
     public ResourceReference Graphic { get; init; }
 
     /// <summary>
-    /// Whether this tile is solid. Collision is a property of the tile, but it is only
-    /// enforced when the tile is placed on a layer whose <see cref="LayerDefinition.Collision"/> is true.
-    /// Per-frame collision is not a thing — an animated tile's collision is stable across all its frames
-    /// (design #7580 §11 — "an animated tile's collision must be stable across frames; frames are visual
-    /// only").
+    /// This tile's collision footprint (DiVoid #7551 Phase 4, design #7580 §7) — replaces the old
+    /// <c>Collides</c> boolean (which only ever expressed "the whole tile" or "nothing"). Collision is a
+    /// property of the tile, but it is only enforced when the tile is placed on a layer whose
+    /// <see cref="LayerDefinition.Collision"/> is true. Per-frame collision is not a thing — an animated
+    /// tile's collision is stable across all its frames (design #7580 §11 — "an animated tile's collision
+    /// must be stable across frames; frames are visual only"). Defaults to
+    /// <see cref="CollisionShapeDefinition.None"/> (no collision), matching the old bool's default of
+    /// <c>false</c>. See <see cref="CollisionShapeResolver"/> for turning this into concrete polygon points.
     /// </summary>
-    public bool Collides { get; init; }
+    public CollisionShapeDefinition CollisionShape { get; init; } = CollisionShapeDefinition.None;
 
     /// <summary>
     /// Ordered animation frames AFTER <see cref="Graphic"/> (which is always frame 0). Empty/omitted for a

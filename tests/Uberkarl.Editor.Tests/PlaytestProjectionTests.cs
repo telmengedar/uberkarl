@@ -108,7 +108,7 @@ public sealed class PlaytestProjectionTests
         var frame0 = Encoding.UTF8.GetBytes("GRASS-PNG");
         var frame1 = Encoding.UTF8.GetBytes("FRAME-2");
         var animatedGrass = new EditableTile(
-            1, GrassPath, frame0, collides: true, name: null,
+            1, GrassPath, frame0, collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full, name: null,
             frames: new[] { new EditableTileFrame(ResourcePath.Create("tiles/grass-2.png"), frame1) },
             animationSpeed: 12.0);
         var cells = new int[Width * Height];
@@ -192,8 +192,8 @@ public sealed class PlaytestProjectionTests
 
     private static IReadOnlyList<EditableTile> Palette() => new[]
     {
-        new EditableTile(1, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), collides: true),
-        new EditableTile(5, WaterPath, Encoding.UTF8.GetBytes("WATER-PNG"), collides: false),
+        new EditableTile(1, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full),
+        new EditableTile(5, WaterPath, Encoding.UTF8.GetBytes("WATER-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None),
     };
 
     private static EditableLevel SampleLevel()
@@ -219,9 +219,9 @@ public sealed class PlaytestProjectionTests
 
         var tiles = new[]
         {
-            new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), Collides = true },
-            new TileDefinition { Id = 2, Graphic = ResourceReference.ToSelf(DirtPath), Collides = true },
-            new TileDefinition { Id = 5, Graphic = ResourceReference.ToSelf(WaterPath), Collides = false },
+            new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.Full },
+            new TileDefinition { Id = 2, Graphic = ResourceReference.ToSelf(DirtPath), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.Full },
+            new TileDefinition { Id = 5, Graphic = ResourceReference.ToSelf(WaterPath), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.None },
         };
         var tileSet = new TileSetDefinition { Tiles = tiles };
 

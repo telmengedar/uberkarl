@@ -8,8 +8,8 @@ using Uberkarl.Editor;
 namespace Uberkarl {
 
     /// <summary>
-    /// The summoned, gamepad-first tile set authoring surface (DiVoid #7551 Phase 1b/2, design #7580):
-    /// add/remove/rename simple tiles, toggle full-tile collision, and import a graphic via Godot's
+    /// The summoned, gamepad-first tile set authoring surface (DiVoid #7551 Phase 1b/2/4, design #7580):
+    /// add/remove/rename simple tiles, cycle a tile's collision shape, and import a graphic via Godot's
     /// standard <see cref="FileDialog"/>. Reuses <see cref="LayerManagerPanel"/>'s scaffolding verbatim —
     /// full-rect dim backdrop, centered panel, 2D <see cref="FocusGrid"/> row layout, grab-focus-on-summon,
     /// <c>ui_cancel</c> closes — and the same "panel calls the session directly, then rebuilds its own rows
@@ -38,6 +38,14 @@ namespace Uberkarl {
     /// N/NE/E/SE/S/SW/W/NW around the tile) so the author declares which neighbours must share this terrain
     /// for Godot to pick this specific variant — no presets yet, every bit is hand-toggled, but it is the
     /// real mechanism <c>TileSetBuilder</c> reads, not a placeholder.
+    ///
+    /// <b>Collision shape</b> (DiVoid #7551 Phase 4, design #7580): each tile row's collision cell is a
+    /// single cycle button stepping through <see cref="CollisionShapeCycle"/> — None → Full → Top Half →
+    /// Bottom Half → Left Half → Right Half → Slope Left → Slope Right → back to None — mirroring the
+    /// "Assign Terrain"/matching-mode cycle buttons elsewhere in this panel rather than a toggle. A
+    /// freeform gamepad polygon editor is explicitly OUT of scope this phase (design #7580 Phase 4 — "DO
+    /// NOT build a freeform gamepad polygon editor now"); the underlying model already supports an
+    /// arbitrary <see cref="Content.CollisionShapeKind.Polygon"/> for a future mouse/sprite-editor era.
     /// </summary>
     public partial class TileSetEditor : Control {
 
@@ -75,10 +83,25 @@ namespace Uberkarl {
             "#8a5c34", "#4ea842", "#82828a", "#4a7ad2", "#be4a3c", "#c9a227", "#3ca7a0", "#a04ec0",
         };
 
+        // DiVoid #7551 Phase 4 (design #7580): the fixed cycle a tile's collision cell steps through on
+        // press. None/Full first (the pre-Phase-4 pair, so the common cases stay a single press away),
+        // then the four half-tiles, then the two slopes. Deliberately NOT a freeform polygon editor — see
+        // class doc.
+        static readonly (Content.CollisionShapeDefinition Shape, string Label)[] CollisionShapeCycle = {
+            (Content.CollisionShapeDefinition.None, "None"),
+            (Content.CollisionShapeDefinition.Full, "Full"),
+            (Content.CollisionShapeDefinition.FromPreset(Content.CollisionPreset.TopHalf), "Top Half"),
+            (Content.CollisionShapeDefinition.FromPreset(Content.CollisionPreset.BottomHalf), "Bottom Half"),
+            (Content.CollisionShapeDefinition.FromPreset(Content.CollisionPreset.LeftHalf), "Left Half"),
+            (Content.CollisionShapeDefinition.FromPreset(Content.CollisionPreset.RightHalf), "Right Half"),
+            (Content.CollisionShapeDefinition.FromPreset(Content.CollisionPreset.SlopeLeft), "Slope Left"),
+            (Content.CollisionShapeDefinition.FromPreset(Content.CollisionPreset.SlopeRight), "Slope Right"),
+        };
+
         int lastFocusedRow;
         int lastFocusedCol;
 
-        /// <summary>Raised after any mutation (add/remove/rename/set-collides): "refresh the canvas + palette + status."</summary>
+        /// <summary>Raised after any mutation (add/remove/rename/set-collision-shape): "refresh the canvas + palette + status."</summary>
         public event Action TileSetModelChanged;
 
         /// <summary>Raised when the panel is dismissed (<c>ui_cancel</c>).</summary>
@@ -259,14 +282,10 @@ namespace Uberkarl {
             row.AddChild(header);
             columns.Add(header);
 
-            Button collidesToggle = new Button {
-                Text = tile.Collides ? "Collides: On" : "Collides: Off",
-                ToggleMode = true,
-                ButtonPressed = tile.Collides,
-            };
-            collidesToggle.Pressed += () => OnCollidesPressed(tile.Id, collidesToggle);
-            row.AddChild(collidesToggle);
-            columns.Add(collidesToggle);
+            Button collisionShapeButton = new Button { Text = $"Collision: {CollisionShapeLabel(tile.CollisionShape)}" };
+            collisionShapeButton.Pressed += () => OnCollisionShapePressed(tile.Id);
+            row.AddChild(collisionShapeButton);
+            columns.Add(collisionShapeButton);
 
             // DiVoid #7551 Phase 2: appending a frame is what turns a simple tile animated (structural —
             // design #7580 §7/§10), so this is offered on every tile, not gated behind an "animate" toggle.
@@ -747,7 +766,7 @@ namespace Uberkarl {
             }
 
             if (pendingFrameTileId == -1) {
-                int id = session.AddTile(bytes, collides: false);
+                int id = session.AddTile(bytes, Content.CollisionShapeDefinition.None);
                 GD.Print($"TileSetEditor: imported tile #{id} from '{path}'.");
             } else if (session.AddFrame(pendingFrameTileId, bytes)) {
                 GD.Print($"TileSetEditor: added an animation frame to tile #{pendingFrameTileId} from '{path}'.");
@@ -815,15 +834,43 @@ namespace Uberkarl {
             Rebuild();
         }
 
-        void OnCollidesPressed(int id, Button toggle) {
+        // DiVoid #7551 Phase 4: steps the tile's collision shape to the NEXT entry in CollisionShapeCycle
+        // (wrapping back to None) and commits — a single press-to-cycle button, mirroring
+        // OnAssignTerrainPressed/OnCycleMatchingModePressed rather than the old on/off toggle.
+        void OnCollisionShapePressed(int id) {
             pendingDeleteId = -1;
             pendingRemoveFrameTileId = -1;
             pendingRemoveFrameIndex = -1;
-            if (session.SetTileCollides(id, toggle.ButtonPressed)) {
-                GD.Print($"TileSetEditor: tile #{id} collides set to {toggle.ButtonPressed}.");
+            EditableTile tile = Find(id);
+            if (tile == null)
+                return;
+
+            Content.CollisionShapeDefinition next = CollisionShapeCycle[(CollisionShapeCycleIndex(tile.CollisionShape) + 1) % CollisionShapeCycle.Length].Shape;
+            if (session.SetTileCollisionShape(id, next)) {
+                GD.Print($"TileSetEditor: tile #{id} collision shape set to {CollisionShapeLabel(next)}.");
                 TileSetModelChanged?.Invoke();
             }
             Rebuild();
+        }
+
+        // Finds shape's position in CollisionShapeCycle by Kind (+Preset, when Kind is Preset) — the cycle
+        // never contains a Rect/Polygon entry, so a tile somehow carrying one (only possible via hand-
+        // authored JSON, never via this UI) is treated as index -1 and simply advances to the cycle's first
+        // entry (None) on next press, rather than throwing.
+        static int CollisionShapeCycleIndex(Content.CollisionShapeDefinition shape) {
+            for (int i = 0; i < CollisionShapeCycle.Length; i++) {
+                Content.CollisionShapeDefinition candidate = CollisionShapeCycle[i].Shape;
+                if (candidate.Kind != shape.Kind)
+                    continue;
+                if (candidate.Kind != Content.CollisionShapeKind.Preset || candidate.Preset == shape.Preset)
+                    return i;
+            }
+            return -1;
+        }
+
+        static string CollisionShapeLabel(Content.CollisionShapeDefinition shape) {
+            int index = CollisionShapeCycleIndex(shape);
+            return index >= 0 ? CollisionShapeCycle[index].Label : shape.Kind.ToString();
         }
 
         // Confirm-gated (mirrors LayerManagerPanel.OnDeletePressed): removal is not undoable this

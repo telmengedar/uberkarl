@@ -66,11 +66,11 @@ public sealed class TileSetMigrationTests
         builder.AddResource(ResourceKind.TileGraphic, ResourcePath.Create("tiles/dirt.png"), Encoding.UTF8.GetBytes("DIRT-B"), "image/png");
         builder.AddResource(ResourceKind.TileSet, tileSetA, LevelContentSerializer.WriteTileSet(new TileSetDefinition
         {
-            Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), Collides = true } },
+            Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.Full } },
         }));
         builder.AddResource(ResourceKind.TileSet, tileSetB, LevelContentSerializer.WriteTileSet(new TileSetDefinition
         {
-            Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(ResourcePath.Create("tiles/dirt.png")), Collides = false } },
+            Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(ResourcePath.Create("tiles/dirt.png")), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.None } },
         }));
         builder.AddResource(ResourceKind.Level, ResourcePath.Create("levels/first.json"), LevelContentSerializer.WriteLevel(MinimalLevel(tileSetA)));
         builder.AddResource(ResourceKind.Level, ResourcePath.Create("levels/second.json"), LevelContentSerializer.WriteLevel(MinimalLevel(tileSetB)));
@@ -119,8 +119,8 @@ public sealed class TileSetMigrationTests
         builder.AddResource(ResourceKind.TileGraphic, graphicA, Encoding.UTF8.GetBytes("SOLID-TILE-PNG"), "image/png");
         builder.AddResource(ResourceKind.TileGraphic, graphicB, Encoding.UTF8.GetBytes("SOLID-TILE-PNG"), "image/png");
 
-        var definitionA = new TileSetDefinition { Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(graphicA), Collides = true } } };
-        var definitionB = new TileSetDefinition { Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(graphicB), Collides = true } } };
+        var definitionA = new TileSetDefinition { Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(graphicA), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.Full } } };
+        var definitionB = new TileSetDefinition { Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(graphicB), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.Full } } };
         // definitionA and definitionB reference DIFFERENT per-level-namespaced graphic paths (exactly the
         // real shape: graphics/first/1.png vs graphics/second/1.png), so their serialized JSON is NOT
         // byte-identical — but the graphic BYTES those paths resolve to ARE identical, which is what the

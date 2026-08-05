@@ -18,6 +18,7 @@ public static class EditableLevelSnapshot
 
         var graphics = new Dictionary<int, byte[]>(level.Tiles.Count);
         var colliding = new HashSet<int>();
+        var collisionShapes = new Dictionary<int, CollisionShapeDefinition>(level.Tiles.Count);
         var animations = new Dictionary<int, ResolvedAnimation>();
         var terrainSetIdByTerrainId = level.TerrainSets
             .SelectMany(set => set.Terrains.Select(terrain => (TerrainId: terrain.Id, TerrainSetId: set.Id)))
@@ -26,7 +27,8 @@ public static class EditableLevelSnapshot
         foreach (var tile in level.Tiles)
         {
             graphics[tile.Id] = tile.Graphic;
-            if (tile.Collides)
+            collisionShapes[tile.Id] = tile.CollisionShape;
+            if (tile.CollisionShape.Kind != CollisionShapeKind.None)
                 colliding.Add(tile.Id);
 
             // DiVoid #7551 Phase 2: the live canvas preview must resolve animated tiles the SAME way
@@ -92,6 +94,7 @@ public static class EditableLevelSnapshot
             Layers = layers,
             TileGraphics = graphics,
             CollidingTileIds = colliding,
+            TileCollisionShapes = collisionShapes,
             TileAnimations = animations,
             TerrainSets = terrainSets,
             TileTerrains = tileTerrains,

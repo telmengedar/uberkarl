@@ -658,7 +658,7 @@ namespace Uberkarl {
 
         // ----- tile set editor / bind lifecycle -----
 
-        // The panel mutated tileSetSession directly (add/remove/rename/set-collides a tile, or a graphic
+        // The panel mutated tileSetSession directly (add/remove/rename/set-collision-shape a tile, or a graphic
         // import). Re-sync the level's palette CACHE from the tile set's current live truth (the level
         // does not own the tiles, but it caches them for painting — DiVoid #7551 Phase 1a) and refresh the
         // canvas/palette/status the same way any other model change does.

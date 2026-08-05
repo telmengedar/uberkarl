@@ -379,8 +379,8 @@ public sealed class EditableLevelTests
 
     private static IReadOnlyList<EditableTile> Palette() => new[]
     {
-        new EditableTile(1, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), collides: true),
-        new EditableTile(5, WaterPath, Encoding.UTF8.GetBytes("WATER-PNG"), collides: false),
+        new EditableTile(1, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full),
+        new EditableTile(5, WaterPath, Encoding.UTF8.GetBytes("WATER-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.None),
     };
 
     private static EditableLevel SampleLevel()
@@ -405,9 +405,9 @@ public sealed class EditableLevelTests
 
         var tiles = new[]
         {
-            new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), Collides = true },
-            new TileDefinition { Id = 2, Graphic = ResourceReference.ToSelf(ResourcePath.Create("tiles/dirt.png")), Collides = true },
-            new TileDefinition { Id = 5, Graphic = ResourceReference.ToSelf(WaterPath), Collides = false },
+            new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.Full },
+            new TileDefinition { Id = 2, Graphic = ResourceReference.ToSelf(ResourcePath.Create("tiles/dirt.png")), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.Full },
+            new TileDefinition { Id = 5, Graphic = ResourceReference.ToSelf(WaterPath), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.None },
         };
         var tileSet = new TileSetDefinition { Tiles = tiles };
 

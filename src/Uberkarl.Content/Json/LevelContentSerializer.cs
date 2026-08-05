@@ -44,6 +44,7 @@ public static class LevelContentSerializer
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         };
         options.Converters.Add(new ResourceReferenceJsonConverter());
+        options.Converters.Add(new TileDefinitionJsonConverter());
         return options;
     }
 }

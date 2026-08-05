@@ -5,7 +5,7 @@ namespace Uberkarl.Editor;
 /// <summary>
 /// A single tile in the level's palette as the editor holds it: its numeric id (what a grid cell
 /// stores), the in-package path its graphic lives at, the raw graphic bytes (kept in memory so the
-/// level can be re-saved without a live package handle), and whether it is solid. This is the
+/// level can be re-saved without a live package handle), and its collision footprint. This is the
 /// authoring shape — distinct from <see cref="Content.TileDefinition"/> (which references the graphic
 /// but does not carry its bytes) and from the resolved runtime view.
 /// </summary>
@@ -15,7 +15,7 @@ public sealed class EditableTile
     public const double DefaultAnimationSpeed = Content.TileDefinition.DefaultAnimationSpeed;
 
     public EditableTile(
-        int id, ResourcePath graphicPath, byte[] graphic, bool collides, string? name = null,
+        int id, ResourcePath graphicPath, byte[] graphic, Content.CollisionShapeDefinition collisionShape, string? name = null,
         IReadOnlyList<EditableTileFrame>? frames = null, double animationSpeed = DefaultAnimationSpeed,
         int? terrain = null, Content.TerrainPeering peeringBits = Content.TerrainPeering.None)
     {
@@ -24,7 +24,7 @@ public sealed class EditableTile
         Id = id;
         GraphicPath = graphicPath;
         Graphic = graphic ?? throw new ArgumentNullException(nameof(graphic));
-        Collides = collides;
+        CollisionShape = collisionShape ?? throw new ArgumentNullException(nameof(collisionShape));
         Name = name;
         Frames = frames ?? Array.Empty<EditableTileFrame>();
         AnimationSpeed = animationSpeed;
@@ -44,8 +44,8 @@ public sealed class EditableTile
     /// <summary>The tile graphic bytes (a PNG for the sample content) — frame 0. Held so the tile set round-trips without the source package.</summary>
     public byte[] Graphic { get; }
 
-    /// <summary>Whether the tile is solid. Only enforced on a collision layer at play time. Stable across every animation frame (design #7580 §11).</summary>
-    public bool Collides { get; }
+    /// <summary>The tile's collision footprint (DiVoid #7551 Phase 4). Only enforced on a collision layer at play time. Stable across every animation frame (design #7580 §11).</summary>
+    public Content.CollisionShapeDefinition CollisionShape { get; }
 
     /// <summary>Ordered animation frames AFTER <see cref="Graphic"/> (DiVoid #7551 Phase 2). Empty for a simple tile — see <see cref="IsAnimated"/>.</summary>
     public IReadOnlyList<EditableTileFrame> Frames { get; }

@@ -73,7 +73,7 @@ public static class EditableTileSetReader
                 frames.Add(new EditableTileFrame(frame.Path, package.ReadBytes(frame.Path)));
             }
 
-            tiles.Add(new EditableTile(tile.Id, tile.Graphic.Path, graphicBytes, tile.Collides, tile.Name, frames, tile.AnimationSpeed, tile.Terrain, tile.PeeringBits));
+            tiles.Add(new EditableTile(tile.Id, tile.Graphic.Path, graphicBytes, tile.CollisionShape, tile.Name, frames, tile.AnimationSpeed, tile.Terrain, tile.PeeringBits));
         }
 
         // DiVoid #7551 Phase 3: rehydrate the tile set's terrain sets/terrains from the definition, in

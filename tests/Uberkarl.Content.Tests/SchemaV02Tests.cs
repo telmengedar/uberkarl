@@ -7,9 +7,11 @@ using Uberkarl.Packages;
 namespace Uberkarl.Content.Tests;
 
 /// <summary>
-/// Covers the v0.2 schema: the tile <c>collides</c> flag, the per-layer <c>collision</c> flag
-/// (replacing the v0.1 role enum), and named <c>spawns</c> with a <c>defaultSpawn</c> (replacing
-/// the v0.1 single <c>playerStart</c>).
+/// Covers the v0.2 schema: the tile collision shape (<see cref="TileDefinition.CollisionShape"/> — DiVoid
+/// #7551 Phase 4 replaced the original v0.2 <c>collides</c> bool with this descriptor; see
+/// <c>CollisionShapeMigrationTests</c> for the legacy-bool JSON round-trip), the per-layer <c>collision</c>
+/// flag (replacing the v0.1 role enum), and named <c>spawns</c> with a <c>defaultSpawn</c> (replacing the
+/// v0.1 single <c>playerStart</c>).
 /// </summary>
 [TestFixture]
 public sealed class SchemaV02Tests
@@ -20,13 +22,13 @@ public sealed class SchemaV02Tests
     private static readonly ResourcePath DecorPath = ResourcePath.Create("tiles/decor.png");
 
     [Test]
-    public void TileSet_CollidesFlag_RoundTrips()
+    public void TileSet_CollisionShape_RoundTrips()
     {
         var original = new TileSetDefinition
         {
             Tiles = new[]
             {
-                new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(SolidPath), Collides = true },
+                new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(SolidPath), CollisionShape = CollisionShapeDefinition.Full },
                 new TileDefinition { Id = 2, Graphic = ResourceReference.ToSelf(DecorPath) },
             },
         };
@@ -35,8 +37,8 @@ public sealed class SchemaV02Tests
 
         Assert.Multiple(() =>
         {
-            Assert.That(restored.Tiles[0].Collides, Is.True);
-            Assert.That(restored.Tiles[1].Collides, Is.False, "collides defaults to false when omitted");
+            Assert.That(restored.Tiles[0].CollisionShape.Kind, Is.EqualTo(CollisionShapeKind.Full));
+            Assert.That(restored.Tiles[1].CollisionShape.Kind, Is.EqualTo(CollisionShapeKind.None), "collision shape defaults to None when omitted");
         });
     }
 
@@ -589,7 +591,7 @@ public sealed class SchemaV02Tests
         {
             Tiles = new[]
             {
-                new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(SolidPath), Collides = true },
+                new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(SolidPath), CollisionShape = CollisionShapeDefinition.Full },
                 new TileDefinition { Id = 2, Graphic = ResourceReference.ToSelf(DecorPath) },
             },
         };

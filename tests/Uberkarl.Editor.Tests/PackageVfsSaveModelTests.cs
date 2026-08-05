@@ -531,7 +531,7 @@ public sealed class PackageVfsSaveModelTests
 
     private static IReadOnlyList<EditableTile> Palette() => new[]
     {
-        new EditableTile(1, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), collides: true),
+        new EditableTile(1, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full),
     };
 
     private static LevelDefinition MinimalLevelDefinition() => new()
@@ -545,7 +545,7 @@ public sealed class PackageVfsSaveModelTests
 
     private static TileSetDefinition MinimalTileSetDefinition() => new()
     {
-        Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), Collides = true } },
+        Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), CollisionShape = Uberkarl.Content.CollisionShapeDefinition.Full } },
     };
 
     private static Package ToPackage(PackageBuilder builder)

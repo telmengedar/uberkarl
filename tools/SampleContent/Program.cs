@@ -9,8 +9,10 @@ const int Height = 16;
 
 var outputPath = args.Length > 0 ? args[0] : Path.Combine("content", "sample.pkg");
 
-// Id, file, RGB, and whether the tile is solid (collision is a property of the tile).
-var palette = new (int Id, string File, byte R, byte G, byte B, bool Collides)[]
+// Id, file, RGB, and whether the tile is solid (collision is a property of the tile — a full-tile shape
+// when solid, none otherwise; DiVoid #7551 Phase 4's richer shapes are an authoring-time concern, not
+// needed for this generated sample).
+var palette = new (int Id, string File, byte R, byte G, byte B, bool Solid)[]
 {
     (1, "tiles/grass.png", 78, 168, 66, true),
     (2, "tiles/dirt.png", 138, 92, 52, true),
@@ -32,7 +34,8 @@ foreach (var entry in palette)
     var path = ResourcePath.Create(entry.File);
     var png = PngWriter.Encode(TileSize, TileSize, SolidTile(TileSize, entry.R, entry.G, entry.B));
     builder.AddResource(ResourceKind.TileGraphic, path, png, "image/png");
-    tiles.Add(new TileDefinition { Id = entry.Id, Graphic = ResourceReference.ToSelf(path), Collides = entry.Collides });
+    var collisionShape = entry.Solid ? CollisionShapeDefinition.Full : CollisionShapeDefinition.None;
+    tiles.Add(new TileDefinition { Id = entry.Id, Graphic = ResourceReference.ToSelf(path), CollisionShape = collisionShape });
 }
 
 var tileSet = new TileSetDefinition { Tiles = tiles };

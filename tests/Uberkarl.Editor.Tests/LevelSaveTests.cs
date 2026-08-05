@@ -165,7 +165,7 @@ public sealed class LevelSaveTests
 
     private static IReadOnlyList<EditableTile> Palette() => new[]
     {
-        new EditableTile(1, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), collides: true),
+        new EditableTile(1, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), collisionShape: Uberkarl.Content.CollisionShapeDefinition.Full),
     };
 
     private static EditableLevel SampleLevel()

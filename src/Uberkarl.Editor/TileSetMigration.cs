@@ -13,7 +13,7 @@ namespace Uberkarl.Editor;
 /// redundancy Toni flagged without discarding any level's data or touching a genuinely distinct tile set.
 ///
 /// <b>Scope (content-identical, same package):</b> two tile sets are considered "the same tileset" when
-/// they declare the exact same tiles — same ids, same <see cref="TileDefinition.Collides"/>/<see cref="TileDefinition.Name"/>,
+/// they declare the exact same tiles — same ids, same <see cref="TileDefinition.CollisionShape"/>/<see cref="TileDefinition.Name"/>,
 /// and byte-identical GRAPHIC content per tile (order-independent). This is deliberately content-aware
 /// rather than a raw byte-comparison of the tileset.json payload: the redundancy this fixes is namespaced
 /// PER LEVEL (<c>tilesets/&lt;level-slug&gt;.json</c> referencing <c>graphics/&lt;level-slug&gt;/&lt;id&gt;.png</c>),
@@ -133,9 +133,9 @@ public static class TileSetMigration
     }
 
     // A tile set's render-determining content, order-independent over tiles: per declared tile (sorted by
-    // id) — id, collides, name, and the hash of its graphic's actual bytes (not its path, which is exactly
-    // what differs between two otherwise-identical per-level copies). A cross-package or missing graphic
-    // cannot be content-compared, so it is folded in as an always-distinct marker (never dedups).
+    // id) — id, collision shape, name, and the hash of its graphic's actual bytes (not its path, which is
+    // exactly what differs between two otherwise-identical per-level copies). A cross-package or missing
+    // graphic cannot be content-compared, so it is folded in as an always-distinct marker (never dedups).
     private static string ContentSignature(Package package, TileSetDefinition tileSet)
     {
         var parts = new List<string>(tileSet.Tiles.Count);
@@ -144,11 +144,23 @@ public static class TileSetMigration
             var graphicHash = tile.Graphic.IsSelf && package.Contains(tile.Graphic.Path)
                 ? Convert.ToBase64String(SHA256.HashData(package.ReadBytes(tile.Graphic.Path)))
                 : $"unresolved:{tile.Graphic}";
-            parts.Add($"{tile.Id}|{tile.Collides}|{tile.Name}|{graphicHash}");
+            parts.Add($"{tile.Id}|{CollisionShapeSignature(tile.CollisionShape)}|{tile.Name}|{graphicHash}");
         }
 
         return Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(";", parts))));
     }
+
+    // A stable string signature of a collision shape's render-determining fields (DiVoid #7551 Phase 4) —
+    // CollisionShapeDefinition is a plain class, not a record, so it carries no structural ToString/Equals
+    // of its own; this is deliberately explicit about which fields matter per Kind, mirroring
+    // EditableTileSet.CollisionShapesEqual's own per-Kind comparison.
+    private static string CollisionShapeSignature(CollisionShapeDefinition shape) => shape.Kind switch
+    {
+        CollisionShapeKind.Rect => $"rect:{shape.RectX}:{shape.RectY}:{shape.RectWidth}:{shape.RectHeight}",
+        CollisionShapeKind.Polygon => "polygon:" + string.Join(",", shape.Points.Select(point => $"{point.X}:{point.Y}")),
+        CollisionShapeKind.Preset => $"preset:{shape.Preset}",
+        _ => shape.Kind.ToString(),
+    };
 
     private static LevelDefinition WithTileSet(LevelDefinition source, ResourceReference tileSet) => new()
     {
