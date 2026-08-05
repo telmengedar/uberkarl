@@ -34,7 +34,7 @@ namespace Uberkarl {
                     CollisionEnabled = layer.Collision,
                 };
                 FillLayer(mapLayer, layer, level, shared.SourceByTile);
-                ConnectTerrain(mapLayer, layer, level, shared.TerrainIndexByTerrainId);
+                ConnectTerrain(mapLayer, layer, level, shared.TerrainIndexByTerrainId, shared.SourceByTile);
                 root.AddChild(WrapForScroll(mapLayer, layer, contentSize));
             }
 
@@ -61,7 +61,7 @@ namespace Uberkarl {
                     CollisionEnabled = false,
                 };
                 FillLayer(mapLayer, layer, level, shared.SourceByTile);
-                ConnectTerrain(mapLayer, layer, level, shared.TerrainIndexByTerrainId);
+                ConnectTerrain(mapLayer, layer, level, shared.TerrainIndexByTerrainId, shared.SourceByTile);
                 root.AddChild(mapLayer);
                 layers.Add(mapLayer);
             }
@@ -90,8 +90,16 @@ namespace Uberkarl {
         /// repainted (the editor's live terrain brush re-issues this same call — see <c>LevelEditor.ReflowTerrain</c>
         /// — over the CURRENT set of terrain-painted cells, so a neighbour edit is naturally picked up). A layer
         /// with no terrain painted (every entry <see cref="LayerDefinition.EmptyCell"/>) issues no calls.
+        ///
+        /// <b>Default tile fallback</b> (DiVoid #7638): empirically (Toni, 2026-08-04 live test), a painted cell
+        /// whose real neighbour configuration matches NONE of the terrain's declared variants does NOT get
+        /// Godot's own "closest" pick — <c>SetCellsTerrainConnect</c> leaves it with no tile at all (invisible
+        /// in-game). <see cref="ApplyDefaultTileToUnmatchedCells"/> runs right after the connect call for each
+        /// terrain and fills exactly the cells STILL empty with that terrain's author-designated
+        /// <see cref="ResolvedTerrain.DefaultTileId"/> — deterministic, author-controlled, and touches nothing
+        /// that Godot itself already resolved to a real variant.
         /// </summary>
-        public static void ConnectTerrain(TileMapLayer mapLayer, ResolvedLayer layer, ResolvedLevel level, IReadOnlyDictionary<int, TileSetBuilder.TerrainIndex> terrainIndexByTerrainId) {
+        public static void ConnectTerrain(TileMapLayer mapLayer, ResolvedLayer layer, ResolvedLevel level, IReadOnlyDictionary<int, TileSetBuilder.TerrainIndex> terrainIndexByTerrainId, IReadOnlyDictionary<int, int> sourceByTile) {
             Dictionary<int, Godot.Collections.Array<Vector2I>> cellsByTerrain = null;
             for (int y = 0; y < level.Height; y++) {
                 for (int x = 0; x < level.Width; x++) {
@@ -110,9 +118,42 @@ namespace Uberkarl {
                 return;
 
             foreach (KeyValuePair<int, Godot.Collections.Array<Vector2I>> entry in cellsByTerrain) {
-                if (terrainIndexByTerrainId.TryGetValue(entry.Key, out TileSetBuilder.TerrainIndex index))
-                    mapLayer.SetCellsTerrainConnect(entry.Value, index.TerrainSet, index.Terrain, ignoreEmptyTerrains: true);
+                if (!terrainIndexByTerrainId.TryGetValue(entry.Key, out TileSetBuilder.TerrainIndex index))
+                    continue;
+
+                mapLayer.SetCellsTerrainConnect(entry.Value, index.TerrainSet, index.Terrain, ignoreEmptyTerrains: true);
+                ApplyDefaultTileToUnmatchedCells(mapLayer, level, entry.Key, entry.Value, sourceByTile);
             }
+        }
+
+        // DiVoid #7638: after the connect call above, any cell in painterCells that Godot left with no tile
+        // (GetCellSourceId == -1 — the "matched nothing" case per Toni's live test) gets this terrain's
+        // DefaultTile, if it declares one. A cell Godot DID place a real variant on is left completely
+        // untouched — no custom peering-pattern matcher needed here: Godot's own connect result (empty or
+        // not) IS the ground truth for "matched," so this never second-guesses a real match.
+        static void ApplyDefaultTileToUnmatchedCells(TileMapLayer mapLayer, ResolvedLevel level, int terrainId, Godot.Collections.Array<Vector2I> paintedCells, IReadOnlyDictionary<int, int> sourceByTile) {
+            if (!TryFindDefaultTileId(level.TerrainSets, terrainId, out int defaultTileId))
+                return;
+            if (!sourceByTile.TryGetValue(defaultTileId, out int defaultSourceId))
+                return; // defensive: a dangling default-tile reference (e.g. stale editor state) is a silent no-op here, not a crash
+
+            foreach (Vector2I cell in paintedCells) {
+                if (mapLayer.GetCellSourceId(cell) == -1)
+                    mapLayer.SetCell(cell, defaultSourceId, Vector2I.Zero);
+            }
+        }
+
+        static bool TryFindDefaultTileId(IReadOnlyList<ResolvedTerrainSet> terrainSets, int terrainId, out int defaultTileId) {
+            foreach (ResolvedTerrainSet terrainSet in terrainSets) {
+                foreach (ResolvedTerrain terrain in terrainSet.Terrains) {
+                    if (terrain.Id != terrainId)
+                        continue;
+                    defaultTileId = terrain.DefaultTileId ?? -1;
+                    return terrain.DefaultTileId is not null;
+                }
+            }
+            defaultTileId = -1;
+            return false;
         }
 
         // A layer that is neither parallax nor repeating (scrollSpeed 1.0, repeat off) is added as-is

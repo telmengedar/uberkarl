@@ -914,9 +914,29 @@ namespace Uberkarl {
                 return;
 
             foreach (KeyValuePair<int, Godot.Collections.Array<Vector2I>> entry in cellsByTerrain) {
-                if (lookup.TryGetValue(entry.Key, out TileSetBuilder.TerrainIndex index))
-                    canvas.ReconnectTerrain(layerIndex, index.TerrainSet, index.Terrain, entry.Value);
+                if (!lookup.TryGetValue(entry.Key, out TileSetBuilder.TerrainIndex index))
+                    continue;
+
+                canvas.ReconnectTerrain(layerIndex, index.TerrainSet, index.Terrain, entry.Value);
+
+                // DiVoid #7638: same deterministic default-tile fallback TileMapLevelBuilder applies at
+                // load/build time, run live here too — see EditorCanvas.ApplyDefaultTile's doc comment.
+                if (FindTerrainDefaultTile(entry.Key) is { } defaultTileId)
+                    canvas.ApplyDefaultTile(layerIndex, defaultTileId, entry.Value);
             }
+        }
+
+        // DiVoid #7638: looks up terrain id -> its author-designated default tile straight from the
+        // currently-bound tile set's terrain sets (the same EditableTerrain.DefaultTile TileSetEditor lets
+        // the author pick), or null when the terrain declares none.
+        int? FindTerrainDefaultTile(int terrainId) {
+            if (session == null)
+                return null;
+            foreach (EditableTerrainSet terrainSet in session.Level.TerrainSets)
+                foreach (EditableTerrain terrain in terrainSet.Terrains)
+                    if (terrain.Id == terrainId)
+                        return terrain.DefaultTile;
+            return null;
         }
 
         // ----- action-driven navigation (gamepad + keyboard parity with mouse selection) -----

@@ -84,7 +84,7 @@ public static class EditableTileSetReader
                 terrainSet.Id,
                 terrainSet.Name,
                 terrainSet.MatchingMode,
-                terrainSet.Terrains.Select(terrain => new EditableTerrain(terrain.Id, terrain.Name, terrain.Color)).ToList()))
+                terrainSet.Terrains.Select(terrain => new EditableTerrain(terrain.Id, terrain.Name, terrain.Color, terrain.DefaultTile)).ToList()))
             .ToList();
 
         // Loaded from a real package resource, so this tile set already occupies a stable slot — isAttached

@@ -106,6 +106,15 @@ public sealed class ResolvedTerrain
 
     /// <summary>Parsed author colour, or <c>null</c> when the terrain declares none.</summary>
     public RgbaColor? Color { get; init; }
+
+    /// <summary>
+    /// This terrain's author-designated fallback tile id (DiVoid #7638), resolved (and validated — a
+    /// declared tile, itself a member of this terrain) from <see cref="TerrainDefinition.DefaultTile"/>, or
+    /// <c>null</c> when the terrain declares none. <c>TileMapLevelBuilder</c> uses this to fill a
+    /// terrain-painted cell that <c>TileMapLayer.SetCellsTerrainConnect</c> left empty (no declared variant
+    /// matched its real neighbour pattern) instead of leaving it invisible.
+    /// </summary>
+    public int? DefaultTileId { get; init; }
 }
 
 /// <summary>

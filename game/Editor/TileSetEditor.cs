@@ -418,6 +418,20 @@ namespace Uberkarl {
             row.AddChild(color);
             columns.Add(color);
 
+            // DiVoid #7638: cycles none -> each of THIS terrain's own member tiles (declaration order) ->
+            // none — the author-designated fallback TileMapLevelBuilder/EditorCanvas use for a painted cell
+            // whose real neighbour pattern matches no declared variant (Godot's terrain-connect otherwise
+            // leaves such a cell empty/invisible, per Toni's live test), instead of a silent invisible gap.
+            EditableTile defaultTile = terrain.DefaultTile is { } defaultTileId ? Find(defaultTileId) : null;
+            Button defaultTileButton = new Button {
+                Text = defaultTile != null
+                    ? $"Default: {(string.IsNullOrEmpty(defaultTile.Name) ? $"#{defaultTile.Id}" : defaultTile.Name)}"
+                    : "Default: none",
+            };
+            defaultTileButton.Pressed += () => OnCycleDefaultTilePressed(terrainSet.Id, terrain.Id);
+            row.AddChild(defaultTileButton);
+            columns.Add(defaultTileButton);
+
             bool pendingThisTerrain = pendingRemoveTerrainSetId == terrainSet.Id && pendingRemoveTerrainSetTerrainId == terrain.Id;
             Button delete = new Button { Text = pendingThisTerrain ? "Confirm Remove?" : "Remove" };
             delete.Pressed += () => OnRemoveTerrainPressed(terrainSet.Id, terrain.Id);
@@ -573,6 +587,35 @@ namespace Uberkarl {
             string next = TerrainColorPalette[(index + 1) % TerrainColorPalette.Length];
             if (session.SetTerrainColor(terrainSetId, terrainId, next)) {
                 GD.Print($"TileSetEditor: terrain #{terrainId} colour set to {next}.");
+                TileSetModelChanged?.Invoke();
+            }
+            Rebuild();
+        }
+
+        // DiVoid #7638: cycles terrain terrainId's default tile through none -> each of its own member
+        // tiles (in EditableTileSet.Tiles declaration order) -> none. With no member tiles declared for
+        // this terrain yet, this is a no-op — the author must assign at least one variant to it first,
+        // exactly like OnAssignTerrainPressed's own "nothing to cycle to" no-op.
+        void OnCycleDefaultTilePressed(int terrainSetId, int terrainId) {
+            ClearPendingConfirms();
+            if (session == null)
+                return;
+
+            List<int> memberTileIds = session.TileSet.Tiles.Where(tile => tile.Terrain == terrainId).Select(tile => tile.Id).ToList();
+            if (memberTileIds.Count == 0)
+                return;
+
+            EditableTerrain terrain = FindTerrain(terrainId);
+            int? next;
+            if (terrain?.DefaultTile is not { } currentId) {
+                next = memberTileIds[0];
+            } else {
+                int index = memberTileIds.IndexOf(currentId);
+                next = index >= 0 && index + 1 < memberTileIds.Count ? memberTileIds[index + 1] : null; // wraps back to "none"
+            }
+
+            if (session.SetTerrainDefaultTile(terrainSetId, terrainId, next)) {
+                GD.Print($"TileSetEditor: terrain #{terrainId} default tile set to {(next?.ToString() ?? "none")}.");
                 TileSetModelChanged?.Invoke();
             }
             Rebuild();

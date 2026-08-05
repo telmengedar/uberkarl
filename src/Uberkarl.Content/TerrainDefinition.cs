@@ -25,4 +25,17 @@ public sealed class TerrainDefinition
     /// as Godot's own terrain colour (shown in its native terrain-paint tooling, unused at runtime).
     /// </summary>
     public string? Color { get; init; }
+
+    /// <summary>
+    /// Optional author-designated fallback <see cref="TileDefinition.Id"/> (DiVoid #7638) — used for a
+    /// terrain-painted cell whose real neighbour configuration matches none of this terrain's declared
+    /// variants. Empirically (Toni, 2026-08-04 live test), Godot's <c>TileMapLayer.SetCellsTerrainConnect</c>
+    /// does NOT fall back to a "closest" variant for such a cell — it leaves the cell with NO tile at all
+    /// (invisible in-game). <c>TileMapLevelBuilder</c> is the only consumer: it fills exactly those
+    /// still-empty cells with this tile after the terrain-connect call, deterministic and author-controlled
+    /// instead of an invisible gap. Must name a tile that is itself a declared variant of THIS terrain (its
+    /// own <see cref="TileDefinition.Terrain"/> equal to this terrain's <see cref="Id"/>) — validated by
+    /// <c>LevelLoader</c>. Omitted from JSON when unset so pre-#7638 content loads unchanged.
+    /// </summary>
+    public int? DefaultTile { get; init; }
 }
