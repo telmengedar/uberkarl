@@ -1,3 +1,4 @@
+using Uberkarl.Behavior;
 using Uberkarl.Content;
 using Uberkarl.Packages;
 
@@ -52,7 +53,10 @@ public sealed class EditableLevel
         IReadOnlyList<EditableTile> tiles,
         IReadOnlyList<EditableLayer> layers,
         bool isAttached = false,
-        IReadOnlyList<EditableTerrainSet>? terrainSets = null)
+        IReadOnlyList<EditableTerrainSet>? terrainSets = null,
+        IReadOnlyDictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>? tileBehaviorOverrides = null,
+        IReadOnlyList<ResolvedAreaTrigger>? triggers = null,
+        ResolvedBehaviorBinding? levelScript = null)
     {
         if (tileSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(tileSize));
@@ -74,6 +78,9 @@ public sealed class EditableLevel
             throw new ArgumentNullException(nameof(layers));
         this.layers = new List<EditableLayer>(layers);
         IsAttached = isAttached;
+        TileBehaviorOverrides = tileBehaviorOverrides ?? new Dictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>();
+        Triggers = triggers ?? Array.Empty<ResolvedAreaTrigger>();
+        LevelScript = levelScript;
 
         var expected = width * height;
         foreach (var layer in this.layers)
@@ -134,6 +141,28 @@ public sealed class EditableLevel
     /// <summary>The layer stack, back→front (array order is draw order). Mutated via
     /// <see cref="AppendLayer"/>/<see cref="RemoveLayerAt"/>/<see cref="MoveLayer"/>/<see cref="SetLayerProperties"/>.</summary>
     public IReadOnlyList<EditableLayer> Layers => layers;
+
+    /// <summary>
+    /// The level's sparse per-instance tile-behavior override/removal map (DiVoid #7738, design #7704 §6),
+    /// carried through unedited from whatever the package authored (DiVoid #7747 — read-through only; there
+    /// is no authoring UX for this yet, P3 scope per #7738's own known-gap note). Keyed exactly like
+    /// <see cref="Content.ResolvedLevel.TileBehaviorOverrides"/> so <see cref="EditableLevelSnapshot"/> can
+    /// pass it straight through to the <c>ResolvedLevel</c> a playtest run actually plays.
+    /// </summary>
+    public IReadOnlyDictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?> TileBehaviorOverrides { get; }
+
+    /// <summary>
+    /// The level's grid-rect area triggers (DiVoid #7738, design #7704 §6), carried through unedited —
+    /// same read-through-only status as <see cref="TileBehaviorOverrides"/> (DiVoid #7747).
+    /// </summary>
+    public IReadOnlyList<ResolvedAreaTrigger> Triggers { get; }
+
+    /// <summary>
+    /// The level's global lifecycle/<c>onUpdate</c> script binding (DiVoid #7738, design #7704 §6), or
+    /// <c>null</c> when the level declares none — carried through unedited, same status as
+    /// <see cref="TileBehaviorOverrides"/> (DiVoid #7747).
+    /// </summary>
+    public ResolvedBehaviorBinding? LevelScript { get; }
 
     /// <summary>Whether <paramref name="x"/>,<paramref name="y"/> is a cell inside the grid.</summary>
     public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < Width && y < Height;

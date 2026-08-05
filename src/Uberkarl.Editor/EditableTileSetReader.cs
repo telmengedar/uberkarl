@@ -73,7 +73,12 @@ public static class EditableTileSetReader
                 frames.Add(new EditableTileFrame(frame.Path, package.ReadBytes(frame.Path)));
             }
 
-            tiles.Add(new EditableTile(tile.Id, tile.Graphic.Path, graphicBytes, tile.CollisionShape, tile.Name, frames, tile.AnimationSpeed, tile.Terrain, tile.PeeringBits));
+            // DiVoid #7747: rehydrate the tile TYPE's default behavior binding (DiVoid #7738) the same way
+            // every other tile property already round-trips, so a level played through the editor's
+            // playtest overlay sees the same scripted tiles the stand-alone LevelLoader path does.
+            var behavior = EditableBehaviorBindings.Resolve(package, tile.Behavior, $"Tile {tile.Id} behavior");
+
+            tiles.Add(new EditableTile(tile.Id, tile.Graphic.Path, graphicBytes, tile.CollisionShape, tile.Name, frames, tile.AnimationSpeed, tile.Terrain, tile.PeeringBits, behavior));
         }
 
         // DiVoid #7551 Phase 3: rehydrate the tile set's terrain sets/terrains from the definition, in

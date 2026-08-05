@@ -128,7 +128,7 @@ public sealed class EditableTileSet
         if (string.Equals(current.Name, normalized, StringComparison.Ordinal))
             return false;
 
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.CollisionShape, normalized, current.Frames, current.AnimationSpeed, current.Terrain, current.PeeringBits);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.CollisionShape, normalized, current.Frames, current.AnimationSpeed, current.Terrain, current.PeeringBits, current.Behavior);
         return true;
     }
 
@@ -146,7 +146,7 @@ public sealed class EditableTileSet
         if (CollisionShapesEqual(current.CollisionShape, collisionShape))
             return false;
 
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, collisionShape, current.Name, current.Frames, current.AnimationSpeed, current.Terrain, current.PeeringBits);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, collisionShape, current.Name, current.Frames, current.AnimationSpeed, current.Terrain, current.PeeringBits, current.Behavior);
         return true;
     }
 
@@ -189,7 +189,7 @@ public sealed class EditableTileSet
         var provisionalSlug = TileSetResourcePaths.Slugify(Name);
         var path = TileSetResourcePaths.FramePath(provisionalSlug, id, overallFrameNumber);
         var frames = new List<EditableTileFrame>(current.Frames) { new EditableTileFrame(path, graphic) };
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.CollisionShape, current.Name, frames, current.AnimationSpeed, current.Terrain, current.PeeringBits);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.CollisionShape, current.Name, frames, current.AnimationSpeed, current.Terrain, current.PeeringBits, current.Behavior);
         return true;
     }
 
@@ -213,7 +213,7 @@ public sealed class EditableTileSet
 
         var frames = new List<EditableTileFrame>(current.Frames);
         frames.RemoveAt(frameIndex);
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.CollisionShape, current.Name, frames, current.AnimationSpeed, current.Terrain, current.PeeringBits);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.CollisionShape, current.Name, frames, current.AnimationSpeed, current.Terrain, current.PeeringBits, current.Behavior);
         return true;
     }
 
@@ -236,7 +236,7 @@ public sealed class EditableTileSet
         if (current.AnimationSpeed == speed)
             return false;
 
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.CollisionShape, current.Name, current.Frames, speed, current.Terrain, current.PeeringBits);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.CollisionShape, current.Name, current.Frames, speed, current.Terrain, current.PeeringBits, current.Behavior);
         return true;
     }
 
@@ -273,7 +273,7 @@ public sealed class EditableTileSet
                 : tile.Frames
                     .Select((frame, frameIndex) => new EditableTileFrame(TileSetResourcePaths.FramePath(slug, tile.Id, frameIndex + 2), frame.Graphic))
                     .ToArray();
-            tiles[i] = new EditableTile(tile.Id, TileSetResourcePaths.GraphicPath(slug, tile.Id), tile.Graphic, tile.CollisionShape, tile.Name, frames, tile.AnimationSpeed, tile.Terrain, tile.PeeringBits);
+            tiles[i] = new EditableTile(tile.Id, TileSetResourcePaths.GraphicPath(slug, tile.Id), tile.Graphic, tile.CollisionShape, tile.Name, frames, tile.AnimationSpeed, tile.Terrain, tile.PeeringBits, tile.Behavior);
         }
 
         IsAttached = true;
@@ -487,7 +487,7 @@ public sealed class EditableTileSet
             return false;
 
         var peering = terrainId is null ? Content.TerrainPeering.None : current.PeeringBits;
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.CollisionShape, current.Name, current.Frames, current.AnimationSpeed, terrainId, peering);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.CollisionShape, current.Name, current.Frames, current.AnimationSpeed, terrainId, peering, current.Behavior);
         ClearDanglingDefaultTileReferences(tileId); // it just stopped being a member of whatever terrain it belonged to before
         return true;
     }
@@ -507,7 +507,7 @@ public sealed class EditableTileSet
         if (!current.IsTerrainVariant || current.PeeringBits == peeringBits)
             return false;
 
-        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.CollisionShape, current.Name, current.Frames, current.AnimationSpeed, current.Terrain, peeringBits);
+        tiles[index] = new EditableTile(current.Id, current.GraphicPath, current.Graphic, current.CollisionShape, current.Name, current.Frames, current.AnimationSpeed, current.Terrain, peeringBits, current.Behavior);
         return true;
     }
 
@@ -517,7 +517,7 @@ public sealed class EditableTileSet
         {
             var tile = tiles[i];
             if (tile.Terrain is { } terrainId && removedTerrainIds.Contains(terrainId))
-                tiles[i] = new EditableTile(tile.Id, tile.GraphicPath, tile.Graphic, tile.CollisionShape, tile.Name, tile.Frames, tile.AnimationSpeed, null, Content.TerrainPeering.None);
+                tiles[i] = new EditableTile(tile.Id, tile.GraphicPath, tile.Graphic, tile.CollisionShape, tile.Name, tile.Frames, tile.AnimationSpeed, null, Content.TerrainPeering.None, tile.Behavior);
         }
     }
 

@@ -1,3 +1,4 @@
+using Uberkarl.Behavior;
 using Uberkarl.Content;
 
 namespace Uberkarl.Editor;
@@ -20,6 +21,10 @@ public static class EditableLevelSnapshot
         var colliding = new HashSet<int>();
         var collisionShapes = new Dictionary<int, CollisionShapeDefinition>(level.Tiles.Count);
         var animations = new Dictionary<int, ResolvedAnimation>();
+        // DiVoid #7747: keyed by tile id exactly like ResolvedLevel.TileBehaviors / LevelLoader's own
+        // ResolveTileBehaviors, so EffectiveTileBehaviors() (the only correct way to enumerate scripted tile
+        // cells) works identically whether the level came from a playtest snapshot or a stand-alone load.
+        var tileBehaviors = new Dictionary<int, ResolvedBehaviorBinding>();
         var terrainSetIdByTerrainId = level.TerrainSets
             .SelectMany(set => set.Terrains.Select(terrain => (TerrainId: terrain.Id, TerrainSetId: set.Id)))
             .ToDictionary(pair => pair.TerrainId, pair => pair.TerrainSetId);
@@ -30,6 +35,8 @@ public static class EditableLevelSnapshot
             collisionShapes[tile.Id] = tile.CollisionShape;
             if (tile.CollisionShape.Kind != CollisionShapeKind.None)
                 colliding.Add(tile.Id);
+            if (tile.Behavior is { } behavior)
+                tileBehaviors[tile.Id] = behavior;
 
             // DiVoid #7551 Phase 2: the live canvas preview must resolve animated tiles the SAME way
             // LevelLoader does at runtime (frame 0 = the tile's own graphic, then its extra frames in
@@ -100,6 +107,16 @@ public static class EditableLevelSnapshot
             TileTerrains = tileTerrains,
             Spawns = new Dictionary<string, GridPosition>(level.Spawns),
             DefaultSpawn = level.DefaultSpawn,
+            // DiVoid #7747: without these three, a level played via PlaytestOverlay (which is fed exactly
+            // this snapshot) always looked like it declared zero scripted tiles/triggers/level-script,
+            // regardless of what the package actually authored — the HUD would show (it does not depend on
+            // any of this) but touching a scripted tile (e.g. the demo hurt-on-contact spike) did nothing,
+            // because EffectiveTileBehaviors() had nothing to yield. LevelPlay's stand-alone LevelLoader.Load
+            // path was never affected — this gap was specific to the editor's projection.
+            TileBehaviors = tileBehaviors,
+            TileBehaviorOverrides = level.TileBehaviorOverrides,
+            Triggers = level.Triggers,
+            LevelScript = level.LevelScript,
         };
     }
 }
