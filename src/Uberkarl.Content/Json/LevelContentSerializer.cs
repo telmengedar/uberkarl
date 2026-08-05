@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Uberkarl.Behavior.Json;
 
 namespace Uberkarl.Content.Json;
 
@@ -45,6 +46,7 @@ public static class LevelContentSerializer
         };
         options.Converters.Add(new ResourceReferenceJsonConverter());
         options.Converters.Add(new TileDefinitionJsonConverter());
+        options.Converters.Add(new BehaviorBindingJsonConverter());
         return options;
     }
 }

@@ -40,6 +40,32 @@ public sealed class BehaviorLoader
     /// failure path — they register the result with a <see cref="BehaviorScheduler"/> exactly like a
     /// healthy one, and dispatch simply becomes a no-op for it.
     /// </summary>
+    /// <summary>
+    /// Compiles a <see cref="ResolvedBehaviorBinding"/> — the single entry point Phase-1 runtime wiring uses
+    /// for every scripted subject (tile cell, area trigger, level script), whatever kind of binding it
+    /// carries (design #7704 §5.2 "binding is the small shared value all four subjects use"). A script
+    /// binding's already-resolved source is compiled directly; a predefined binding's id is resolved to
+    /// source via <see cref="PredefinedBehaviors"/> first. An unknown predefined id quarantines exactly like
+    /// a parse error — this method never throws for bad content, matching <see cref="Compile"/>'s contract.
+    /// </summary>
+    public CompiledBehavior CompileBinding(ResolvedBehaviorBinding binding, IReadOnlyDictionary<string, object> facadeGlobals)
+    {
+        if (binding is null)
+            throw new ArgumentNullException(nameof(binding));
+
+        if (binding.IsScript)
+            return Compile(binding.Script!, facadeGlobals);
+
+        if (!PredefinedBehaviors.TryGetSource(binding.PredefinedId!, binding.Parameters, out var source))
+        {
+            var quarantined = new CompiledBehavior(EmptyHandlers, new CancellationTokenSource());
+            quarantined.Quarantine($"unknown predefined behavior id '{binding.PredefinedId}'");
+            return quarantined;
+        }
+
+        return Compile(source, facadeGlobals);
+    }
+
     public CompiledBehavior Compile(string source, IReadOnlyDictionary<string, object> facadeGlobals)
     {
         var instanceCancellation = new CancellationTokenSource();

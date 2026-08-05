@@ -1,3 +1,4 @@
+using Uberkarl.Behavior;
 using Uberkarl.Packages;
 
 namespace Uberkarl.Content;
@@ -36,4 +37,25 @@ public sealed class LevelDefinition
     public string? DefaultSpawn { get; init; }
 
     public IReadOnlyList<LayerDefinition> Layers { get; init; } = Array.Empty<LayerDefinition>();
+
+    /// <summary>
+    /// Sparse per-instance overrides/removals of the tileset's default tile behavior (DiVoid #7738, design
+    /// #7704 §6). Empty when the level declares no overrides — every scripted tile instance then just uses
+    /// its type's default. Omitted from JSON when empty.
+    /// </summary>
+    public IReadOnlyList<TileBehaviorOverride> TileBehaviorOverrides { get; init; } = Array.Empty<TileBehaviorOverride>();
+
+    /// <summary>
+    /// Grid-rect area triggers (DiVoid #7738, design #7704 §6) — <c>onEnter</c>/<c>onLeave</c> behaviors.
+    /// Empty when the level declares none. Omitted from JSON when empty.
+    /// </summary>
+    public IReadOnlyList<AreaTriggerDefinition> Triggers { get; init; } = Array.Empty<AreaTriggerDefinition>();
+
+    /// <summary>
+    /// The level's single global behavior binding (DiVoid #7738, design #7704 §6 — "the level gains an
+    /// optional <c>levelScript</c> behavior binding (global)"), reacting to lifecycle events
+    /// (<c>onLevelStart</c>, <c>onPlayerDeath</c>/<c>onPlayerRespawn</c>) and <c>onUpdate(delta)</c>. Null
+    /// when the level declares no global script.
+    /// </summary>
+    public BehaviorBinding? LevelScript { get; init; }
 }

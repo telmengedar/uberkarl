@@ -1,3 +1,4 @@
+using Uberkarl.Behavior;
 using Uberkarl.Packages;
 
 namespace Uberkarl.Content;
@@ -75,4 +76,14 @@ public sealed class TileDefinition
     /// <see cref="Terrain"/> is set; <see cref="TerrainPeering.None"/> (the default) for a non-terrain tile.
     /// </summary>
     public TerrainPeering PeeringBits { get; init; } = TerrainPeering.None;
+
+    /// <summary>
+    /// This tile TYPE's default contact/contact-leave behavior binding (DiVoid #7738, design #7704 §6 —
+    /// "type-level defaults... live on the tileset/objectset"), e.g. "spikes always hurt". <c>null</c> for a
+    /// plain tile with no scripted behavior. A level may override or remove this default for a specific
+    /// placed instance via its sparse <see cref="LevelDefinition.TileBehaviorOverrides"/> map — the tile type
+    /// itself only ever expresses the default. Omitted from JSON when unset so pre-Phase-1 content loads
+    /// unchanged.
+    /// </summary>
+    public BehaviorBinding? Behavior { get; init; }
 }

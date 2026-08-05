@@ -1,3 +1,5 @@
+using Uberkarl.Behavior;
+
 namespace Uberkarl.Content;
 
 public sealed class ResolvedLevel
@@ -69,6 +71,83 @@ public sealed class ResolvedLevel
     /// at a specific named spawn rather than its default.
     /// </summary>
     public bool TryGetSpawn(string name, out GridPosition position) => Spawns.TryGetValue(name, out position);
+
+    /// <summary>
+    /// The bound tile set's default contact/contact-leave behavior per tile id (DiVoid #7738, design #7704
+    /// §6 "type-level defaults... live on the tileset"). A tile id absent from this dictionary declares no
+    /// default behavior. <see cref="EffectiveTileBehaviors"/> is the usual way to consume this together with
+    /// <see cref="TileBehaviorOverrides"/> — most callers should not need to read this directly.
+    /// </summary>
+    public IReadOnlyDictionary<int, ResolvedBehaviorBinding> TileBehaviors { get; init; } = new Dictionary<int, ResolvedBehaviorBinding>();
+
+    /// <summary>
+    /// The level's sparse per-instance override/removal map (DiVoid #7738, design #7704 §6), keyed by
+    /// (layer index, cell). A present entry with a non-null value REPLACES the tile type's default binding
+    /// for that one instance; a present entry with a null value explicitly REMOVES the default (the instance
+    /// has no behavior even though its type declares one); an absent key means "use the type default, if
+    /// any" — see <see cref="EffectiveTileBehaviors"/>.
+    /// </summary>
+    public IReadOnlyDictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?> TileBehaviorOverrides { get; init; }
+        = new Dictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>();
+
+    /// <summary>Grid-rect area triggers (DiVoid #7738, design #7704 §6). Empty when the level declares none.</summary>
+    public IReadOnlyList<ResolvedAreaTrigger> Triggers { get; init; } = Array.Empty<ResolvedAreaTrigger>();
+
+    /// <summary>The level's global behavior binding (DiVoid #7738, design #7704 §6), or null when the level declares none.</summary>
+    public ResolvedBehaviorBinding? LevelScript { get; init; }
+
+    /// <summary>
+    /// Yields every scripted tile CELL in the level — the tileset default combined with any per-cell
+    /// override/removal (DiVoid #7738, design #7704 §9.3 — "only cells whose resolved binding is non-empty
+    /// are tracked"). This is the ONLY correct way to enumerate scripted tile cells; reading
+    /// <see cref="TileBehaviors"/> or <see cref="TileBehaviorOverrides"/> alone is not enough, because an
+    /// override can both ADD a behavior to a plain tile and REMOVE a type's default from one instance. Pure
+    /// and Godot-free so the effective-binding computation is unit-testable without any runtime wiring.
+    /// </summary>
+    public IEnumerable<(int Layer, GridPosition Cell, ResolvedBehaviorBinding Binding)> EffectiveTileBehaviors()
+    {
+        for (var layerIndex = 0; layerIndex < Layers.Count; layerIndex++)
+        {
+            var layer = Layers[layerIndex];
+            for (var y = 0; y < Height; y++)
+            {
+                for (var x = 0; x < Width; x++)
+                {
+                    var cell = new GridPosition(x, y);
+                    var tileId = layer.Cells[y * Width + x];
+
+                    if (TileBehaviorOverrides.TryGetValue((layerIndex, cell), out var overrideBinding))
+                    {
+                        if (overrideBinding is { } replacement)
+                            yield return (layerIndex, cell, replacement);
+                        continue; // present-but-null = explicit removal; either way the override is final.
+                    }
+
+                    if (tileId != LayerDefinition.EmptyCell && TileBehaviors.TryGetValue(tileId, out var defaultBinding))
+                        yield return (layerIndex, cell, defaultBinding);
+                }
+            }
+        }
+    }
+}
+
+/// <summary>
+/// A resolved grid-rect area trigger (DiVoid #7738, design #7704 §6) — the runtime counterpart of
+/// <see cref="AreaTriggerDefinition"/>.
+/// </summary>
+public sealed class ResolvedAreaTrigger
+{
+    public string Name { get; init; } = string.Empty;
+
+    public int X { get; init; }
+
+    public int Y { get; init; }
+
+    public int Width { get; init; }
+
+    public int Height { get; init; }
+
+    public required ResolvedBehaviorBinding Binding { get; init; }
 }
 
 public sealed class ResolvedLayer

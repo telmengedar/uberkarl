@@ -10,5 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Uberkarl.Packages\Uberkarl.Packages.csproj" />
+    <ProjectReference Include="..\Uberkarl.Behavior\Uberkarl.Behavior.csproj" />
   </ItemGroup>
 </Project>

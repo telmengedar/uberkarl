@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Uberkarl.Behavior;
 using Uberkarl.Packages;
 
 namespace Uberkarl.Content.Json;
@@ -40,6 +41,9 @@ internal sealed class TileDefinitionJsonConverter : JsonConverter<TileDefinition
         var peeringBits = root.TryGetProperty("peeringBits", out var peeringElement)
             ? (TerrainPeering)peeringElement.GetInt32()
             : TerrainPeering.None;
+        var behavior = root.TryGetProperty("behavior", out var behaviorElement) && behaviorElement.ValueKind != JsonValueKind.Null
+            ? behaviorElement.Deserialize<BehaviorBinding>(options)
+            : null;
 
         return new TileDefinition
         {
@@ -51,6 +55,7 @@ internal sealed class TileDefinitionJsonConverter : JsonConverter<TileDefinition
             AnimationSpeed = animationSpeed,
             Terrain = terrain,
             PeeringBits = peeringBits,
+            Behavior = behavior,
         };
     }
 
@@ -97,6 +102,12 @@ internal sealed class TileDefinitionJsonConverter : JsonConverter<TileDefinition
 
         if (value.PeeringBits != TerrainPeering.None)
             writer.WriteNumber("peeringBits", (int)value.PeeringBits);
+
+        if (value.Behavior is { } behavior)
+        {
+            writer.WritePropertyName("behavior");
+            JsonSerializer.Serialize(writer, behavior, options);
+        }
 
         writer.WriteEndObject();
     }
