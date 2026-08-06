@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 using Uberkarl.Behavior;
 using Uberkarl.Content;
@@ -86,6 +87,15 @@ namespace Uberkarl {
         readonly HashSet<string> contactedTileIds = new HashSet<string>();
         readonly HashSet<string> insideTriggerIds = new HashSet<string>();
 
+        // DiVoid #7747 (REOPENED) diagnostic instrumentation: every stage of the live editor-Play chain
+        // (attach -> Configure -> per-tick contact scan -> contact -> dispatch -> intent application) gets
+        // an unmistakable GD.Print so a single Play run in the Godot Output panel pinpoints exactly which
+        // stage is the LAST to print -- that is the dead stage. _PhysicsProcess itself only logs once (to
+        // prove it is ticking at all) plus on every grid-cell change (to avoid 60/s spam while still
+        // showing the player's live position as they approach the spike).
+        bool loggedFirstTick;
+        GridCell lastLoggedCell = new GridCell(int.MinValue, int.MinValue);
+
         readonly struct ScriptedTile {
             public ScriptedTile(string subjectId, Rect2 worldRect, GridCell cell) {
                 SubjectId = subjectId;
@@ -104,6 +114,12 @@ namespace Uberkarl {
             }
             public string SubjectId { get; }
             public Rect2 WorldRect { get; }
+        }
+
+        // DiVoid #7747 (REOPENED) stage 1: proves this node actually joined the running scene tree on the
+        // live editor-Play path (vs. e.g. never being added, or being added but never entering the tree).
+        public override void _Ready() {
+            GD.Print("[behavior] BehaviorRuntime._Ready attached");
         }
 
         /// <summary>
@@ -132,6 +148,11 @@ namespace Uberkarl {
             RegisterScriptedTiles(level);
             RegisterTriggers(level);
             RegisterLevelScript(level);
+
+            // DiVoid #7747 (REOPENED) stage 2: proves Configure() actually ran against a level carrying
+            // scripted content on THIS path (vs. a ResolvedLevel that projected empty -- the P1 editor gap
+            // fixed in commit 3bdd8a0) and, separately, proves Configure() was called at all.
+            GD.Print($"[behavior] Configure: {scriptedTiles.Count} tile cells, {scriptedTriggers.Count} triggers, levelScript={hasLevelScript}");
 
             if (hasLevelScript)
                 scheduler.DispatchLevelStart(LevelScriptSubjectId);
@@ -197,6 +218,18 @@ namespace Uberkarl {
             Rect2 playerAabb = new Rect2(player.Position - Player.CollisionHalfExtents, Player.CollisionHalfExtents * 2f);
             GridCell playerCell = new GridCell(Mathf.FloorToInt(player.Position.X / tileSize), Mathf.FloorToInt(player.Position.Y / tileSize));
 
+            // DiVoid #7747 (REOPENED) stage 3: proves _PhysicsProcess is actually being invoked at all on
+            // this path (vs. e.g. a ProcessMode/pause issue that would silently starve it) and, via the
+            // per-cell log, lets Toni watch the player's live grid cell approach the spike's authored cell
+            // (20,11) without flooding the Output panel at 60 lines/sec.
+            if (!loggedFirstTick) {
+                loggedFirstTick = true;
+                GD.Print($"[behavior] _PhysicsProcess tick alive (player at {player.Position}, cell {playerCell})");
+            } else if (playerCell != lastLoggedCell) {
+                GD.Print($"[behavior] _PhysicsProcess tick (player at {player.Position}, cell {playerCell})");
+            }
+            lastLoggedCell = playerCell;
+
             DispatchTileContacts(playerAabb);
             DispatchTriggerOverlaps(playerAabb, playerCell);
 
@@ -215,6 +248,10 @@ namespace Uberkarl {
 
                 var other = new EventParty("player", string.Empty, tile.Cell);
                 if (touching) {
+                    // DiVoid #7747 (REOPENED) stage 4: proves the manual AABB overlap actually fired for
+                    // this cell -- if this never prints while the player visibly stands on the spike,
+                    // contact detection (coordinate space / AABB math) is the dead stage, not dispatch.
+                    GD.Print($"[behavior] CONTACT tile cell {tile.Cell} binding {tile.SubjectId}");
                     contactedTileIds.Add(tile.SubjectId);
                     scheduler.DispatchContact(tile.SubjectId, other);
                 } else {
@@ -243,11 +280,26 @@ namespace Uberkarl {
         }
 
         void ApplyIntents() {
-            foreach (BehaviorIntent intent in intents.Drain()) {
+            // DiVoid #7747 (REOPENED) stage 5: materialized (not streamed straight into the switch) purely
+            // so it can be logged as one line -- proves the compiled Pooscript actually reached the point of
+            // enqueueing an intent at all (vs. e.g. quarantine swallowing the script silently -- see
+            // OnQuarantined below, which prints separately on that path).
+            List<BehaviorIntent> drained = intents.Drain().ToList();
+            if (drained.Count > 0)
+                GD.Print($"[behavior] dispatch -> intents: [{string.Join(", ", drained.Select(i => i.GetType().Name))}]");
+
+            foreach (BehaviorIntent intent in drained) {
                 switch (intent) {
-                    case HurtIntent hurt:
+                    case HurtIntent hurt: {
+                        // DiVoid #7747 (REOPENED) stage 6: the final stage -- proves the intent actually
+                        // mutated the SAME Player.Health instance the HUD reads. If stage 5 printed but this
+                        // never does, or prints with before==after, the intent reached here but Player.Hurt
+                        // no-op'd (most likely still-active i-frames -- see Player.IsInvulnerable).
+                        double before = player.Health;
                         player.Hurt(hurt.Amount);
+                        GD.Print($"[behavior] applied Hurt {hurt.Amount}, Player.Health {before}->{player.Health}");
                         break;
+                    }
                     case HealIntent heal:
                         player.Heal(heal.Amount);
                         break;
