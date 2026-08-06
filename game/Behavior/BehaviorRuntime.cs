@@ -59,6 +59,24 @@ namespace Uberkarl {
         // this budget, so a healthy dispatch (the overwhelming common case) returns near-instantly regardless.
         static readonly TimeSpan WatchdogBudget = TimeSpan.FromMilliseconds(50);
 
+        // DiVoid #7747 (REOPENED, root cause): a small world-unit padding added to the player's AABB before
+        // it is tested against a scripted tile's/trigger's world rect (design #7704 §9.3's "geometric AABB
+        // overlap"). Proven necessary in-engine, not by source review or a Godot-free unit test: when a
+        // scripted tile is ALSO solid (e.g. the demo spike, tools/SampleContent/Program.cs -- Solid=true so
+        // "the player must jump over" it), CharacterBody2D.MoveAndSlide's own collision response rests the
+        // player's collision box a fraction of a pixel SHORT of true geometric penetration (a headless probe,
+        // game/Diagnostics/BehaviorHeadlessProbe.cs, measured the real resting gap at ~0.0068px after a real
+        // gravity-driven drop onto the spike) -- so a bare, zero-tolerance Rect2.Intersects() (even with
+        // includeBorders:true, which only helps for an EXACT shared edge, not a genuine sub-pixel gap) never
+        // returns true for "standing on top of a solid hazard", which is exactly how a real player touches a
+        // ground-level spike. Every earlier "fixed" write-up on this bug validated only the CONTENT/PROJECTION
+        // half of the chain (editor playtest carrying scripted bindings at all) via forced/teleported overlap
+        // in a unit test or a Godot-free assertion -- none of them exercised genuine MoveAndSlide collision
+        // response, so this shared-runtime gap survived two prior "fixed" passes. 1 world unit (1px at this
+        // project's TileSize=16) comfortably absorbs the physics resting gap while staying negligible next to
+        // a tile's full size, so it does not make contact detection trigger from a meaningfully separated cell.
+        const float ContactMargin = 1f;
+
         // The level script's own "self" subject id. Deliberately NOT BehaviorSubjectIds.Level ("level") --
         // that id is reserved for the SHARED level-wide state bag every subject reaches via the `level`
         // global (BehaviorLevel.State). Keeping this id distinct preserves the same "self is private,
@@ -215,7 +233,14 @@ namespace Uberkarl {
             playerFacade.Velocity = new BehaviorVector2(player.Velocity.X, player.Velocity.Y);
             playerFacade.IsOnGround = player.IsOnFloor();
 
-            Rect2 playerAabb = new Rect2(player.Position - Player.CollisionHalfExtents, Player.CollisionHalfExtents * 2f);
+            // Padded by ContactMargin (DiVoid #7747 REOPENED root cause, see its declaration) so a player
+            // resting exactly against a SOLID scripted tile -- the physics-normal way to "touch" one -- still
+            // geometrically overlaps for the contact/trigger checks below, instead of requiring true
+            // penetration MoveAndSlide's own collision response never actually produces.
+            Vector2 marginVector = new Vector2(ContactMargin, ContactMargin);
+            Rect2 playerAabb = new Rect2(
+                player.Position - Player.CollisionHalfExtents - marginVector,
+                Player.CollisionHalfExtents * 2f + marginVector * 2f);
             GridCell playerCell = new GridCell(Mathf.FloorToInt(player.Position.X / tileSize), Mathf.FloorToInt(player.Position.Y / tileSize));
 
             // DiVoid #7747 (REOPENED) stage 3: proves _PhysicsProcess is actually being invoked at all on
