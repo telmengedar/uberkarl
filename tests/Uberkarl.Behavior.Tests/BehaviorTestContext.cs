@@ -36,17 +36,29 @@ internal sealed class BehaviorTestContext
     /// <summary>Compiles <paramref name="source"/> with <paramref name="subject"/> bound as <c>self</c> alongside the shared <c>level</c>/<c>player</c>/<c>event</c> globals, and registers the result with <see cref="Scheduler"/>.</summary>
     public BehaviorInstance Compile(BehaviorSubject subject, string source)
     {
-        var globals = new Dictionary<string, object>
-        {
-            ["self"] = subject,
-            ["level"] = Level,
-            ["player"] = Player,
-            ["event"] = Scheduler.CurrentEvent,
-        };
-
-        var compiled = Loader.Compile(source, globals);
+        var compiled = Loader.Compile(source, Globals(subject));
         var instance = new BehaviorInstance(subject.Id, compiled);
         Scheduler.Register(instance);
         return instance;
     }
+
+    /// <summary>
+    /// Compiles a <see cref="ResolvedBehaviorBinding"/> (script or predefined) via <see cref="BehaviorLoader.CompileBinding"/>
+    /// -- the P1 runtime wiring's entry point (DiVoid #7738) -- with <paramref name="subject"/> bound as
+    /// <c>self</c>, and registers the result with <see cref="Scheduler"/>.
+    /// </summary>
+    public CompiledBehavior CompileResolved(BehaviorSubject subject, ResolvedBehaviorBinding binding)
+    {
+        var compiled = Loader.CompileBinding(binding, Globals(subject));
+        Scheduler.Register(new BehaviorInstance(subject.Id, compiled));
+        return compiled;
+    }
+
+    private Dictionary<string, object> Globals(BehaviorSubject subject) => new()
+    {
+        ["self"] = subject,
+        ["level"] = Level,
+        ["player"] = Player,
+        ["event"] = Scheduler.CurrentEvent,
+    };
 }

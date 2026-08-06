@@ -1,4 +1,5 @@
 using System.IO;
+using Uberkarl.Behavior;
 using Uberkarl.Content;
 using Uberkarl.Content.Json;
 using Uberkarl.Packages;
@@ -80,6 +81,33 @@ public static class EditableLevelReader
                 terrain));
         }
 
+        // DiVoid #7747: rehydrate the level's own scripted-behavior data (DiVoid #7738) the same way every
+        // other level property already round-trips, so EditableLevelSnapshot.ToResolvedLevel — what
+        // PlaytestOverlay actually plays — can carry it into the playtest run. Read-through only; there is
+        // still no authoring UX for any of this (P3, per #7738's own known-gap note).
+        var tileBehaviorOverrides = new Dictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>();
+        foreach (var overrideEntry in levelDefinition.TileBehaviorOverrides) {
+            var role = $"Tile behavior override at layer {overrideEntry.Layer} cell ({overrideEntry.Cell.X},{overrideEntry.Cell.Y})";
+            tileBehaviorOverrides[(overrideEntry.Layer, overrideEntry.Cell)] = overrideEntry.Removed
+                ? null
+                : EditableBehaviorBindings.Resolve(package, overrideEntry.Binding, role);
+        }
+
+        var triggers = new List<ResolvedAreaTrigger>(levelDefinition.Triggers.Count);
+        foreach (var trigger in levelDefinition.Triggers) {
+            triggers.Add(new ResolvedAreaTrigger {
+                Name = trigger.Name,
+                X = trigger.X,
+                Y = trigger.Y,
+                Width = trigger.Width,
+                Height = trigger.Height,
+                Binding = EditableBehaviorBindings.Resolve(package, trigger.Binding, $"Trigger '{trigger.Name}'")
+                    ?? throw new LevelContentException($"Trigger '{trigger.Name}' declares no behavior binding."),
+            });
+        }
+
+        var levelScript = EditableBehaviorBindings.Resolve(package, levelDefinition.LevelScript, "Level script");
+
         // Loaded from a real package resource, so this level already occupies a stable slot: isAttached
         // is true and levelPath is preserved verbatim, even if it predates the per-resource namespacing
         // scheme (a legacy fixed-constant path like "level.json" still round-trips fine — this correction
@@ -103,7 +131,10 @@ public static class EditableLevelReader
             tiles,
             layers,
             isAttached: true,
-            terrainSets: terrainSets);
+            terrainSets: terrainSets,
+            tileBehaviorOverrides: tileBehaviorOverrides,
+            triggers: triggers,
+            levelScript: levelScript);
     }
 
     private static ResourcePath FindLevelPath(Package package)

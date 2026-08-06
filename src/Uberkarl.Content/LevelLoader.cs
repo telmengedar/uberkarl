@@ -1,3 +1,4 @@
+using Uberkarl.Behavior;
 using Uberkarl.Content.Json;
 using Uberkarl.Packages;
 
@@ -23,6 +24,10 @@ public static class LevelLoader
         var tileTerrains = ResolveTileTerrains(tileSet, declaredTerrainIds);
         ValidateSpawns(level);
         var backgroundColor = ParseBackgroundColor(level);
+        var tileBehaviors = ResolveTileBehaviors(resolver, tileSet);
+        var tileBehaviorOverrides = ResolveTileBehaviorOverrides(resolver, level);
+        var triggers = ResolveTriggers(resolver, level);
+        var levelScript = level.LevelScript is { } levelScriptBinding ? BehaviorBindingResolver.Resolve(resolver, levelScriptBinding) : null;
 
         var layers = new List<ResolvedLayer>(level.Layers.Count);
         foreach (var layer in level.Layers)
@@ -55,7 +60,90 @@ public static class LevelLoader
             Spawns = level.Spawns,
             DefaultSpawn = level.DefaultSpawn,
             BackgroundColor = backgroundColor,
+            TileBehaviors = tileBehaviors,
+            TileBehaviorOverrides = tileBehaviorOverrides,
+            Triggers = triggers,
+            LevelScript = levelScript,
         };
+    }
+
+    /// <summary>Resolves each declared tile's default behavior binding (DiVoid #7738, design #7704 §6), keyed by tile id. A tile with no <see cref="TileDefinition.Behavior"/> contributes no entry.</summary>
+    private static Dictionary<int, ResolvedBehaviorBinding> ResolveTileBehaviors(IResourceResolver resolver, TileSetDefinition tileSet)
+    {
+        var behaviors = new Dictionary<int, ResolvedBehaviorBinding>();
+        foreach (var tile in tileSet.Tiles)
+        {
+            if (tile.Behavior is { } binding)
+                behaviors[tile.Id] = ResolveBinding(resolver, binding, $"tile {tile.Id} behavior");
+        }
+
+        return behaviors;
+    }
+
+    /// <summary>
+    /// Resolves and validates the level's sparse tile-behavior override map (DiVoid #7738, design #7704 §6):
+    /// every entry's layer index and cell must be in bounds, exactly one of <see cref="TileBehaviorOverride.Binding"/>/
+    /// <see cref="TileBehaviorOverride.Removed"/> must be set, and no (layer,cell) pair may repeat (it is a
+    /// dictionary key — a repeat is necessarily an authoring mistake, not two independent instructions).
+    /// </summary>
+    private static Dictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?> ResolveTileBehaviorOverrides(IResourceResolver resolver, LevelDefinition level)
+    {
+        var overrides = new Dictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>();
+        foreach (var entry in level.TileBehaviorOverrides)
+        {
+            if (entry.Layer < 0 || entry.Layer >= level.Layers.Count)
+                throw new LevelContentException($"Tile behavior override references layer {entry.Layer}, but the level has {level.Layers.Count} layer(s).");
+            if (entry.Cell.X < 0 || entry.Cell.Y < 0 || entry.Cell.X >= level.Width || entry.Cell.Y >= level.Height)
+                throw new LevelContentException($"Tile behavior override cell ({entry.Cell.X},{entry.Cell.Y}) is outside the {level.Width}x{level.Height} grid.");
+            if (entry.Binding is not null && entry.Removed)
+                throw new LevelContentException($"Tile behavior override at layer {entry.Layer} cell ({entry.Cell.X},{entry.Cell.Y}) declares both a replacement binding and 'removed' — exactly one is allowed.");
+            if (entry.Binding is null && !entry.Removed)
+                throw new LevelContentException($"Tile behavior override at layer {entry.Layer} cell ({entry.Cell.X},{entry.Cell.Y}) declares neither a binding nor 'removed'.");
+
+            var key = (entry.Layer, entry.Cell);
+            if (!overrides.TryAdd(key, entry.Removed ? null : ResolveBinding(resolver, entry.Binding!, $"tile behavior override at layer {entry.Layer} cell ({entry.Cell.X},{entry.Cell.Y})")))
+                throw new LevelContentException($"Tile behavior override at layer {entry.Layer} cell ({entry.Cell.X},{entry.Cell.Y}) is defined more than once.");
+        }
+
+        return overrides;
+    }
+
+    /// <summary>Resolves and validates the level's area triggers (DiVoid #7738, design #7704 §6): each rect must have a positive size and lie fully within the level grid.</summary>
+    private static List<ResolvedAreaTrigger> ResolveTriggers(IResourceResolver resolver, LevelDefinition level)
+    {
+        var triggers = new List<ResolvedAreaTrigger>(level.Triggers.Count);
+        foreach (var trigger in level.Triggers)
+        {
+            if (trigger.Width <= 0 || trigger.Height <= 0)
+                throw new LevelContentException($"Trigger '{trigger.Name}' has a non-positive size ({trigger.Width}x{trigger.Height}).");
+            if (trigger.X < 0 || trigger.Y < 0 || trigger.X + trigger.Width > level.Width || trigger.Y + trigger.Height > level.Height)
+                throw new LevelContentException(
+                    $"Trigger '{trigger.Name}' rect ({trigger.X},{trigger.Y},{trigger.Width}x{trigger.Height}) does not fit within the {level.Width}x{level.Height} grid.");
+
+            triggers.Add(new ResolvedAreaTrigger
+            {
+                Name = trigger.Name,
+                X = trigger.X,
+                Y = trigger.Y,
+                Width = trigger.Width,
+                Height = trigger.Height,
+                Binding = ResolveBinding(resolver, trigger.Binding, $"trigger '{trigger.Name}'"),
+            });
+        }
+
+        return triggers;
+    }
+
+    private static ResolvedBehaviorBinding ResolveBinding(IResourceResolver resolver, BehaviorBinding binding, string role)
+    {
+        try
+        {
+            return BehaviorBindingResolver.Resolve(resolver, binding);
+        }
+        catch (Exception exception) when (exception is UnresolvedReferenceException or ResourceNotFoundException)
+        {
+            throw new LevelContentException($"The {role} script resource could not be resolved.", exception);
+        }
     }
 
     private static RgbaColor? ParseBackgroundColor(LevelDefinition level)

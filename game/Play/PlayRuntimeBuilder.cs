@@ -29,15 +29,27 @@ namespace Uberkarl {
         static readonly Vector2I FallbackStart = new Vector2I(1, 1);
 
         /// <summary>
-        /// Adds the level's background fill, tile layers, player, and following camera as children of
-        /// <paramref name="root"/>. Returns the spawned <see cref="Player"/>.
+        /// Adds the level's background fill, tile layers, player, following camera, and behavior runtime
+        /// (DiVoid #7738 -- scripted tiles/area triggers/level script, via <see cref="BehaviorRuntime"/>) as
+        /// children of <paramref name="root"/>. Returns the spawned <see cref="Player"/>.
         /// </summary>
         public static Player Populate(Node2D root, ResolvedLevel level) {
             AddBackgroundFill(root, level);
             root.AddChild(TileMapLevelBuilder.Build(level));
             Player player = SpawnPlayer(root, level);
             AttachCamera(player, level);
+            AttachBehaviorRuntime(root, level, player);
             return player;
+        }
+
+        // The behavior runtime is a plain child node added last, after the player exists (DiVoid #7738,
+        // design #7704 §9.1 -- "PlayRuntimeBuilder.Populate gains a BehaviorRuntime step"). Being in THIS
+        // shared builder is what makes standalone play (LevelPlay) and editor playtest (PlaytestOverlay)
+        // get behavior identically (design C-4) -- neither caller needs its own wiring.
+        static void AttachBehaviorRuntime(Node2D root, ResolvedLevel level, Player player) {
+            BehaviorRuntime runtime = new BehaviorRuntime { Name = "BehaviorRuntime" };
+            root.AddChild(runtime);
+            runtime.Configure(level, player);
         }
 
         // Renders the level's optional solid background fill behind every layer. A full-rect ColorRect

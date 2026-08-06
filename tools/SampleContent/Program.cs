@@ -1,3 +1,4 @@
+using Uberkarl.Behavior;
 using Uberkarl.Content;
 using Uberkarl.Content.Json;
 using Uberkarl.Packages;
@@ -12,6 +13,8 @@ var outputPath = args.Length > 0 ? args[0] : Path.Combine("content", "sample.pkg
 // Id, file, RGB, and whether the tile is solid (collision is a property of the tile — a full-tile shape
 // when solid, none otherwise; DiVoid #7551 Phase 4's richer shapes are an authoring-time concern, not
 // needed for this generated sample).
+const int SpikeTileId = 8;
+
 var palette = new (int Id, string File, byte R, byte G, byte B, bool Solid)[]
 {
     (1, "tiles/grass.png", 78, 168, 66, true),
@@ -21,12 +24,19 @@ var palette = new (int Id, string File, byte R, byte G, byte B, bool Solid)[]
     (5, "tiles/water.png", 64, 122, 210, false),
     (6, "tiles/hill.png", 86, 110, 120, false),   // distant background hills (non-colliding, parallax layer)
     (7, "tiles/cloud.png", 210, 215, 225, false), // distant background clouds (non-colliding, parallax layer)
+    // DiVoid #7738 (behavior system Phase 1) demo hazard: a solid obstacle the player must jump over,
+    // wired below to the "hurtOnContact" predefined behavior -- see SpikeTileId's use.
+    (SpikeTileId, "tiles/spike.png", 200, 40, 40, true),
 };
 
 var builder = new PackageBuilder()
     .WithName("Uberkarl Demo Level")
     .WithVersion("0.1.0")
     .WithAttribution(new Attribution { Author = "Uberkarl", License = "CC0-1.0" });
+
+// DiVoid #7738 -- the tile-set-level default binding proving "spikes always hurt" (design #7704 §6):
+// authored here as a PREDEFINED binding (no script resource needed), the gamepad-authorable path.
+var spikeBehavior = BehaviorBinding.FromPredefined(PredefinedBehaviors.HurtOnContact, new Dictionary<string, object?> { ["amount"] = 10 });
 
 var tiles = new List<TileDefinition>();
 foreach (var entry in palette)
@@ -35,12 +45,28 @@ foreach (var entry in palette)
     var png = PngWriter.Encode(TileSize, TileSize, SolidTile(TileSize, entry.R, entry.G, entry.B));
     builder.AddResource(ResourceKind.TileGraphic, path, png, "image/png");
     var collisionShape = entry.Solid ? CollisionShapeDefinition.Full : CollisionShapeDefinition.None;
-    tiles.Add(new TileDefinition { Id = entry.Id, Graphic = ResourceReference.ToSelf(path), CollisionShape = collisionShape });
+    tiles.Add(new TileDefinition
+    {
+        Id = entry.Id,
+        Graphic = ResourceReference.ToSelf(path),
+        CollisionShape = collisionShape,
+        Behavior = entry.Id == SpikeTileId ? spikeBehavior : null,
+    });
 }
 
 var tileSet = new TileSetDefinition { Tiles = tiles };
 var tileSetPath = ResourcePath.Create("tileset.json");
 builder.AddResource(ResourceKind.TileSet, tileSetPath, LevelContentSerializer.WriteTileSet(tileSet));
+
+// DiVoid #7738 -- the level script proves the third scripted subject (lifecycle + onUpdate). Authored as a
+// SCRIPT binding (a Pooscript resource), the free-text path, complementing the predefined bindings above.
+var levelScriptPath = ResourcePath.Create("scripts/level.poo");
+const string LevelScriptSource = """
+    $onLevelStart = [] => { self.setState("started", true); }
+    $onUpdate = $delta => { self.setState("elapsed", delta); }
+    { "onLevelStart": onLevelStart, "onUpdate": onUpdate }
+    """;
+builder.AddResource(ResourceKind.Script, levelScriptPath, System.Text.Encoding.UTF8.GetBytes(LevelScriptSource), "text/x-pooscript");
 
 var level = new LevelDefinition
 {
@@ -64,6 +90,20 @@ var level = new LevelDefinition
         // The world-locked collision layer (scrollSpeed 1.0): ground, side walls, and platforms.
         new LayerDefinition { Name = "terrain", Collision = true, ScrollSpeed = 1.0f, Cells = BuildTerrainLayer() },
     },
+    // DiVoid #7738 -- an area trigger proving the second scripted subject (onEnter/onLeave), spanning the
+    // full ground-to-head height at columns 30-31 so walking through is enough to trigger it regardless of
+    // jump timing. PREDEFINED binding again (gamepad-authorable), with an explicit parameter overriding the
+    // default amount, proving the param-picker path the design calls for (§10.2).
+    Triggers = new[]
+    {
+        new AreaTriggerDefinition
+        {
+            Name = "heal-zone",
+            X = 30, Y = 9, Width = 2, Height = 4,
+            Binding = BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter, new Dictionary<string, object?> { ["amount"] = 20 }),
+        },
+    },
+    LevelScript = BehaviorBinding.FromScript(ResourceReference.ToSelf(levelScriptPath)),
 };
 builder.AddResource(ResourceKind.Level, ResourcePath.Create("levels/demo.json"), LevelContentSerializer.WriteLevel(level));
 
@@ -149,6 +189,10 @@ static int[] BuildTerrainLayer()
     PlatformRun(cells, 12, 15, 9);
     PlatformRun(cells, 26, 29, 8);
     PlatformRun(cells, 42, 45, 9);
+
+    // DiVoid #7738 -- a solid spike obstacle sitting on the ground surface, hurt-on-contact bound via
+    // spikeBehavior above. One tile tall (row 11, just above the grass at row 12) so it is jumpable.
+    Set(cells, 20, 11, SpikeTileId);
 
     return cells;
 }
