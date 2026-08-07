@@ -1,41 +1,27 @@
 using System.Diagnostics;
 using NUnit.Framework;
+using Pooshit.Scripting;
 
 namespace Uberkarl.Behavior.Tests;
 
-/// <summary>
-/// Covers the P0 acceptance gate's load-bearing requirement (DiVoid #7710): "a looping / CPU-burning /
-/// throwing script is quarantined (budget breach kills the handler, subject degrades) and the test host
-/// keeps running" — demonstrated in a test that would hang if the watchdog only relied on cooperative
-/// Pooscript cancellation (design #7704 §8.4: #7409 is open, and a cached handler's cancellation token is
-/// fixed at parse+init time — see <see cref="BehaviorWatchdog"/>'s doc comment for what was verified).
-/// Every test here asserts elapsed wall-clock time to prove the CALLING thread — this test process, i.e.
-/// "the host" — was never blocked past the watchdog budget, regardless of whether the runaway script
-/// thread itself ever actually stops.
-/// </summary>
+/// <summary>Proves the native <c>ScriptLimits</c> guards quarantine an over-budget subject while the host keeps running (DiVoid #7737).</summary>
 [TestFixture]
-public sealed class WatchdogQuarantineTests
+public sealed class ScriptLimitQuarantineTests
 {
-    // Small and deterministic so these tests run fast while still proving the guarantee: even a script that
-    // spins forever and never checks cancellation cannot block a caller past roughly this budget.
-    private static readonly TimeSpan Budget = TimeSpan.FromMilliseconds(150);
-
-    // Generous upper bound for "the host kept running" -- if the watchdog were broken (e.g. it awaited the
-    // runaway task instead of abandoning it) this assertion would fail (or the test would hang until the
-    // fixture's own kill switch, never silently pass).
+    private static readonly ScriptLimits TinyStepBudget = new() { MaxSteps = 500, Timeout = TimeSpan.FromSeconds(5) };
+    private static readonly ScriptLimits TinyDepthBudget = new() { MaxDepth = 5, Timeout = TimeSpan.FromSeconds(5) };
+    private static readonly ScriptLimits TinyMemoryBudget = new() { MaxVariableBytes = 4096, MaxSteps = 1_000_000, Timeout = TimeSpan.FromSeconds(5) };
     private static readonly TimeSpan MustReturnWithin = TimeSpan.FromSeconds(3);
 
     [Test]
     [CancelAfter(10_000)]
     public void LoopingHandler_IsQuarantined_AndTheHostKeepsRunning()
     {
-        var ctx = new BehaviorTestContext(Budget);
+        var ctx = new BehaviorTestContext(TinyStepBudget);
         var subject = ctx.CreateSubject("obj-1", "object", "runaway");
         var quarantineEvents = new List<BehaviorQuarantineEvent>();
         ctx.Scheduler.Quarantined += quarantineEvents.Add;
 
-        // A tight `while(true)` with a non-trivial body -- exactly the shape design #7704 §8.4 flags as not
-        // yet guaranteed-interruptible by Pooscript's own (incomplete, #7409) cooperative cancellation.
         var instance = ctx.Compile(subject, """
             $onUpdate = $delta => { while(true) { $x = 1; } }
             { "onUpdate": onUpdate }
@@ -48,15 +34,13 @@ public sealed class WatchdogQuarantineTests
 
         Assert.That(fired, Is.False);
         Assert.That(stopwatch.Elapsed, Is.LessThan(MustReturnWithin),
-            "the scheduler must return control near the watchdog budget -- this is the freeze-proof guarantee itself");
+            "the scheduler must return control near the configured budget -- this is the freeze-proof guarantee itself");
         Assert.That(ctx.Scheduler.IsQuarantined("obj-1"), Is.True);
         Assert.That(quarantineEvents, Has.Count.EqualTo(1));
         Assert.That(quarantineEvents[0].SubjectId, Is.EqualTo("obj-1"));
         Assert.That(quarantineEvents[0].TriggeringEvent, Is.EqualTo(BehaviorEventKind.OnUpdate));
-        Assert.That(quarantineEvents[0].Reason, Does.Contain("budget"));
+        Assert.That(quarantineEvents[0].Reason, Does.Contain("budget").And.Contain("ScriptStepLimitExceededException"));
 
-        // The host is demonstrably still alive and responsive: an unrelated, healthy subject dispatches fine
-        // right after the runaway one -- nothing about the leaked background thread affects it.
         var healthy = ctx.CreateSubject("obj-2", "object", "healthy");
         ctx.Compile(healthy, """
             $onUpdate = $delta => { self.setState("ok", true); }
@@ -64,17 +48,15 @@ public sealed class WatchdogQuarantineTests
             """);
         Assert.That(ctx.Scheduler.DispatchUpdate("obj-2", 0.016), Is.True);
 
-        // Quarantine is permanent and silent from here on: re-dispatching the runaway subject is a pure
-        // no-op and does NOT raise a second Quarantined notification (design #7704 §8.3 -- "logged once").
         Assert.That(ctx.Scheduler.DispatchUpdate("obj-1", 0.016), Is.False);
-        Assert.That(quarantineEvents, Has.Count.EqualTo(1));
+        Assert.That(quarantineEvents, Has.Count.EqualTo(1), "quarantine is permanent and logged exactly once");
     }
 
     [Test]
     [CancelAfter(10_000)]
     public void ThrowingHandler_IsQuarantined_AndTheHostKeepsRunning()
     {
-        var ctx = new BehaviorTestContext(Budget);
+        var ctx = new BehaviorTestContext();
         var subject = ctx.CreateSubject("obj-1", "object", "buggy");
         var instance = ctx.Compile(subject, """
             $onContact = $other => { throw("boom") }
@@ -96,7 +78,7 @@ public sealed class WatchdogQuarantineTests
     [CancelAfter(10_000)]
     public void LoopingInit_IsQuarantined_BeforeRegistration_CompileNeverHangs()
     {
-        var ctx = new BehaviorTestContext(Budget);
+        var ctx = new BehaviorTestContext(TinyStepBudget);
         var subject = ctx.CreateSubject("obj-1", "object", "runaway-init");
 
         var stopwatch = Stopwatch.StartNew();
@@ -104,15 +86,50 @@ public sealed class WatchdogQuarantineTests
         stopwatch.Stop();
 
         Assert.That(stopwatch.Elapsed, Is.LessThan(MustReturnWithin),
-            "a malicious init body must not block Compile -- the watchdog guards init exactly like a handler dispatch");
+            "a malicious init body must not block Compile -- the guard applies to init exactly like a handler dispatch");
         Assert.That(instance.IsQuarantined, Is.True);
         Assert.That(instance.Compiled.QuarantineReason, Does.Contain("budget"));
     }
 
     [Test]
+    [CancelAfter(10_000)]
+    public void DeepRecursion_IsQuarantined_ViaMaxDepth()
+    {
+        var ctx = new BehaviorTestContext(TinyDepthBudget);
+        var subject = ctx.CreateSubject("obj-1", "object", "recursive");
+        ctx.Compile(subject, """
+            $recurse = $n => { recurse(n + 1) }
+            $onUpdate = $delta => { recurse(0) }
+            { "onUpdate": onUpdate }
+            """);
+
+        var fired = ctx.Scheduler.DispatchUpdate("obj-1", 0.016);
+
+        Assert.That(fired, Is.False);
+        Assert.That(ctx.Scheduler.IsQuarantined("obj-1"), Is.True);
+    }
+
+    [Test]
+    [CancelAfter(10_000)]
+    public void OversizedVariable_IsQuarantined_ViaMaxVariableBytes()
+    {
+        var ctx = new BehaviorTestContext(TinyMemoryBudget);
+        var subject = ctx.CreateSubject("obj-1", "object", "memoryhog");
+        ctx.Compile(subject, """
+            $onUpdate = $delta => { $s = "x"; while(true) { s = s + s; } }
+            { "onUpdate": onUpdate }
+            """);
+
+        var fired = ctx.Scheduler.DispatchUpdate("obj-1", 0.016);
+
+        Assert.That(fired, Is.False);
+        Assert.That(ctx.Scheduler.IsQuarantined("obj-1"), Is.True);
+    }
+
+    [Test]
     public void ParseError_IsQuarantined_NotThrown()
     {
-        var ctx = new BehaviorTestContext(Budget);
+        var ctx = new BehaviorTestContext();
         var subject = ctx.CreateSubject("obj-1", "object", "malformed");
 
         var instance = ctx.Compile(subject, "$onContact = $other => { ");

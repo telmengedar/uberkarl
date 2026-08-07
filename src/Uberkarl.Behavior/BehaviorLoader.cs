@@ -1,111 +1,72 @@
 namespace Uberkarl.Behavior;
 
 using System.Collections;
-using System.Threading;
+using Pooshit.Scripting;
 using Pooshit.Scripting.Errors;
 using Pooshit.Scripting.Parser;
 using Pooshit.Scripting.Providers;
 
-/// <summary>
-/// Turns Pooscript text into a reusable <see cref="CompiledBehavior"/> (design #7704 §5.3): parses once,
-/// runs a one-time "init execute" with the facade globals bound, and reads back the handler lambdas the
-/// script assigned. Also the seat of the capability boundary (design #7704 §8.2/C-8) — the parser this
-/// builds registers ONLY the caller-supplied facade globals; <c>import</c>/<c>new</c>/casts are off, so a
-/// behavior script can never reach reflection, file, network, or any type beyond what the globals expose.
-///
-/// <para>
-/// Handler convention (design §7, D-1): the script assigns named handler lambdas to top-level variables
-/// (e.g. <c>$onContact = $other =&gt; { ... }</c>) and, as its LAST statement, returns a dictionary literal
-/// echoing them back — <c>{ "onContact": onContact, "onUpdate": onUpdate }</c>. This is required because
-/// Pooscript's top-level variable assignments do not persist into the host-supplied variable provider after
-/// <c>Execute</c> returns (verified empirically against Pooshit.Scripting 0.18.18-preview): only the
-/// explicit return value survives. Handler bodies should end with their result as the last expression rather
-/// than an explicit <c>return</c> — <c>return</c> inside a lambda invoked later via the cached delegate does
-/// not propagate a value in this Pooscript version (also verified empirically); this does not affect the
-/// behavior layer in practice because handlers communicate only through recorded intents, never return
-/// values.
-/// </para>
-/// </summary>
+/// <summary>Compiles Pooscript text into a reusable <see cref="CompiledBehavior"/>: parses once, runs a one-time init execute with the facade globals bound, and reads back the handler lambdas the script assigned.</summary>
 public sealed class BehaviorLoader
 {
-    private readonly BehaviorWatchdog watchdog;
+    private readonly ScriptLimits behaviorLimits;
+    private readonly ScriptLimits initLimits;
 
-    public BehaviorLoader(BehaviorWatchdog watchdog) => this.watchdog = watchdog;
+    /// <summary>Creates a new <see cref="BehaviorLoader"/>.</summary>
+    /// <param name="behaviorLimits">Budget applied to tile/trigger/object behavior scripts.</param>
+    /// <param name="initLimits">Budget applied to the level script.</param>
+    public BehaviorLoader(ScriptLimits behaviorLimits, ScriptLimits initLimits)
+    {
+        this.behaviorLimits = behaviorLimits ?? throw new ArgumentNullException(nameof(behaviorLimits));
+        this.initLimits = initLimits ?? throw new ArgumentNullException(nameof(initLimits));
+    }
 
-    /// <summary>
-    /// Compiles <paramref name="source"/> against the given facade globals (typically <c>self</c>,
-    /// <c>level</c>, <c>player</c>, <c>event</c> — design #7704 §8.1/§8.2). Always returns a usable
-    /// <see cref="CompiledBehavior"/>: a parse error, an init-time exception, or an init-time budget breach
-    /// all produce an already-quarantined result rather than throwing, so callers never need a separate
-    /// failure path — they register the result with a <see cref="BehaviorScheduler"/> exactly like a
-    /// healthy one, and dispatch simply becomes a no-op for it.
-    /// </summary>
-    /// <summary>
-    /// Compiles a <see cref="ResolvedBehaviorBinding"/> — the single entry point Phase-1 runtime wiring uses
-    /// for every scripted subject (tile cell, area trigger, level script), whatever kind of binding it
-    /// carries (design #7704 §5.2 "binding is the small shared value all four subjects use"). A script
-    /// binding's already-resolved source is compiled directly; a predefined binding's id is resolved to
-    /// source via <see cref="PredefinedBehaviors"/> first. An unknown predefined id quarantines exactly like
-    /// a parse error — this method never throws for bad content, matching <see cref="Compile"/>'s contract.
-    /// </summary>
-    public CompiledBehavior CompileBinding(ResolvedBehaviorBinding binding, IReadOnlyDictionary<string, object> facadeGlobals)
+    /// <summary>Compiles a <see cref="ResolvedBehaviorBinding"/> (script or predefined) against the given facade globals.</summary>
+    public CompiledBehavior CompileBinding(ResolvedBehaviorBinding binding, IReadOnlyDictionary<string, object> facadeGlobals, BehaviorScriptRole role = BehaviorScriptRole.Behavior)
     {
         if (binding is null)
             throw new ArgumentNullException(nameof(binding));
 
         if (binding.IsScript)
-            return Compile(binding.Script!, facadeGlobals);
+            return Compile(binding.Script!, facadeGlobals, role);
 
         if (!PredefinedBehaviors.TryGetSource(binding.PredefinedId!, binding.Parameters, out var source))
-        {
-            var quarantined = new CompiledBehavior(EmptyHandlers, new CancellationTokenSource());
-            quarantined.Quarantine($"unknown predefined behavior id '{binding.PredefinedId}'");
-            return quarantined;
-        }
+            return Quarantined($"unknown predefined behavior id '{binding.PredefinedId}'");
 
-        return Compile(source, facadeGlobals);
+        return Compile(source, facadeGlobals, role);
     }
 
-    public CompiledBehavior Compile(string source, IReadOnlyDictionary<string, object> facadeGlobals)
+    /// <summary>Compiles <paramref name="source"/> against the given facade globals.</summary>
+    public CompiledBehavior Compile(string source, IReadOnlyDictionary<string, object> facadeGlobals, BehaviorScriptRole role = BehaviorScriptRole.Behavior)
     {
-        var instanceCancellation = new CancellationTokenSource();
-
         Pooshit.Scripting.IScript script;
-        try
-        {
-            script = CreateSandboxedParser().Parse(source);
+        try {
+            script = CreateSandboxedParser(role).Parse(source);
         }
-        catch (ScriptParserException ex)
-        {
-            var quarantined = new CompiledBehavior(EmptyHandlers, instanceCancellation);
-            quarantined.Quarantine($"parse error: {ex.Message}");
-            return quarantined;
+        catch (ScriptParserException ex) {
+            return Quarantined($"parse error: {ex.Message}");
         }
 
         var initVariables = new Dictionary<string, object>(facadeGlobals);
-        var outcome = watchdog.Execute(() => script.Execute(initVariables), instanceCancellation);
+        if (!ScriptExecutionGuard.TryRun(() => script.Execute(initVariables), out var initResult, out var failureReason))
+            return Quarantined($"init {failureReason}");
 
-        if (outcome.Kind != BehaviorWatchdogOutcomeKind.Completed)
-        {
-            var quarantined = new CompiledBehavior(EmptyHandlers, instanceCancellation);
-            quarantined.Quarantine(outcome.Kind == BehaviorWatchdogOutcomeKind.BudgetExceeded
-                ? $"init exceeded the {watchdog.Budget.TotalMilliseconds}ms watchdog budget"
-                : $"init threw: {outcome.Exception}");
-            return quarantined;
-        }
-
-        return new CompiledBehavior(ExtractHandlers(outcome.Value), instanceCancellation);
+        return new CompiledBehavior(ExtractHandlers(initResult));
     }
 
-    private static ScriptParser CreateSandboxedParser() => new()
-    {
-        // Capability lock (design #7704 §8.2, C-8/#2946): only the facade globals the caller binds are
-        // reachable. Control flow (if/while/for/...) stays ON -- behavior scripts need it, and the watchdog
-        // (not a restricted grammar) is what makes an unbounded loop safe.
+    private ScriptParser CreateSandboxedParser(BehaviorScriptRole role) => new() {
         TypeInstanceProvidersEnabled = false,
         TypeCastsEnabled = false,
         ImportsEnabled = false,
+        Limits = role == BehaviorScriptRole.Init ? initLimits : behaviorLimits,
     };
+
+    private static CompiledBehavior Quarantined(string reason)
+    {
+        var behavior = new CompiledBehavior(EmptyHandlers);
+        behavior.Quarantine(reason);
+        return behavior;
+    }
 
     private static IReadOnlyDictionary<BehaviorEventKind, BehaviorHandler> ExtractHandlers(object? initResult)
     {

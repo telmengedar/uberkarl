@@ -1,27 +1,20 @@
+using Pooshit.Scripting;
+
 namespace Uberkarl.Behavior.Tests;
 
-/// <summary>
-/// Shared Godot-free test rig composing the reference facades (<see cref="BehaviorLevel"/>/
-/// <see cref="BehaviorPlayer"/>/<see cref="BehaviorSubject"/>) with a <see cref="BehaviorLoader"/> and
-/// <see cref="BehaviorScheduler"/> exactly the way a real (future, Godot) host would — this class itself IS
-/// the "fake host" design #7704 §5.3 calls for, built from the core's own reference facade rather than a
-/// second bespoke test double, per <see cref="BehaviorSubject"/>'s doc comment.
-/// </summary>
+/// <summary>Shared Godot-free test rig composing the reference facades with a <see cref="BehaviorLoader"/> and <see cref="BehaviorScheduler"/> exactly the way a real host would.</summary>
 internal sealed class BehaviorTestContext
 {
-    public BehaviorTestContext(TimeSpan? budget = null)
+    public BehaviorTestContext(ScriptLimits? behaviorLimits = null, ScriptLimits? initLimits = null)
     {
         Intents = new IntentBuffer();
-        Watchdog = new BehaviorWatchdog(budget ?? TimeSpan.FromMilliseconds(200));
-        Loader = new BehaviorLoader(Watchdog);
-        Scheduler = new BehaviorScheduler(Watchdog);
+        Loader = new BehaviorLoader(behaviorLimits ?? BehaviorScriptBudgets.DefaultBehavior(), initLimits ?? BehaviorScriptBudgets.DefaultInit());
+        Scheduler = new BehaviorScheduler();
         Level = new BehaviorLevel(Intents);
         Player = new BehaviorPlayer(Intents);
     }
 
     public IntentBuffer Intents { get; }
-
-    public BehaviorWatchdog Watchdog { get; }
 
     public BehaviorLoader Loader { get; }
 

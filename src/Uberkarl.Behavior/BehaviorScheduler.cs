@@ -1,28 +1,12 @@
 namespace Uberkarl.Behavior;
 
-/// <summary>Raised exactly once per subject the moment it is quarantined — either at registration (already quarantined by <see cref="BehaviorLoader"/>) or on its first runtime budget breach/exception (design #7704 §8.3 — "logged once, not per frame").</summary>
+/// <summary>Raised exactly once per subject the moment it is quarantined.</summary>
 public sealed record BehaviorQuarantineEvent(string SubjectId, BehaviorEventKind? TriggeringEvent, string Reason);
 
-/// <summary>
-/// Owns the registry of live <see cref="BehaviorInstance"/>s and routes events to their cached handlers
-/// (design #7704 §5.4). Every dispatch runs through the shared <see cref="BehaviorWatchdog"/>; a breach or
-/// exception quarantines that instance permanently (dispatch becomes a silent no-op from then on) and raises
-/// <see cref="Quarantined"/> exactly once — the scheduler itself is never blocked past the watchdog's
-/// budget, and a quarantined subject never gets dispatched to again, so the "logged once" guarantee falls
-/// out of the registration/quarantine state machine rather than needing separate bookkeeping.
-///
-/// <para>
-/// Does NOT own producing raw engine events (a glue layer pushes those in via the <c>Dispatch*</c> calls)
-/// nor applying the intents handlers record (the host drains <see cref="IntentBuffer"/> after the phase) —
-/// per design #7704 §5.4's explicit non-ownership.
-/// </para>
-/// </summary>
+/// <summary>Owns the registry of live <see cref="BehaviorInstance"/>s and routes events to their cached handlers, quarantining a subject on breach or exception.</summary>
 public sealed class BehaviorScheduler
 {
-    private readonly BehaviorWatchdog watchdog;
     private readonly Dictionary<string, BehaviorInstance> instances = new();
-
-    public BehaviorScheduler(BehaviorWatchdog watchdog) => this.watchdog = watchdog;
 
     /// <summary>
     /// The shared <c>event</c> facade object (design #7704 §8.1). Bind this as the "event" global
@@ -46,12 +30,7 @@ public sealed class BehaviorScheduler
 
     public IReadOnlyCollection<string> RegisteredSubjectIds => instances.Keys;
 
-    /// <summary>
-    /// Dispatches one event to one subject's cached handler, watchdog-guarded. Returns false (a silent
-    /// no-op) when the subject isn't registered, is already quarantined, or has no handler for this event
-    /// kind; returns false and quarantines the subject when the handler breaches budget or throws. Prefer
-    /// the typed <c>Dispatch*</c> helpers below, which also keep <see cref="CurrentEvent"/> in sync.
-    /// </summary>
+    /// <summary>Dispatches one event to one subject's cached handler. Prefer the typed <c>Dispatch*</c> helpers below, which also keep <see cref="CurrentEvent"/> in sync.</summary>
     public bool Dispatch(string subjectId, BehaviorEventKind kind, params object?[] arguments)
     {
         if (!instances.TryGetValue(subjectId, out var instance) || instance.IsQuarantined)
@@ -60,13 +39,10 @@ public sealed class BehaviorScheduler
         if (!instance.Compiled.Handlers.TryGetValue(kind, out var handler))
             return false;
 
-        var outcome = watchdog.Execute(() => handler.Invoke(arguments), instance.Compiled.Cancellation);
-        if (outcome.Kind == BehaviorWatchdogOutcomeKind.Completed)
+        if (ScriptExecutionGuard.TryRun(() => handler.Invoke(arguments), out _, out var failureReason))
             return true;
 
-        var reason = outcome.Kind == BehaviorWatchdogOutcomeKind.BudgetExceeded
-            ? $"{kind} exceeded the {watchdog.Budget.TotalMilliseconds}ms watchdog budget"
-            : $"{kind} threw: {outcome.Exception}";
+        var reason = $"{kind} {failureReason}";
         instance.Compiled.Quarantine(reason);
         Quarantined?.Invoke(new BehaviorQuarantineEvent(subjectId, kind, reason));
         return false;

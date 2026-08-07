@@ -12,15 +12,12 @@ namespace Uberkarl {
     /// </summary>
     public partial class BehaviorRuntime : Node {
 
-        static readonly TimeSpan WatchdogBudget = TimeSpan.FromMilliseconds(50);
-
         const float ContactMargin = 1f;
 
         const string LevelScriptSubjectId = "level-script";
 
         static readonly bool DiagnosticsEnabled = false;
 
-        BehaviorWatchdog watchdog;
         BehaviorLoader loader;
         BehaviorScheduler scheduler;
         IntentBuffer intents;
@@ -78,9 +75,8 @@ namespace Uberkarl {
             respawnPosition = PlayRuntimeBuilder.SpawnWorldPosition(level);
             player.Died += OnPlayerDied;
 
-            watchdog = new BehaviorWatchdog(WatchdogBudget);
-            loader = new BehaviorLoader(watchdog);
-            scheduler = new BehaviorScheduler(watchdog);
+            loader = new BehaviorLoader(BehaviorScriptBudgets.DefaultBehavior(), BehaviorScriptBudgets.DefaultInit());
+            scheduler = new BehaviorScheduler();
             intents = new IntentBuffer();
             levelFacade = new BehaviorLevel(intents);
             playerFacade = new BehaviorPlayer(intents);
@@ -142,7 +138,7 @@ namespace Uberkarl {
 
             var subject = new BehaviorSubject(LevelScriptSubjectId, "level", string.Empty, intents);
             subjectsById[LevelScriptSubjectId] = subject;
-            scheduler.Register(new BehaviorInstance(LevelScriptSubjectId, loader.CompileBinding(binding, Globals(subject))));
+            scheduler.Register(new BehaviorInstance(LevelScriptSubjectId, loader.CompileBinding(binding, Globals(subject), BehaviorScriptRole.Init)));
             hasLevelScript = true;
         }
 
