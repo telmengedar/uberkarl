@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 using Uberkarl.Behavior;
 using Uberkarl.Content;
@@ -7,63 +8,17 @@ using Uberkarl.Content;
 namespace Uberkarl {
 
     /// <summary>
-    /// Godot glue wiring the Godot-free <c>Uberkarl.Behavior</c> core onto real level subjects (DiVoid #7738,
-    /// design #7704 §5.8/§9.1-9.3): scripted tiles, area triggers, and the level script. Added as a child by
-    /// <see cref="PlayRuntimeBuilder.Populate"/>, so standalone play (<see cref="LevelPlay"/>) and editor
-    /// playtest (<see cref="PlaytestOverlay"/>) get behavior identically (design C-4) -- this class owns no
-    /// decision logic beyond "which subjects to create and when to dispatch"; the actual reacting is entirely
-    /// the compiled Pooscript's.
-    ///
-    /// <para>
-    /// <b>One subject/facade model, parameterized by kind</b> (DiVoid #7738 KISS guardrail): every scripted
-    /// tile cell, every trigger, and the level itself is a plain <see cref="BehaviorSubject"/> with a
-    /// different <c>Kind</c> string ("tile"/"trigger"/"level") -- there is no
-    /// TileBehaviorSubject/TriggerBehaviorSubject/LevelBehaviorSubject split. This mirrors how the P0 core
-    /// itself is built (<see cref="BehaviorSubject"/> already carries <c>Kind</c> as data); this glue never
-    /// introduces a parallel subject type.
-    /// </para>
-    ///
-    /// <para>
-    /// <b>Contact detection</b> (design #7704 §9.3) is a geometric AABB overlap between the player's
-    /// collision box (<see cref="Player.CollisionHalfExtents"/>) and each scripted cell's/trigger's world
-    /// rect, re-evaluated every physics frame -- deliberately NOT read off Godot's tilemap physics-slide
-    /// collision info, because a tile's SCRIPTED behavior is independent of whether its layer actually
-    /// blocks movement (a non-colliding "hurt" layer must still fire <c>onContact</c>). Edge-triggered per
-    /// design #7704 §7/§11: a cell/trigger only re-fires when the overlap STATE changes, tracked in
-    /// <see cref="contactedTileIds"/>/<see cref="insideTriggerIds"/>.
-    /// </para>
-    ///
-    /// <para>
-    /// <b>Intents applied this phase</b> (task #7738 scope -- "the ones meaningful without free objects yet"):
-    /// <see cref="HurtIntent"/>/<see cref="HealIntent"/> (against <see cref="Player.Hurt"/>/<see cref="Player.Heal"/>)
-    /// and <see cref="SetStateIntent"/> (routed to the level's shared state, the player's state, or the
-    /// issuing subject's own private state). Every other intent kind is drained every frame (so the buffer
-    /// never grows unbounded) but deliberately left unapplied -- <c>moveTo</c>/move-object and friends arrive
-    /// with P2's free-moving objects.
-    /// </para>
-    ///
-    /// <para>
-    /// <b>Pooscript-compatibility</b> (DiVoid #7718/#7732/#7738): this glue dispatches exclusively through
-    /// <see cref="BehaviorScheduler"/>'s <c>Dispatch*</c> methods and <see cref="BehaviorLoader.CompileBinding"/>
-    /// -- the P0 entry points that already run every script invocation through <see cref="BehaviorWatchdog"/>.
-    /// It introduces no separate try/catch around a handler invoke of its own, so the pending watchdog swap
-    /// (task #7737, replacing thread-abandonment with native <c>ScriptLimits</c>) is entirely a change inside
-    /// <c>Uberkarl.Behavior</c> -- a config change from this glue's point of view, exactly as required.
-    /// </para>
+    /// Godot glue wiring the Godot-free <c>Uberkarl.Behavior</c> core onto real level subjects: scripted tiles, area triggers, and the level script.
     /// </summary>
     public partial class BehaviorRuntime : Node {
 
-        // Per-invocation wall-clock watchdog budget (design #7704 §8.3). Generous relative to a 60fps frame
-        // (~16.6ms) because it only matters on BREACH -- BehaviorWatchdog never blocks the calling thread past
-        // this budget, so a healthy dispatch (the overwhelming common case) returns near-instantly regardless.
         static readonly TimeSpan WatchdogBudget = TimeSpan.FromMilliseconds(50);
 
-        // The level script's own "self" subject id. Deliberately NOT BehaviorSubjectIds.Level ("level") --
-        // that id is reserved for the SHARED level-wide state bag every subject reaches via the `level`
-        // global (BehaviorLevel.State). Keeping this id distinct preserves the same "self is private,
-        // `level`/`player` are shared" split every other subject kind already has; it does not collapse the
-        // level script's own self.state into level.state.
+        const float ContactMargin = 1f;
+
         const string LevelScriptSubjectId = "level-script";
+
+        static readonly bool DiagnosticsEnabled = false;
 
         BehaviorWatchdog watchdog;
         BehaviorLoader loader;
@@ -75,11 +30,16 @@ namespace Uberkarl {
         int tileSize;
         bool hasLevelScript;
 
+        Vector2 respawnPosition;
+
         readonly Dictionary<string, BehaviorSubject> subjectsById = new Dictionary<string, BehaviorSubject>();
         readonly List<ScriptedTile> scriptedTiles = new List<ScriptedTile>();
         readonly List<ScriptedTrigger> scriptedTriggers = new List<ScriptedTrigger>();
         readonly HashSet<string> contactedTileIds = new HashSet<string>();
         readonly HashSet<string> insideTriggerIds = new HashSet<string>();
+
+        bool loggedFirstTick;
+        GridCell lastLoggedCell = new GridCell(int.MinValue, int.MinValue);
 
         readonly struct ScriptedTile {
             public ScriptedTile(string subjectId, Rect2 worldRect, GridCell cell) {
@@ -101,18 +61,22 @@ namespace Uberkarl {
             public Rect2 WorldRect { get; }
         }
 
+        public override void _Ready() {
+            if (DiagnosticsEnabled)
+                GD.Print("[behavior] BehaviorRuntime._Ready attached");
+        }
+
         /// <summary>
-        /// Builds the behavior world for <paramref name="level"/>/<paramref name="spawnedPlayer"/> -- compiles
-        /// and registers every scripted tile cell (<see cref="ResolvedLevel.EffectiveTileBehaviors"/>), every
-        /// trigger, and the level script, then dispatches the one-time <c>onLevelStart</c>. Call once, any
-        /// time before or after this node joins the tree (dispatch here is synchronous -- it does not depend
-        /// on <see cref="_PhysicsProcess"/> having run yet).
+        /// Builds the behavior world for <paramref name="level"/> and <paramref name="spawnedPlayer"/>: registers
+        /// scripted tiles, triggers, and the level script, then dispatches <c>onLevelStart</c>.
         /// </summary>
         public void Configure(ResolvedLevel level, Player spawnedPlayer) {
             if (level is null)
                 throw new ArgumentNullException(nameof(level));
             player = spawnedPlayer ?? throw new ArgumentNullException(nameof(spawnedPlayer));
             tileSize = level.TileSize;
+            respawnPosition = PlayRuntimeBuilder.SpawnWorldPosition(level);
+            player.Died += OnPlayerDied;
 
             watchdog = new BehaviorWatchdog(WatchdogBudget);
             loader = new BehaviorLoader(watchdog);
@@ -125,6 +89,9 @@ namespace Uberkarl {
             RegisterScriptedTiles(level);
             RegisterTriggers(level);
             RegisterLevelScript(level);
+
+            if (DiagnosticsEnabled)
+                GD.Print($"[behavior] Configure: {scriptedTiles.Count} tile cells, {scriptedTriggers.Count} triggers, levelScript={hasLevelScript}");
 
             if (hasLevelScript)
                 scheduler.DispatchLevelStart(LevelScriptSubjectId);
@@ -187,8 +154,21 @@ namespace Uberkarl {
             playerFacade.Velocity = new BehaviorVector2(player.Velocity.X, player.Velocity.Y);
             playerFacade.IsOnGround = player.IsOnFloor();
 
-            Rect2 playerAabb = new Rect2(player.Position - Player.CollisionHalfExtents, Player.CollisionHalfExtents * 2f);
+            Vector2 marginVector = new Vector2(ContactMargin, ContactMargin);
+            Rect2 playerAabb = new Rect2(
+                player.Position - Player.CollisionHalfExtents - marginVector,
+                Player.CollisionHalfExtents * 2f + marginVector * 2f);
             GridCell playerCell = new GridCell(Mathf.FloorToInt(player.Position.X / tileSize), Mathf.FloorToInt(player.Position.Y / tileSize));
+
+            if (!loggedFirstTick) {
+                loggedFirstTick = true;
+                if (DiagnosticsEnabled)
+                    GD.Print($"[behavior] _PhysicsProcess tick alive (player at {player.Position}, cell {playerCell})");
+            } else if (playerCell != lastLoggedCell) {
+                if (DiagnosticsEnabled)
+                    GD.Print($"[behavior] _PhysicsProcess tick (player at {player.Position}, cell {playerCell})");
+            }
+            lastLoggedCell = playerCell;
 
             DispatchTileContacts(playerAabb);
             DispatchTriggerOverlaps(playerAabb, playerCell);
@@ -208,6 +188,8 @@ namespace Uberkarl {
 
                 var other = new EventParty("player", string.Empty, tile.Cell);
                 if (touching) {
+                    if (DiagnosticsEnabled)
+                        GD.Print($"[behavior] CONTACT tile cell {tile.Cell} binding {tile.SubjectId}");
                     contactedTileIds.Add(tile.SubjectId);
                     scheduler.DispatchContact(tile.SubjectId, other);
                 } else {
@@ -236,11 +218,19 @@ namespace Uberkarl {
         }
 
         void ApplyIntents() {
-            foreach (BehaviorIntent intent in intents.Drain()) {
+            List<BehaviorIntent> drained = intents.Drain().ToList();
+            if (DiagnosticsEnabled && drained.Count > 0)
+                GD.Print($"[behavior] dispatch -> intents: [{string.Join(", ", drained.Select(i => i.GetType().Name))}]");
+
+            foreach (BehaviorIntent intent in drained) {
                 switch (intent) {
-                    case HurtIntent hurt:
+                    case HurtIntent hurt: {
+                        double before = player.Health;
                         player.Hurt(hurt.Amount);
+                        if (DiagnosticsEnabled)
+                            GD.Print($"[behavior] applied Hurt {hurt.Amount}, Player.Health {before}->{player.Health}");
                         break;
+                    }
                     case HealIntent heal:
                         player.Heal(heal.Amount);
                         break;
@@ -248,10 +238,6 @@ namespace Uberkarl {
                         ApplySetState(setState);
                         break;
                     default:
-                        // Every other intent kind (MoveTo*/SetGraphic/Despawn/Spawn/SetTile/Message/Teleport/
-                        // SetSpawn/SetPhysics/ScheduleTimer) is deliberately not applied in P1 (task #7738
-                        // scope -- "moveTo/move-object come with P2 objects, not here"). Draining the buffer
-                        // regardless keeps it from growing unbounded even though nothing acts on these yet.
                         break;
                 }
             }
@@ -266,9 +252,11 @@ namespace Uberkarl {
                 subject.SeedState(intent.Key, intent.Value);
         }
 
-        // "Logged once" falls out of BehaviorScheduler's own state machine (design #7704 §8.3) -- this is
-        // simply where that one log line surfaces on the Godot side, matching the repo's existing GD.Print
-        // diagnostic style (e.g. LevelPlay).
+        void OnPlayerDied() {
+            GD.Print("BehaviorRuntime: player died, respawning at level spawn.");
+            player.Respawn(respawnPosition);
+        }
+
         void OnQuarantined(BehaviorQuarantineEvent quarantine) {
             GD.PrintErr($"BehaviorRuntime: subject '{quarantine.SubjectId}' quarantined " +
                 $"({(quarantine.TriggeringEvent is { } kind ? kind.ToString() : "init")}): {quarantine.Reason}");
