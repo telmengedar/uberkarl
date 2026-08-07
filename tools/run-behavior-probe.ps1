@@ -3,36 +3,11 @@
     Builds the C# solution and runs the headless in-engine behavior probe
     (game/Diagnostics/BehaviorHeadlessProbe.tscn), then reports its verdict.
 
-.DESCRIPTION
-    DiVoid #7747 (REOPENED) exposed a gap the project had no way to close before:
-    the Godot-free `Uberkarl.Behavior`/`Uberkarl.Editor`/`Uberkarl.Content` unit
-    tests, and even a real-Pooscript-executing test on a seam, can all pass while
-    the actual running game does nothing -- because none of them ever drive a
-    real Godot `SceneTree` with real physics (`CharacterBody2D.MoveAndSlide`
-    resting a player a fraction of a pixel short of true geometric penetration
-    against a solid tile, in this bug's case). This script is that missing
-    verification layer: it builds the project the same way the editor does
-    (`godot --headless --build-solutions`), then runs
-    `game/Diagnostics/BehaviorHeadlessProbe.tscn` headless -- which plants a
-    player on the real `content/sample.pkg` spike tile (cell 20,11) both by
-    forced teleport (a sanity check that the dispatch/intent chain can fire at
-    all) and by a real gravity-driven drop (the actual reproduction of "walk
-    onto the spike"), through BOTH ways a level reaches
-    `PlayRuntimeBuilder.Populate` (the editor-Play projection and the
-    stand-alone `LevelLoader` path) -- and greps the `[probe] VERDICT`/`SUMMARY`
-    lines out of the captured stdout.
-
-    Deliberately NOT part of `dotnet test`: it needs the real Godot mono
-    runtime (headless is fine, a Godot-less CI/dev-test run is not), so it is
-    its own opt-in script rather than wired into any test project.
-
 .PARAMETER GodotExe
-    Path to the Godot 4 (.NET/Mono) editor executable. Defaults to this
-    machine's known install; override for a different machine/CI runner.
+    Path to the Godot 4 (.NET/Mono) editor executable.
 
 .PARAMETER SkipBuild
-    Skip the `--build-solutions` step (e.g. you just built and only want to
-    re-run the probe against the existing build).
+    Skip the `--build-solutions` step.
 
 .EXAMPLE
     .\tools\run-behavior-probe.ps1
@@ -56,12 +31,8 @@ if (-not (Test-Path $GodotExe)) {
     exit 2
 }
 
-# Run via Start-Process + file redirection rather than `& $exe ...` / `& $exe ... 2>&1`: on this
-# project's Windows PowerShell 5.1, capturing a native Godot process through the call operator was
-# observed to silently return zero output AND a blank $LASTEXITCODE (not just the documented
-# NativeCommandError-wrapping gotcha from a redirected stderr) -- Start-Process -Wait -PassThru with
-# -RedirectStandardOutput/-RedirectStandardError is the reliable way to get both the full stdout and
-# a trustworthy exit code back from this executable.
+# Windows PowerShell 5.1: `& $exe ...` silently drops native-process stdout and $LASTEXITCODE.
+# Start-Process with redirected files is the reliable way to get both back.
 $stdoutFile = [System.IO.Path]::GetTempFileName()
 $stderrFile = [System.IO.Path]::GetTempFileName()
 

@@ -3,14 +3,8 @@ using Godot;
 namespace Uberkarl {
 
     /// <summary>
-    /// Minimal health readout (bar + numeric value) for the play/playtest overlay (DiVoid #7743 -- making
-    /// the P1 hurt/heal intent plumbing visible: "I see the spike but wouldn't know how to actually
-    /// playtest the behaviors"). Added as a <see cref="CanvasLayer"/> child by the shared
-    /// <see cref="PlayRuntimeBuilder.Populate"/>, so standalone play (<see cref="LevelPlay"/>) and editor
-    /// playtest (<see cref="PlaytestOverlay"/>) show it identically (design #7704 C-4) -- same reasoning as
-    /// <see cref="BehaviorRuntime"/> being wired in that one shared place. A <see cref="CanvasLayer"/> (like
-    /// <c>PlayRuntimeBuilder.AddBackgroundFill</c>'s backdrop) draws in screen space, so the HUD stays
-    /// pinned to a screen corner regardless of the following camera.
+    /// Minimal health readout (bar + numeric value) for the play/playtest overlay, added as a
+    /// <see cref="CanvasLayer"/> child by <see cref="PlayRuntimeBuilder.Populate"/>.
     /// </summary>
     public partial class PlayerHud : CanvasLayer {
 
@@ -22,8 +16,7 @@ namespace Uberkarl {
         ProgressBar bar;
         Label label;
 
-        /// <summary>Binds the player whose health this HUD polls. Must be called once, any time relative to
-        /// <see cref="_Ready"/> -- reading only starts on the next <see cref="_Process"/>.</summary>
+        /// <summary>Binds the player whose health this HUD polls.</summary>
         public void Configure(Player boundPlayer) => player = boundPlayer;
 
         public override void _Ready() {
@@ -45,9 +38,6 @@ namespace Uberkarl {
             container.AddChild(label);
         }
 
-        // A read-only poll, not event-driven (DiVoid #7743) -- Player.Health/MaxHealth have no change
-        // notification of their own, and a per-frame read of two doubles is cheap enough that adding one
-        // isn't worth the extra wiring at this scope.
         public override void _Process(double delta) {
             if (player is null || bar is null)
                 return;

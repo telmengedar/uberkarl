@@ -4,13 +4,8 @@ using Uberkarl;
 namespace Uberkarl.Editor.Tests;
 
 /// <summary>
-/// Pins the intent -&gt; health arithmetic (DiVoid #7743) that <see cref="Player.Hurt"/>/<see cref="Player.Heal"/>
-/// delegate to: clamping, the post-hit invulnerability (i-frame) gate, the invulnerability countdown, and the
-/// death edge-detection that <see cref="BehaviorRuntime"/> uses to trigger a respawn. <see cref="PlayerHealth"/>
-/// is deliberately Godot-free, so this only exercises the pure math -- no engine/scene tree required, same
-/// reasoning as <see cref="TileMapLevelBuilderTests"/> pinning <c>TileMapLevelBuilder.ScrollScaleFor</c>; the
-/// actual glue (Player raising <c>Died</c>, BehaviorRuntime respawning it, the HUD reading Health/MaxHealth)
-/// is otherwise verified only in-engine via Godot MCP.
+/// Pins the intent -&gt; health arithmetic that <see cref="Player.Hurt"/>/<see cref="Player.Heal"/> delegate to:
+/// clamping, the invulnerability gate, the invulnerability countdown, and death edge-detection.
 /// </summary>
 [TestFixture]
 public sealed class PlayerHealthTests {
@@ -48,18 +43,18 @@ public sealed class PlayerHealthTests {
     }
 
     [Test]
+    [Description("A second hurt landing while already at 0 health must not re-raise Died.")]
     public void Hurt_RaisesDied_OnlyOnTheFrameHealthFirstReachesZero() {
         PlayerHealth.HurtResult lethal = PlayerHealth.Hurt(health: 5, invulnerabilityRemaining: 0, amount: 999);
         Assert.That(lethal.Died, Is.True);
 
-        // Once already at 0 (e.g. a second hurt landing before respawn runs), Died must not re-fire.
         PlayerHealth.HurtResult alreadyDead = PlayerHealth.Hurt(health: 0, invulnerabilityRemaining: 0, amount: 10);
         Assert.That(alreadyDead.Died, Is.False);
     }
 
     [Test]
+    [Description("Respawn grants its own fresh invulnerability window; the death transition itself must not stack one.")]
     public void Hurt_OnDeath_LeavesNoInvulnerabilityWindow() {
-        // Respawn (Player.Respawn) grants its own fresh window; the death transition itself shouldn't stack one.
         PlayerHealth.HurtResult result = PlayerHealth.Hurt(health: 5, invulnerabilityRemaining: 0, amount: 999);
 
         Assert.That(result.InvulnerabilityRemaining, Is.EqualTo(0));
