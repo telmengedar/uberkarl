@@ -93,6 +93,9 @@ public sealed class ResolvedLevel
     /// <summary>Grid-rect area triggers (DiVoid #7738, design #7704 §6). Empty when the level declares none.</summary>
     public IReadOnlyList<ResolvedAreaTrigger> Triggers { get; init; } = Array.Empty<ResolvedAreaTrigger>();
 
+    /// <summary>Placed free-moving objects (DiVoid #7863, design #7704 §5.2/§6). Empty when the level places none.</summary>
+    public IReadOnlyList<ResolvedObjectPlacement> Objects { get; init; } = Array.Empty<ResolvedObjectPlacement>();
+
     /// <summary>The level's global behavior binding (DiVoid #7738, design #7704 §6), or null when the level declares none.</summary>
     public ResolvedBehaviorBinding? LevelScript { get; init; }
 
@@ -148,6 +151,29 @@ public sealed class ResolvedAreaTrigger
     public int Height { get; init; }
 
     public required ResolvedBehaviorBinding Binding { get; init; }
+}
+
+/// <summary>
+/// A resolved placed object (DiVoid #7863, design #7704 §5.2/§6) — the runtime counterpart of
+/// <see cref="ObjectPlacement"/> with its <see cref="ObjectDefinition"/> type data (graphic, collision
+/// role, default state) already merged in. <see cref="Cell"/> is only the spawn position — the object is a
+/// free-moving Godot body thereafter (design #7704 §9.4).
+/// </summary>
+public sealed class ResolvedObjectPlacement
+{
+    public string Name { get; init; } = string.Empty;
+
+    public GridPosition Cell { get; init; }
+
+    public ObjectCollisionRole CollisionRole { get; init; }
+
+    public required byte[] Graphic { get; init; }
+
+    /// <summary>The effective binding (instance override, else type default), or <c>null</c> for a purely decorative object.</summary>
+    public ResolvedBehaviorBinding? Binding { get; init; }
+
+    /// <summary>The object type's default state, seeded into this instance's runtime state at spawn.</summary>
+    public IReadOnlyDictionary<string, object?> State { get; init; } = new Dictionary<string, object?>();
 }
 
 public sealed class ResolvedLayer

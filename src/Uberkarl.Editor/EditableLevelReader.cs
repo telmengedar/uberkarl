@@ -106,6 +106,8 @@ public static class EditableLevelReader
             });
         }
 
+        var objects = ResolveObjects(package, levelDefinition);
+
         var levelScript = EditableBehaviorBindings.Resolve(package, levelDefinition.LevelScript, "Level script");
 
         // Loaded from a real package resource, so this level already occupies a stable slot: isAttached
@@ -134,7 +136,55 @@ public static class EditableLevelReader
             terrainSets: terrainSets,
             tileBehaviorOverrides: tileBehaviorOverrides,
             triggers: triggers,
+            objects: objects,
             levelScript: levelScript);
+    }
+
+    /// <summary>
+    /// Resolves the level's placed objects (DiVoid #7863, design #7704 §5.2/§6) — same read-through-only
+    /// status as triggers/level script (DiVoid #7747). Each placement's <c>objectset</c> resource must live
+    /// in <paramref name="package"/> itself, mirroring the existing same-package-only restriction on tile
+    /// graphics and behavior scripts.
+    /// </summary>
+    private static List<ResolvedObjectPlacement> ResolveObjects(Package package, LevelDefinition levelDefinition)
+    {
+        var objectSets = new Dictionary<ResourceReference, ObjectSetDefinition>();
+        var objects = new List<ResolvedObjectPlacement>(levelDefinition.Objects.Count);
+        foreach (var placement in levelDefinition.Objects)
+        {
+            var objectSet = ResolveObjectSet(package, objectSets, placement.ObjectSet);
+            var definition = objectSet.Objects.FirstOrDefault(candidate => candidate.Id == placement.ObjectId)
+                ?? throw new LevelContentException($"Object '{placement.Name}' references undefined object id '{placement.ObjectId}'.");
+
+            objects.Add(new ResolvedObjectPlacement
+            {
+                Name = placement.Name,
+                Cell = placement.Cell,
+                CollisionRole = definition.CollisionRole,
+                Graphic = ReadSelfResource(package, definition.Graphic, $"Object '{placement.Name}' graphic"),
+                Binding = EditableBehaviorBindings.Resolve(package, placement.Behavior ?? definition.Behavior, $"Object '{placement.Name}'"),
+                State = definition.State,
+            });
+        }
+
+        return objects;
+    }
+
+    private static ObjectSetDefinition ResolveObjectSet(Package package, Dictionary<ResourceReference, ObjectSetDefinition> cache, ResourceReference reference)
+    {
+        if (cache.TryGetValue(reference, out var cached))
+            return cached;
+
+        var objectSet = LevelContentSerializer.ReadObjectSet(ReadSelfResource(package, reference, "Object set"));
+        cache[reference] = objectSet;
+        return objectSet;
+    }
+
+    private static byte[] ReadSelfResource(Package package, ResourceReference reference, string role)
+    {
+        if (!reference.IsSelf && reference.Package != package.Id)
+            throw new LevelContentException($"{role} lives in another package; cross-package resources are not editable in this increment.");
+        return package.ReadBytes(reference.Path);
     }
 
     private static ResourcePath FindLevelPath(Package package)

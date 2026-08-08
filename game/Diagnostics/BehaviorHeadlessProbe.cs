@@ -21,6 +21,17 @@ namespace Uberkarl.Diagnostics {
         const int FallStartRowsAboveSpike = 4;
         const int FallFramesToRun = 90;
 
+        const string PlatformBodyName = "moving-platform-1";
+        const string JumpBlockBodyName = "jump-block-1";
+        const int PlatformLandingFrames = 30;
+        const int PlatformRideFrames = 90;
+        const float PlatformMovedThreshold = 1f;
+        const float PlatformRideToleranceX = 4f;
+        const int JumpBlockGroundRow = 12;
+        const int JumpBlockFramesToRun = 60;
+        const float JumpBlockBumpThreshold = 2f;
+        const float JumpBlockSettledTolerance = 1f;
+
         public override async void _Ready() {
             GD.Print("[probe] BehaviorHeadlessProbe._Ready starting");
 
@@ -38,10 +49,104 @@ namespace Uberkarl.Diagnostics {
             bool pathAReal = await RunPath("PathA-RealFall(editor-Play projection, real physics)", () => BuildPathA(bytes), forceOverlap: false);
             bool pathBReal = await RunPath("PathB-RealFall(stand-alone LevelLoader, real physics)", () => BuildPathB(bytes), forceOverlap: false);
 
-            GD.Print($"[probe] SUMMARY PathA-Forced={(pathAForced ? "OK" : "NO DAMAGE")} PathB-Forced={(pathBForced ? "OK" : "NO DAMAGE")} " +
-                $"PathA-RealFall={(pathAReal ? "OK" : "NO DAMAGE")} PathB-RealFall={(pathBReal ? "OK" : "NO DAMAGE")}");
+            bool platformRides = await RunPlatformCheck(bytes);
+            bool jumpBlockReacts = await RunJumpBlockCheck(bytes);
 
-            GetTree().Quit(pathAReal ? 0 : 1);
+            GD.Print($"[probe] SUMMARY PathA-Forced={(pathAForced ? "OK" : "NO DAMAGE")} PathB-Forced={(pathBForced ? "OK" : "NO DAMAGE")} " +
+                $"PathA-RealFall={(pathAReal ? "OK" : "NO DAMAGE")} PathB-RealFall={(pathBReal ? "OK" : "NO DAMAGE")} " +
+                $"Platform={(platformRides ? "OK" : "NO MOVEMENT/RIDE")} JumpBlock={(jumpBlockReacts ? "OK" : "NO REACTION")}");
+
+            bool allOk = pathAReal && platformRides && jumpBlockReacts;
+            GetTree().Quit(allOk ? 0 : 1);
+        }
+
+        /// <summary>DiVoid #7863: asserts the moving platform's body actually moves AND the player standing on it rides it (moves with it).</summary>
+        async Task<bool> RunPlatformCheck(byte[] bytes) {
+            const string Label = "ObjectCheck-Platform(moves + player rides)";
+            GD.Print($"[probe] ==== {Label} ====");
+            var root = new Node2D { Name = "World_" + Label };
+            AddChild(root);
+
+            ResolvedLevel level = BuildPathB(bytes);
+            Player player = PlayRuntimeBuilder.Populate(root, level);
+            Node2D platform = root.FindChild(PlatformBodyName, recursive: true, owned: false) as Node2D;
+            if (platform is null) {
+                GD.PrintErr($"[probe] {Label}: FAILED to find platform body node '{PlatformBodyName}'.");
+                root.QueueFree();
+                return false;
+            }
+
+            Vector2 platformStart = platform.Position;
+            player.Position = new Vector2(platformStart.X, platformStart.Y - level.TileSize * 2);
+            player.Velocity = Vector2.Zero;
+            GD.Print($"[probe] {Label}: platform spawned at {platformStart}, player dropped from {player.Position}");
+
+            for (int frame = 0; frame < PlatformLandingFrames; frame++) {
+                await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+                player.Position = new Vector2(platform.Position.X, player.Position.Y);
+                player.Velocity = new Vector2(0, player.Velocity.Y);
+            }
+
+            Vector2 playerBeforeRide = player.Position;
+            Vector2 platformBeforeRide = platform.Position;
+            GD.Print($"[probe] {Label}: after landing, player at {playerBeforeRide}, platform at {platformBeforeRide}");
+
+            for (int frame = 0; frame < PlatformRideFrames; frame++)
+                await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+
+            Vector2 playerAfterRide = player.Position;
+            Vector2 platformAfterRide = platform.Position;
+
+            float platformDelta = platformAfterRide.X - platformBeforeRide.X;
+            float playerDelta = playerAfterRide.X - playerBeforeRide.X;
+            bool platformMoved = Mathf.Abs(platformDelta) > PlatformMovedThreshold;
+            bool playerRode = Mathf.Abs(playerDelta - platformDelta) < PlatformRideToleranceX && Mathf.Abs(playerDelta) > PlatformMovedThreshold;
+
+            GD.Print($"[probe] {Label}: platform delta {platformDelta:0.00}px, player delta {playerDelta:0.00}px over {PlatformRideFrames} frames");
+            GD.Print($"[probe] VERDICT {Label}: platformMoved={platformMoved} playerRode={playerRode}");
+
+            root.QueueFree();
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            return platformMoved && playerRode;
+        }
+
+        /// <summary>DiVoid #7863: asserts the jump-block reacts (bumps up then settles back) when hit from below.</summary>
+        async Task<bool> RunJumpBlockCheck(byte[] bytes) {
+            const string Label = "ObjectCheck-JumpBlock(reacts when hit from below)";
+            GD.Print($"[probe] ==== {Label} ====");
+            var root = new Node2D { Name = "World_" + Label };
+            AddChild(root);
+
+            ResolvedLevel level = BuildPathB(bytes);
+            Player player = PlayRuntimeBuilder.Populate(root, level);
+            Node2D jumpBlock = root.FindChild(JumpBlockBodyName, recursive: true, owned: false) as Node2D;
+            if (jumpBlock is null) {
+                GD.PrintErr($"[probe] {Label}: FAILED to find jump-block body node '{JumpBlockBodyName}'.");
+                root.QueueFree();
+                return false;
+            }
+
+            float initialY = jumpBlock.Position.Y;
+            player.Position = new Vector2(jumpBlock.Position.X, JumpBlockGroundRow * level.TileSize - Player.CollisionHalfExtents.Y);
+            player.Velocity = new Vector2(0, -player.JumpSpeed);
+            GD.Print($"[probe] {Label}: jump-block at {jumpBlock.Position}, player jumping from {player.Position}");
+
+            float minY = initialY;
+            for (int frame = 0; frame < JumpBlockFramesToRun; frame++) {
+                await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+                minY = Mathf.Min(minY, jumpBlock.Position.Y);
+            }
+
+            float finalY = jumpBlock.Position.Y;
+            bool bumped = initialY - minY > JumpBlockBumpThreshold;
+            bool settled = Mathf.Abs(finalY - initialY) < JumpBlockSettledTolerance;
+
+            GD.Print($"[probe] {Label}: initialY={initialY:0.00} minY={minY:0.00} finalY={finalY:0.00}");
+            GD.Print($"[probe] VERDICT {Label}: bumped={bumped} settled={settled}");
+
+            root.QueueFree();
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            return bumped && settled;
         }
 
         static ResolvedLevel BuildPathA(byte[] bytes) {

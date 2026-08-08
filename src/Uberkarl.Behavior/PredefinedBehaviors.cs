@@ -21,9 +21,30 @@ public static class PredefinedBehaviors
     /// <summary>Area-trigger predefined (design task #7738 — "an on-enter trigger"): on enter, heals the player by <c>amount</c> (default 20) — a distinct intent (heal vs. hurt) proving the same binding/dispatch path serves more than one demo.</summary>
     public const string HealOnEnter = "healOnEnter";
 
+    /// <summary>
+    /// Object predefined (DiVoid #7863, design #7704 §9.4 — "patrol predefined"): a <c>solid</c> object
+    /// oscillates horizontally by <c>range</c> pixels (default 48) at <c>speed</c> px/s (default 24) — a
+    /// moving platform. Bounded by construction (a ping-pong around its spawn position, no unbounded loop).
+    /// </summary>
+    public const string Patrol = "patrol";
+
+    /// <summary>
+    /// Object predefined (DiVoid #7863, design #7704 §9.4 — "rise-then-fall predefined"): a <c>passthrough</c>
+    /// object bumps up then back down over a fixed frame count when hit from below (the player moving
+    /// upward on contact) — a jump-block/question-block. Ignores contact while already bumping or not from
+    /// below, so a single hit produces exactly one bounded reaction.
+    /// </summary>
+    public const string BumpOnHitFromBelow = "bumpOnHitFromBelow";
+
     private const string AmountParameter = "amount";
+    private const string SpeedParameter = "speed";
+    private const string RangeParameter = "range";
+    private const string RiseParameter = "rise";
     private const double HurtOnContactDefaultAmount = 10;
     private const double HealOnEnterDefaultAmount = 20;
+    private const double PatrolDefaultSpeed = 24;
+    private const double PatrolDefaultRange = 48;
+    private const double BumpDefaultRise = 6;
 
     /// <summary>
     /// Resolves a predefined id + parameters into ready-to-compile Pooscript source. False for an unknown id
@@ -48,6 +69,46 @@ public static class PredefinedBehaviors
                     """;
                 return true;
 
+            case Patrol:
+                source = $$"""
+                    $onSpawn = [] => {
+                        self.setState("dir", 1);
+                        self.setState("origin", self.position.x);
+                    }
+                    $onUpdate = $delta => {
+                        $dir = self.getState("dir");
+                        self.moveBy({{FormatParameter(parameters, SpeedParameter, PatrolDefaultSpeed)}} * delta * dir, 0);
+                        $traveled = self.position.x - self.getState("origin");
+                        if (traveled > {{FormatParameter(parameters, RangeParameter, PatrolDefaultRange)}}) { self.setState("dir", -1); }
+                        if (traveled < 0) { self.setState("dir", 1); }
+                    }
+                    { "onSpawn": onSpawn, "onUpdate": onUpdate }
+                    """;
+                return true;
+
+            case BumpOnHitFromBelow:
+                source = $$"""
+                    $onContact = $other => {
+                        if (self.getState("bumping") != true) {
+                            if (player.velocity.y < 0) {
+                                self.setState("bumping", true);
+                                self.setState("bumpFrames", 12);
+                            }
+                        }
+                    }
+                    $onUpdate = $delta => {
+                        if (self.getState("bumping") == true) {
+                            $frames = self.getState("bumpFrames");
+                            if (frames > 6) { self.moveBy(0, -{{FormatParameter(parameters, RiseParameter, BumpDefaultRise)}}); }
+                            if (frames <= 6) { self.moveBy(0, {{FormatParameter(parameters, RiseParameter, BumpDefaultRise)}}); }
+                            self.setState("bumpFrames", frames - 1);
+                            if (frames <= 1) { self.setState("bumping", false); }
+                        }
+                    }
+                    { "onContact": onContact, "onUpdate": onUpdate }
+                    """;
+                return true;
+
             default:
                 source = string.Empty;
                 return false;
@@ -55,10 +116,13 @@ public static class PredefinedBehaviors
     }
 
     private static string FormatAmount(IReadOnlyDictionary<string, object?> parameters, double fallback)
+        => FormatParameter(parameters, AmountParameter, fallback);
+
+    private static string FormatParameter(IReadOnlyDictionary<string, object?> parameters, string key, double fallback)
     {
-        var amount = parameters.TryGetValue(AmountParameter, out var value) && value is not null
-            ? Convert.ToDouble(value, CultureInfo.InvariantCulture)
+        var value = parameters.TryGetValue(key, out var raw) && raw is not null
+            ? Convert.ToDouble(raw, CultureInfo.InvariantCulture)
             : fallback;
-        return amount.ToString(CultureInfo.InvariantCulture);
+        return value.ToString(CultureInfo.InvariantCulture);
     }
 }

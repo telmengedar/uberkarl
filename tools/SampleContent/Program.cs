@@ -58,6 +58,40 @@ var tileSet = new TileSetDefinition { Tiles = tiles };
 var tileSetPath = ResourcePath.Create("tileset.json");
 builder.AddResource(ResourceKind.TileSet, tileSetPath, LevelContentSerializer.WriteTileSet(tileSet));
 
+const string PlatformObjectId = "platform";
+const string JumpBlockObjectId = "jump-block";
+var platformGraphicPath = ResourcePath.Create("objects/platform.png");
+var jumpBlockGraphicPath = ResourcePath.Create("objects/jump-block.png");
+builder.AddResource(ResourceKind.Sprite, platformGraphicPath, PngWriter.Encode(TileSize, TileSize, SolidTile(TileSize, 210, 150, 40)), "image/png");
+builder.AddResource(ResourceKind.Sprite, jumpBlockGraphicPath, PngWriter.Encode(TileSize, TileSize, SolidTile(TileSize, 230, 120, 30)), "image/png");
+
+var objectSet = new ObjectSetDefinition
+{
+    Objects = new[]
+    {
+        new ObjectDefinition
+        {
+            Id = PlatformObjectId,
+            Name = "Moving Platform",
+            Graphic = ResourceReference.ToSelf(platformGraphicPath),
+            CollisionRole = ObjectCollisionRole.Solid,
+            Behavior = BehaviorBinding.FromPredefined(PredefinedBehaviors.Patrol,
+                new Dictionary<string, object?> { ["speed"] = 20, ["range"] = 64 }),
+        },
+        new ObjectDefinition
+        {
+            Id = JumpBlockObjectId,
+            Name = "Jump Block",
+            Graphic = ResourceReference.ToSelf(jumpBlockGraphicPath),
+            CollisionRole = ObjectCollisionRole.Passthrough,
+            Behavior = BehaviorBinding.FromPredefined(PredefinedBehaviors.BumpOnHitFromBelow,
+                new Dictionary<string, object?> { ["rise"] = 8 }),
+        },
+    },
+};
+var objectSetPath = ResourcePath.Create("objectsets/demo.json");
+builder.AddResource(ResourceKind.ObjectSet, objectSetPath, LevelContentSerializer.WriteObjectSet(objectSet));
+
 // DiVoid #7738 -- the level script proves the third scripted subject (lifecycle + onUpdate). Authored as a
 // SCRIPT binding (a Pooscript resource), the free-text path, complementing the predefined bindings above.
 var levelScriptPath = ResourcePath.Create("scripts/level.poo");
@@ -102,6 +136,11 @@ var level = new LevelDefinition
             X = 30, Y = 9, Width = 2, Height = 4,
             Binding = BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter, new Dictionary<string, object?> { ["amount"] = 20 }),
         },
+    },
+    Objects = new[]
+    {
+        new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(objectSetPath), ObjectId = PlatformObjectId, Cell = new GridPosition(50, 9), Name = "moving-platform-1" },
+        new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(objectSetPath), ObjectId = JumpBlockObjectId, Cell = new GridPosition(36, 9), Name = "jump-block-1" },
     },
     LevelScript = BehaviorBinding.FromScript(ResourceReference.ToSelf(levelScriptPath)),
 };

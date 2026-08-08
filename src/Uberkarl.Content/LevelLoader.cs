@@ -27,6 +27,7 @@ public static class LevelLoader
         var tileBehaviors = ResolveTileBehaviors(resolver, tileSet);
         var tileBehaviorOverrides = ResolveTileBehaviorOverrides(resolver, level);
         var triggers = ResolveTriggers(resolver, level);
+        var objects = ResolveObjects(resolver, level);
         var levelScript = level.LevelScript is { } levelScriptBinding ? BehaviorBindingResolver.Resolve(resolver, levelScriptBinding) : null;
 
         var layers = new List<ResolvedLayer>(level.Layers.Count);
@@ -63,6 +64,7 @@ public static class LevelLoader
             TileBehaviors = tileBehaviors,
             TileBehaviorOverrides = tileBehaviorOverrides,
             Triggers = triggers,
+            Objects = objects,
             LevelScript = levelScript,
         };
     }
@@ -132,6 +134,50 @@ public static class LevelLoader
         }
 
         return triggers;
+    }
+
+    /// <summary>
+    /// Resolves and validates the level's placed objects (DiVoid #7863, design #7704 §5.2/§6): each
+    /// placement's cell must be in bounds, its <see cref="ObjectPlacement.ObjectSet"/> must resolve to an
+    /// <see cref="ObjectSetDefinition"/> declaring <see cref="ObjectPlacement.ObjectId"/>, and its effective
+    /// binding is the instance override when present, else the object type's default (or none).
+    /// </summary>
+    private static List<ResolvedObjectPlacement> ResolveObjects(IResourceResolver resolver, LevelDefinition level)
+    {
+        var objectSets = new Dictionary<ResourceReference, ObjectSetDefinition>();
+        var placements = new List<ResolvedObjectPlacement>(level.Objects.Count);
+        foreach (var placement in level.Objects)
+        {
+            if (placement.Cell.X < 0 || placement.Cell.Y < 0 || placement.Cell.X >= level.Width || placement.Cell.Y >= level.Height)
+                throw new LevelContentException($"Object '{placement.Name}' cell ({placement.Cell.X},{placement.Cell.Y}) is outside the {level.Width}x{level.Height} grid.");
+
+            var objectSet = ResolveObjectSet(resolver, objectSets, placement.ObjectSet);
+            var definition = objectSet.Objects.FirstOrDefault(candidate => candidate.Id == placement.ObjectId)
+                ?? throw new LevelContentException($"Object '{placement.Name}' references undefined object id '{placement.ObjectId}'.");
+
+            var effectiveBinding = placement.Behavior ?? definition.Behavior;
+            placements.Add(new ResolvedObjectPlacement
+            {
+                Name = placement.Name,
+                Cell = placement.Cell,
+                CollisionRole = definition.CollisionRole,
+                Graphic = Resolve(resolver, definition.Graphic, $"object '{placement.Name}' graphic"),
+                Binding = effectiveBinding is { } binding ? ResolveBinding(resolver, binding, $"object '{placement.Name}' behavior") : null,
+                State = definition.State,
+            });
+        }
+
+        return placements;
+    }
+
+    private static ObjectSetDefinition ResolveObjectSet(IResourceResolver resolver, Dictionary<ResourceReference, ObjectSetDefinition> cache, ResourceReference reference)
+    {
+        if (cache.TryGetValue(reference, out var cached))
+            return cached;
+
+        var objectSet = LevelContentSerializer.ReadObjectSet(Resolve(resolver, reference, "object set"));
+        cache[reference] = objectSet;
+        return objectSet;
     }
 
     private static ResolvedBehaviorBinding ResolveBinding(IResourceResolver resolver, BehaviorBinding binding, string role)
