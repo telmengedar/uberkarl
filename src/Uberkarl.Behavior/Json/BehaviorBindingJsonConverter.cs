@@ -48,7 +48,7 @@ public sealed class BehaviorBindingJsonConverter : JsonConverter<BehaviorBinding
             {
                 var values = new Dictionary<string, object?>();
                 foreach (var property in paramsElement.EnumerateObject())
-                    values[property.Name] = ReadValue(property.Value);
+                    values[property.Name] = JsonScalarValue.Read(property.Value);
                 parameters = values;
             }
 
@@ -82,18 +82,4 @@ public sealed class BehaviorBindingJsonConverter : JsonConverter<BehaviorBinding
         }
         writer.WriteEndObject();
     }
-
-    // Parameter values are simple, author-facing scalars (design #7704 §10.2 — "filled via gamepad
-    // pickers": numbers, strings, bools). Decodes a raw JsonElement into the matching CLR primitive rather
-    // than leaving JsonElement leak into BehaviorBinding.Parameters, so a predefined behavior's parameter
-    // reads (e.g. PredefinedBehaviors.TryGetSource) never need to know about System.Text.Json.
-    private static object? ReadValue(JsonElement element) => element.ValueKind switch
-    {
-        JsonValueKind.String => element.GetString(),
-        JsonValueKind.Number => element.TryGetInt64(out var integer) ? integer : element.GetDouble(),
-        JsonValueKind.True => true,
-        JsonValueKind.False => false,
-        JsonValueKind.Null => null,
-        _ => throw new JsonException($"Unsupported behavior binding parameter value kind '{element.ValueKind}'."),
-    };
 }

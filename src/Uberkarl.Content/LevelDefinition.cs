@@ -52,6 +52,12 @@ public sealed class LevelDefinition
     public IReadOnlyList<AreaTriggerDefinition> Triggers { get; init; } = Array.Empty<AreaTriggerDefinition>();
 
     /// <summary>
+    /// Placed free-moving objects (DiVoid #7863, design #7704 §5.2/§6) — grid-placed at author time, free
+    /// bodies at runtime. Empty when the level places none. Omitted from JSON when empty.
+    /// </summary>
+    public IReadOnlyList<ObjectPlacement> Objects { get; init; } = Array.Empty<ObjectPlacement>();
+
+    /// <summary>
     /// The level's single global behavior binding (DiVoid #7738, design #7704 §6 — "the level gains an
     /// optional <c>levelScript</c> behavior binding (global)"), reacting to lifecycle events
     /// (<c>onLevelStart</c>, <c>onPlayerDeath</c>/<c>onPlayerRespawn</c>) and <c>onUpdate(delta)</c>. Null

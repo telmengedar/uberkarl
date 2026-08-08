@@ -15,11 +15,17 @@ public static class LevelContentSerializer
     public static byte[] WriteTileSet(TileSetDefinition tileSet)
         => Encoding.UTF8.GetBytes(JsonSerializer.Serialize(tileSet, Options));
 
+    public static byte[] WriteObjectSet(ObjectSetDefinition objectSet)
+        => Encoding.UTF8.GetBytes(JsonSerializer.Serialize(objectSet, Options));
+
     public static LevelDefinition ReadLevel(byte[] payload)
         => Deserialize<LevelDefinition>(payload, "level definition");
 
     public static TileSetDefinition ReadTileSet(byte[] payload)
         => Deserialize<TileSetDefinition>(payload, "tile set definition");
+
+    public static ObjectSetDefinition ReadObjectSet(byte[] payload)
+        => Deserialize<ObjectSetDefinition>(payload, "object set definition");
 
     private static T Deserialize<T>(byte[] payload, string description)
     {
@@ -47,6 +53,7 @@ public static class LevelContentSerializer
         options.Converters.Add(new ResourceReferenceJsonConverter());
         options.Converters.Add(new TileDefinitionJsonConverter());
         options.Converters.Add(new BehaviorBindingJsonConverter());
+        options.Converters.Add(new BehaviorStateJsonConverter());
         return options;
     }
 }
