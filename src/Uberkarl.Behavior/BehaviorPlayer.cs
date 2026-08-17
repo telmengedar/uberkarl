@@ -27,10 +27,4 @@ public sealed class BehaviorPlayer : IPlayerFacade
     public void Hurt(double amount) => intents.Record(new HurtIntent(BehaviorSubjectIds.Player, amount));
 
     public void Heal(double amount) => intents.Record(new HealIntent(BehaviorSubjectIds.Player, amount));
-
-    public void Teleport(GridCell cell) => intents.Record(new TeleportIntent(BehaviorSubjectIds.Player, cell));
-
-    public void SetSpawn(string name) => intents.Record(new SetSpawnIntent(BehaviorSubjectIds.Player, name));
-
-    public void SetPhysics(string field, object? value) => intents.Record(new SetPhysicsIntent(BehaviorSubjectIds.Player, field, value));
 }

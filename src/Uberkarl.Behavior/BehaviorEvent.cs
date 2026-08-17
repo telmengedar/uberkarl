@@ -29,22 +29,10 @@ public sealed class BehaviorEvent
     /// <summary><see cref="BehaviorEventKind.OnUpdate"/>: elapsed seconds since the last frame.</summary>
     public double Delta { get; internal set; }
 
-    /// <summary><see cref="BehaviorEventKind.OnTimer"/>: the tag passed to <c>self.after</c>/<c>self.every</c>.</summary>
-    public string? Tag { get; internal set; }
-
-    /// <summary><see cref="BehaviorEventKind.OnMessage"/>: the message name.</summary>
-    public string? MessageName { get; internal set; }
-
-    /// <summary><see cref="BehaviorEventKind.OnMessage"/>: the message payload.</summary>
-    public object? MessagePayload { get; internal set; }
-
     internal void Reset(BehaviorEventKind kind)
     {
         Kind = BehaviorEventNames.ToVariableName(kind);
         Other = null;
         Delta = 0;
-        Tag = null;
-        MessageName = null;
-        MessagePayload = null;
     }
 }

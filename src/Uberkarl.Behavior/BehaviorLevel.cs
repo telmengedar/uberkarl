@@ -31,15 +31,6 @@ public sealed class BehaviorLevel : ILevelFacade
 
     public object? GetState(string key) => State.TryGetValue(key, out var value) ? value : null;
 
-    public void Spawn(string objectDefinitionRef, GridCell cell) =>
-        intents.Record(new SpawnIntent(BehaviorSubjectIds.Level, objectDefinitionRef, cell));
-
-    public void SetTile(int layer, GridCell cell, string tileId) =>
-        intents.Record(new SetTileIntent(BehaviorSubjectIds.Level, layer, cell, tileId));
-
     public void SetState(string key, object? value) =>
         intents.Record(new SetStateIntent(BehaviorSubjectIds.Level, key, value));
-
-    public void Message(string target, string name, object? data) =>
-        intents.Record(new MessageIntent(BehaviorSubjectIds.Level, target, name, data));
 }

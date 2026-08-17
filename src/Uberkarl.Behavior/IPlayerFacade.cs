@@ -24,13 +24,4 @@ public interface IPlayerFacade
 
     /// <summary>Records an intent healing the player.</summary>
     void Heal(double amount);
-
-    /// <summary>Records an intent teleporting the player to a cell.</summary>
-    void Teleport(GridCell cell);
-
-    /// <summary>Records an intent setting the player's active named spawn point.</summary>
-    void SetSpawn(string name);
-
-    /// <summary>Records an intent overriding a player physics field (design C-5 — the <c>[Export]</c> seams already earmarked for script overrides).</summary>
-    void SetPhysics(string field, object? value);
 }
