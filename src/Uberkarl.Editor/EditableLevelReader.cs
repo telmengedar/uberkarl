@@ -63,6 +63,7 @@ public static class EditableLevelReader
         var boundTileSet = EditableTileSetReader.FromPackage(package, tileSetReference);
         var tiles = boundTileSet.Tiles;
         var terrainSets = boundTileSet.TerrainSets;
+        var tileScripts = boundTileSet.Scripts;
 
         var expectedCells = levelDefinition.Width * levelDefinition.Height;
         var layers = new List<EditableLayer>(levelDefinition.Layers.Count);
@@ -81,34 +82,25 @@ public static class EditableLevelReader
                 terrain));
         }
 
-        // DiVoid #7747: rehydrate the level's own scripted-behavior data (DiVoid #7738) the same way every
-        // other level property already round-trips, so EditableLevelSnapshot.ToResolvedLevel — what
-        // PlaytestOverlay actually plays — can carry it into the playtest run. Read-through only; there is
-        // still no authoring UX for any of this (P3, per #7738's own known-gap note).
-        var tileBehaviorOverrides = new Dictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>();
+        var scripts = new Dictionary<ResourcePath, string>();
+
+        var tileBehaviorOverrides = new List<TileBehaviorOverride>(levelDefinition.TileBehaviorOverrides.Count);
         foreach (var overrideEntry in levelDefinition.TileBehaviorOverrides) {
-            var role = $"Tile behavior override at layer {overrideEntry.Layer} cell ({overrideEntry.Cell.X},{overrideEntry.Cell.Y})";
-            tileBehaviorOverrides[(overrideEntry.Layer, overrideEntry.Cell)] = overrideEntry.Removed
-                ? null
-                : EditableBehaviorBindings.Resolve(package, overrideEntry.Binding, role);
+            if (!overrideEntry.Removed)
+                EditableBehaviorBindings.Capture(package, overrideEntry.Binding, $"Tile behavior override at layer {overrideEntry.Layer} cell ({overrideEntry.Cell.X},{overrideEntry.Cell.Y})", scripts);
+            tileBehaviorOverrides.Add(overrideEntry);
         }
 
-        var triggers = new List<ResolvedAreaTrigger>(levelDefinition.Triggers.Count);
+        var triggers = new List<AreaTriggerDefinition>(levelDefinition.Triggers.Count);
         foreach (var trigger in levelDefinition.Triggers) {
-            triggers.Add(new ResolvedAreaTrigger {
-                Name = trigger.Name,
-                X = trigger.X,
-                Y = trigger.Y,
-                Width = trigger.Width,
-                Height = trigger.Height,
-                Binding = EditableBehaviorBindings.Resolve(package, trigger.Binding, $"Trigger '{trigger.Name}'")
-                    ?? throw new LevelContentException($"Trigger '{trigger.Name}' declares no behavior binding."),
-            });
+            if (EditableBehaviorBindings.Capture(package, trigger.Binding, $"Trigger '{trigger.Name}'", scripts) is null)
+                throw new LevelContentException($"Trigger '{trigger.Name}' declares no behavior binding.");
+            triggers.Add(trigger);
         }
 
-        var objects = ResolveObjects(package, levelDefinition);
+        var objects = ResolveObjects(package, levelDefinition, scripts);
 
-        var levelScript = EditableBehaviorBindings.Resolve(package, levelDefinition.LevelScript, "Level script");
+        var levelScript = EditableBehaviorBindings.Capture(package, levelDefinition.LevelScript, "Level script", scripts);
 
         // Loaded from a real package resource, so this level already occupies a stable slot: isAttached
         // is true and levelPath is preserved verbatim, even if it predates the per-resource namespacing
@@ -137,34 +129,34 @@ public static class EditableLevelReader
             tileBehaviorOverrides: tileBehaviorOverrides,
             triggers: triggers,
             objects: objects,
-            levelScript: levelScript);
+            levelScript: levelScript,
+            tileScripts: tileScripts,
+            scripts: scripts);
     }
 
     /// <summary>
-    /// Resolves the level's placed objects (DiVoid #7863, design #7704 §5.2/§6) — same read-through-only
-    /// status as triggers/level script (DiVoid #7747). Each placement's <c>objectset</c> resource must live
-    /// in <paramref name="package"/> itself, mirroring the existing same-package-only restriction on tile
-    /// graphics and behavior scripts.
+    /// Resolves the level's placed objects. Each placement's <c>objectset</c> resource must live in
+    /// <paramref name="package"/> itself, mirroring the same-package-only restriction on tile graphics and
+    /// behavior scripts.
     /// </summary>
-    private static List<ResolvedObjectPlacement> ResolveObjects(Package package, LevelDefinition levelDefinition)
+    private static List<EditableObjectPlacement> ResolveObjects(Package package, LevelDefinition levelDefinition, IDictionary<ResourcePath, string> scripts)
     {
         var objectSets = new Dictionary<ResourceReference, ObjectSetDefinition>();
-        var objects = new List<ResolvedObjectPlacement>(levelDefinition.Objects.Count);
+        var objects = new List<EditableObjectPlacement>(levelDefinition.Objects.Count);
         foreach (var placement in levelDefinition.Objects)
         {
             var objectSet = ResolveObjectSet(package, objectSets, placement.ObjectSet);
             var definition = objectSet.Objects.FirstOrDefault(candidate => candidate.Id == placement.ObjectId)
                 ?? throw new LevelContentException($"Object '{placement.Name}' references undefined object id '{placement.ObjectId}'.");
 
-            objects.Add(new ResolvedObjectPlacement
-            {
-                Name = placement.Name,
-                Cell = placement.Cell,
-                CollisionRole = definition.CollisionRole,
-                Graphic = ReadSelfResource(package, definition.Graphic, $"Object '{placement.Name}' graphic"),
-                Binding = EditableBehaviorBindings.Resolve(package, placement.Behavior ?? definition.Behavior, $"Object '{placement.Name}'"),
-                State = definition.State,
-            });
+            var effectiveBehavior = EditableBehaviorBindings.Capture(package, placement.Behavior ?? definition.Behavior, $"Object '{placement.Name}'", scripts);
+
+            objects.Add(new EditableObjectPlacement(
+                placement,
+                definition.CollisionRole,
+                ReadSelfResource(package, definition.Graphic, $"Object '{placement.Name}' graphic"),
+                effectiveBehavior,
+                definition.State));
         }
 
         return objects;

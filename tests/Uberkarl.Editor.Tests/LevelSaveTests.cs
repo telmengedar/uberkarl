@@ -177,6 +177,6 @@ public sealed class LevelSaveTests
             "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
-            Palette(), new[] { layer });
+            Palette(), new[] { layer }, new Dictionary<ResourcePath, string>());
     }
 }

@@ -37,7 +37,8 @@ public sealed class EditableTileSet
         int? nextTileId = null,
         IReadOnlyList<EditableTerrainSet>? terrainSets = null,
         int? nextTerrainSetId = null,
-        int? nextTerrainId = null)
+        int? nextTerrainId = null,
+        IReadOnlyDictionary<ResourcePath, string>? scripts = null)
     {
         Name = name ?? throw new ArgumentNullException(nameof(name));
         TileSetPath = tileSetPath;
@@ -49,6 +50,8 @@ public sealed class EditableTileSet
         this.nextTerrainSetId = nextTerrainSetId ?? (this.terrainSets.Count == 0 ? 1 : this.terrainSets.Max(set => set.Id) + 1);
         var allTerrainIds = this.terrainSets.SelectMany(set => set.Terrains).Select(terrain => terrain.Id).ToList();
         this.nextTerrainId = nextTerrainId ?? (allTerrainIds.Count == 0 ? 1 : allTerrainIds.Max() + 1);
+
+        Scripts = scripts ?? new Dictionary<ResourcePath, string>();
     }
 
     public string Name { get; private set; }
@@ -67,6 +70,9 @@ public sealed class EditableTileSet
 
     /// <summary>The tile set's logical terrain sets (DiVoid #7551 Phase 3, design #7580).</summary>
     public IReadOnlyList<EditableTerrainSet> TerrainSets => terrainSets;
+
+    /// <summary>Script source text for every script-kind tile behavior binding, keyed by its <see cref="ResourcePath"/>.</summary>
+    public IReadOnlyDictionary<ResourcePath, string> Scripts { get; }
 
     /// <summary>True when <paramref name="tileId"/> names a declared tile.</summary>
     public bool Contains(int tileId)

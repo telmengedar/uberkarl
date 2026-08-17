@@ -665,7 +665,7 @@ namespace Uberkarl {
         void OnTileSetModelChanged() {
             if (session == null || tileSetSession == null)
                 return;
-            session.Level.RefreshTiles(tileSetSession.TileSet.Tiles, tileSetSession.TileSet.TerrainSets);
+            session.Level.RefreshTiles(tileSetSession.TileSet.Tiles, tileSetSession.TileSet.Scripts, tileSetSession.TileSet.TerrainSets);
             PopulatePalette(session.Level);
             canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(session.Level));
             UpdateState();
@@ -681,7 +681,7 @@ namespace Uberkarl {
             if (session == null)
                 return;
 
-            session.Level.BindTileSet(reference, boundTileSet.Tiles, boundTileSet.TerrainSets);
+            session.Level.BindTileSet(reference, boundTileSet.Tiles, boundTileSet.Scripts, boundTileSet.TerrainSets);
             tileSetSession = new TileSetEditSession(boundTileSet);
             PopulatePalette(session.Level);
             canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(session.Level));
@@ -1036,7 +1036,7 @@ namespace Uberkarl {
             IReadOnlyList<PendingResource> tileSetContributions = Array.Empty<PendingResource>();
             if (tileSetSession != null) {
                 tileSetSession.EnsureAttached(existingResources);
-                session.Level.BindTileSet(ResourceReference.ToSelf(tileSetSession.TileSet.TileSetPath), tileSetSession.TileSet.Tiles);
+                session.Level.BindTileSet(ResourceReference.ToSelf(tileSetSession.TileSet.TileSetPath), tileSetSession.TileSet.Tiles, tileSetSession.TileSet.Scripts);
                 tileSetContributions = tileSetSession.BuildContributions();
             }
 

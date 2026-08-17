@@ -56,6 +56,7 @@ public static class EditableTileSetReader
 
         var tileSetDefinition = LevelContentSerializer.ReadTileSet(package.ReadBytes(tileSetPath));
 
+        var scripts = new Dictionary<ResourcePath, string>();
         var tiles = new List<EditableTile>(tileSetDefinition.Tiles.Count);
         foreach (var tile in tileSetDefinition.Tiles)
         {
@@ -73,10 +74,7 @@ public static class EditableTileSetReader
                 frames.Add(new EditableTileFrame(frame.Path, package.ReadBytes(frame.Path)));
             }
 
-            // DiVoid #7747: rehydrate the tile TYPE's default behavior binding (DiVoid #7738) the same way
-            // every other tile property already round-trips, so a level played through the editor's
-            // playtest overlay sees the same scripted tiles the stand-alone LevelLoader path does.
-            var behavior = EditableBehaviorBindings.Resolve(package, tile.Behavior, $"Tile {tile.Id} behavior");
+            var behavior = EditableBehaviorBindings.Capture(package, tile.Behavior, $"Tile {tile.Id} behavior", scripts);
 
             tiles.Add(new EditableTile(tile.Id, tile.Graphic.Path, graphicBytes, tile.CollisionShape, tile.Name, frames, tile.AnimationSpeed, tile.Terrain, tile.PeeringBits, behavior));
         }
@@ -96,7 +94,7 @@ public static class EditableTileSetReader
         // is true and tileSetPath is preserved verbatim, even if it predates the per-resource namespacing
         // scheme (a legacy fixed-constant path like "tileset.json" still round-trips fine). The tile set's
         // own display name comes from ITS resource path, mirroring EditableLevelReader's DisplayNameFromPath.
-        return new EditableTileSet(DisplayNameFromPath(tileSetPath), tileSetPath, tiles, isAttached: true, terrainSets: terrainSets);
+        return new EditableTileSet(DisplayNameFromPath(tileSetPath), tileSetPath, tiles, isAttached: true, terrainSets: terrainSets, scripts: scripts);
     }
 
     private static ResourcePath FindTileSetPath(Package package)

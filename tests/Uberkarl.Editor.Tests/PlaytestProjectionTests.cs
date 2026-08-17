@@ -61,7 +61,7 @@ public sealed class PlaytestProjectionTests
             "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new System.Collections.Generic.Dictionary<string, GridPosition>(), defaultSpawn: null,
-            Palette(), new[] { terrain, backdrop });
+            Palette(), new[] { terrain, backdrop }, new Dictionary<ResourcePath, string>());
 
         var resolved = EditableLevelSnapshot.ToResolvedLevel(level);
 
@@ -117,7 +117,7 @@ public sealed class PlaytestProjectionTests
             "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new System.Collections.Generic.Dictionary<string, GridPosition>(), defaultSpawn: null,
-            new[] { animatedGrass }, new[] { new EditableLayer("terrain", true, 1f, false, cells) });
+            new[] { animatedGrass }, new[] { new EditableLayer("terrain", true, 1f, false, cells) }, new Dictionary<ResourcePath, string>());
 
         var resolved = EditableLevelSnapshot.ToResolvedLevel(level);
 
@@ -205,7 +205,7 @@ public sealed class PlaytestProjectionTests
             "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new System.Collections.Generic.Dictionary<string, GridPosition>(), defaultSpawn: null,
-            Palette(), new[] { layer });
+            Palette(), new[] { layer }, new Dictionary<ResourcePath, string>());
     }
 
     // A real self-contained package with a declared default spawn — mirrors EditableLevelTests'

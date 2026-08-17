@@ -322,7 +322,7 @@ public sealed class EditableLevelTests
         var origin = EditableLevelReader.FromPackage(package);
         var withBackground = new EditableLevel(
             origin.Name, origin.LevelPath, origin.TileSetReference, origin.TileSize, origin.Width, origin.Height,
-            "#3A5A8C", origin.Spawns, origin.DefaultSpawn, origin.Tiles, origin.Layers, isAttached: true);
+            "#3A5A8C", origin.Spawns, origin.DefaultSpawn, origin.Tiles, origin.Layers, origin.TileScripts, isAttached: true);
         var session = new LevelEditSession(withBackground);
 
         var reloaded = EditableLevelReader.FromPackageBytes(session.Save(package));
@@ -336,7 +336,7 @@ public sealed class EditableLevelTests
         var origin = EditableLevelReader.FromPackageBytes(BuildSamplePackageBytes());
         var withBackground = new EditableLevel(
             origin.Name, origin.LevelPath, origin.TileSetReference, origin.TileSize, origin.Width, origin.Height,
-            "#204080", origin.Spawns, origin.DefaultSpawn, origin.Tiles, origin.Layers, isAttached: true);
+            "#204080", origin.Spawns, origin.DefaultSpawn, origin.Tiles, origin.Layers, origin.TileScripts, isAttached: true);
 
         var resolved = EditableLevelSnapshot.ToResolvedLevel(withBackground);
 
@@ -392,7 +392,7 @@ public sealed class EditableLevelTests
             "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
-            Palette(), new[] { layer });
+            Palette(), new[] { layer }, new Dictionary<ResourcePath, string>());
     }
 
     // A real self-contained package: grass at (1,1) and (2,1), everything else empty.

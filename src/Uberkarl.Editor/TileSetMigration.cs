@@ -172,5 +172,9 @@ public static class TileSetMigration
         Spawns = source.Spawns,
         DefaultSpawn = source.DefaultSpawn,
         Layers = source.Layers,
+        TileBehaviorOverrides = source.TileBehaviorOverrides,
+        Triggers = source.Triggers,
+        Objects = source.Objects,
+        LevelScript = source.LevelScript,
     };
 }

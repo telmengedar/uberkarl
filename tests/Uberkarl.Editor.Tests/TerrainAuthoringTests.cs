@@ -440,7 +440,7 @@ public sealed class TerrainAuthoringTests
 
         var tileSetSession = new TileSetEditSession(TileSetFor(level));
         tileSetSession.AttachAsNewResource(Array.Empty<ResourceEntry>());
-        levelSession.Level.BindTileSet(ResourceReference.ToSelf(tileSetSession.TileSet.TileSetPath), tileSetSession.TileSet.Tiles, tileSetSession.TileSet.TerrainSets);
+        levelSession.Level.BindTileSet(ResourceReference.ToSelf(tileSetSession.TileSet.TileSetPath), tileSetSession.TileSet.Tiles, tileSetSession.TileSet.Scripts, tileSetSession.TileSet.TerrainSets);
         levelSession.AttachAsNewResource(Array.Empty<ResourceEntry>());
 
         var contributions = levelSession.BuildContributions().Concat(tileSetSession.BuildContributions()).ToList();
@@ -460,7 +460,7 @@ public sealed class TerrainAuthoringTests
         var levelSession = new LevelEditSession(level);
         var tileSetSession = new TileSetEditSession(TileSetFor(level));
         tileSetSession.AttachAsNewResource(Array.Empty<ResourceEntry>());
-        levelSession.Level.BindTileSet(ResourceReference.ToSelf(tileSetSession.TileSet.TileSetPath), tileSetSession.TileSet.Tiles);
+        levelSession.Level.BindTileSet(ResourceReference.ToSelf(tileSetSession.TileSet.TileSetPath), tileSetSession.TileSet.Tiles, tileSetSession.TileSet.Scripts);
         levelSession.AttachAsNewResource(Array.Empty<ResourceEntry>());
 
         var contributions = levelSession.BuildContributions().Concat(tileSetSession.BuildContributions()).ToList();
@@ -486,7 +486,7 @@ public sealed class TerrainAuthoringTests
             "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
-            Palette(), new[] { layer });
+            Palette(), new[] { layer }, new Dictionary<ResourcePath, string>());
     }
 
     // A level whose bound tile set declares one terrain set ("Ground") with one terrain ("Earth", id
@@ -509,7 +509,7 @@ public sealed class TerrainAuthoringTests
             "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
-            tileSet.Tiles, new[] { layer }, terrainSets: tileSet.TerrainSets);
+            tileSet.Tiles, new[] { layer }, tileSet.Scripts, terrainSets: tileSet.TerrainSets);
     }
 
     // Rebuilds a blank EditableTileSet with the same tiles/terrain sets a level's palette cache is

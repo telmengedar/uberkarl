@@ -1,3 +1,4 @@
+using System.Text;
 using Uberkarl.Content;
 using Uberkarl.Content.Json;
 using Uberkarl.Packages;
@@ -46,6 +47,7 @@ public static class TileSetMergeWriter
                     AnimationSpeed = tile.AnimationSpeed,
                     Terrain = tile.Terrain,
                     PeeringBits = tile.PeeringBits,
+                    Behavior = tile.Behavior,
                 })
                 .ToArray(),
             TerrainSets = tileSet.TerrainSets
@@ -63,6 +65,9 @@ public static class TileSetMergeWriter
         contributions.Add(new PendingResource(
             tileSet.TileSetPath, ResourceKind.TileSet, PackageFormat.DefaultMediaType,
             LevelContentSerializer.WriteTileSet(tileSetDefinition), attribution: null));
+
+        foreach (var script in tileSet.Scripts)
+            contributions.Add(new PendingResource(script.Key, ResourceKind.Script, PackageFormat.ScriptMediaType, Encoding.UTF8.GetBytes(script.Value), attribution: null));
 
         return contributions;
     }
