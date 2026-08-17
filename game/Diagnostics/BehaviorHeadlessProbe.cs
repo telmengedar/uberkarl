@@ -26,13 +26,13 @@ namespace Uberkarl.Diagnostics {
         const string BehaviorRuntimeNodeName = "BehaviorRuntime";
         const int PlatformLandingFrames = 30;
         const int PlatformRideFrames = 90;
-        const int PlatformExtendedRunFrames = 510;
+        const int PlatformExtendedRunFrames = 1790;
         const int PlatformLateWindowFrames = 90;
         const float PlatformMovedThreshold = 1f;
         const float PlatformRideToleranceX = 4f;
         const int JumpBlockGroundRow = 12;
         const int JumpBlockCycleFrames = 60;
-        const int JumpBlockCycleCount = 11;
+        const int JumpBlockCycleCount = 67;
         const float JumpBlockBumpThreshold = 2f;
         const float JumpBlockSettledTolerance = 1f;
 
@@ -64,14 +64,7 @@ namespace Uberkarl.Diagnostics {
             GetTree().Quit(allOk ? 0 : 1);
         }
 
-        /// <summary>
-        /// DiVoid #7879/#7889: asserts the moving platform's body actually moves AND the player standing on it
-        /// rides it, then keeps driving it for a combined <see cref="PlatformLandingFrames"/> +
-        /// <see cref="PlatformRideFrames"/> + <see cref="PlatformExtendedRunFrames"/> + <see cref="PlatformLateWindowFrames"/>
-        /// (&gt;= 600) physics frames and asserts (a) no subject was quarantined and (b) the platform is still
-        /// moving across the trailing <see cref="PlatformLateWindowFrames"/> window, not merely at some point
-        /// since the run started.
-        /// </summary>
+        /// <summary>Drives the moving platform through landing, riding, and an extended run, then asserts it stays unquarantined and still moves within a trailing window.</summary>
         async Task<bool> RunPlatformCheck(byte[] bytes) {
             const string Label = "ObjectCheck-Platform(moves + player rides, 10s+, no quarantine)";
             GD.Print($"[probe] ==== {Label} ====");
@@ -139,13 +132,7 @@ namespace Uberkarl.Diagnostics {
             return platformMoved && playerRode && platformStillMovingLate && noQuarantine;
         }
 
-        /// <summary>
-        /// DiVoid #7879/#7889: drives the jump-block through <see cref="JumpBlockCycleCount"/> separate
-        /// hit-bump-settle cycles (<see cref="JumpBlockCycleFrames"/> each, &gt;= 600 physics frames total) and
-        /// asserts (a) no subject was quarantined across the whole run and (b) the block still reacts (bumps
-        /// then settles) on the LAST cycle, proving the handler is still responsive at the end of the run
-        /// rather than frozen by an accumulated quarantine.
-        /// </summary>
+        /// <summary>Drives the jump-block through repeated hit-bump-settle cycles and asserts it stays unquarantined and keeps reacting on every cycle.</summary>
         async Task<bool> RunJumpBlockCheck(byte[] bytes) {
             const string Label = "ObjectCheck-JumpBlock(reacts across many hits, 10s+, no quarantine)";
             GD.Print($"[probe] ==== {Label} ====");
@@ -163,8 +150,8 @@ namespace Uberkarl.Diagnostics {
             }
 
             float restY = jumpBlock.Position.Y;
-            bool lastCycleBumped = false;
-            bool lastCycleSettled = false;
+            bool allCyclesBumped = true;
+            bool allCyclesSettled = true;
 
             for (int cycle = 0; cycle < JumpBlockCycleCount; cycle++) {
                 player.Position = new Vector2(jumpBlock.Position.X, JumpBlockGroundRow * level.TileSize - Player.CollisionHalfExtents.Y);
@@ -178,19 +165,21 @@ namespace Uberkarl.Diagnostics {
                 }
 
                 float cycleEndY = jumpBlock.Position.Y;
-                lastCycleBumped = cycleStartY - minY > JumpBlockBumpThreshold;
-                lastCycleSettled = Mathf.Abs(cycleEndY - restY) < JumpBlockSettledTolerance;
-                GD.Print($"[probe] {Label}: cycle {cycle} startY={cycleStartY:0.00} minY={minY:0.00} endY={cycleEndY:0.00} bumped={lastCycleBumped} settled={lastCycleSettled}");
+                bool cycleBumped = cycleStartY - minY > JumpBlockBumpThreshold;
+                bool cycleSettled = Mathf.Abs(cycleEndY - restY) < JumpBlockSettledTolerance;
+                allCyclesBumped &= cycleBumped;
+                allCyclesSettled &= cycleSettled;
+                GD.Print($"[probe] {Label}: cycle {cycle} startY={cycleStartY:0.00} minY={minY:0.00} endY={cycleEndY:0.00} bumped={cycleBumped} settled={cycleSettled}");
             }
 
             bool noQuarantine = runtime.QuarantinedSubjectIds.Count == 0;
             int totalFrames = JumpBlockCycleFrames * JumpBlockCycleCount;
-            GD.Print($"[probe] VERDICT {Label}: lastCycleBumped={lastCycleBumped} lastCycleSettled={lastCycleSettled} " +
+            GD.Print($"[probe] VERDICT {Label}: allCyclesBumped={allCyclesBumped} allCyclesSettled={allCyclesSettled} " +
                 $"noQuarantine={noQuarantine} over {totalFrames} total physics frames (quarantined=[{string.Join(",", runtime.QuarantinedSubjectIds)}])");
 
             root.QueueFree();
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-            return lastCycleBumped && lastCycleSettled && noQuarantine;
+            return allCyclesBumped && allCyclesSettled && noQuarantine;
         }
 
         static ResolvedLevel BuildPathA(byte[] bytes) {
