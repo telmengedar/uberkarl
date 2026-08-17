@@ -46,7 +46,7 @@ public sealed class HandlerDispatchTests
         var ctx = new BehaviorTestContext();
         var subject = ctx.CreateSubject("spike-1", "tile", "spike");
         var instance = ctx.Compile(subject, """
-            $onContact = $other => { self.despawn(); }
+            $onContact = $other => { self.moveBy(1, 0); }
             { "onContact": onContact }
             """);
 
@@ -79,23 +79,6 @@ public sealed class HandlerDispatchTests
 
         Assert.That(leaveFired, Is.True);
         Assert.That(ctx.Intents.Drain(), Is.EqualTo(new BehaviorIntent[] { new SetStateIntent(BehaviorSubjectIds.Level, "visitor", "") }));
-    }
-
-    [Test]
-    public void OnMessage_ReceivesNameAndData()
-    {
-        var ctx = new BehaviorTestContext();
-        var subject = ctx.CreateSubject("gate-1", "object", "gate");
-        const string source = """
-            $onMessage = [$name, $data] => { self.setState(name, data); }
-            { "onMessage": onMessage }
-            """;
-        ctx.Compile(subject, source);
-
-        var fired = ctx.Scheduler.DispatchMessage("gate-1", "open", true);
-
-        Assert.That(fired, Is.True);
-        Assert.That(ctx.Intents.Drain(), Is.EqualTo(new BehaviorIntent[] { new SetStateIntent("gate-1", "open", true) }));
     }
 
     [Test]

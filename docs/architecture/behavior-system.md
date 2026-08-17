@@ -120,7 +120,7 @@ The behavior system is a new **engine-agnostic core** (`Uberkarl.Behavior`) plus
 | **Behavior compiler/loader** | core | Parses Pooscript text once, resolves handler entry points, produces reusable `CompiledBehavior` values. |
 | **BehaviorScheduler + event bus** | core | Owns per-entity behavior instances, dispatches events, runs the per-frame behavior phase in deterministic order, collects intents. |
 | **Watchdog** | core | Wraps every script invocation in a time/instruction budget over `ExecuteAsync`+CT; on breach cancels (or, interim, abandons) and quarantines the offending behavior. |
-| **Intent buffer + intent types** | core | Scripts never mutate directly; the facade records *intents* (`MoveTo`, `SetState`, `Hurt`, `Spawn`, …). The host applies them on the main thread after scripts run. This IS the single-thread mutation contract. |
+| **Intent buffer + intent types** | core | Scripts never mutate directly; the facade records *intents* (`MoveTo`, `SetState`, `Hurt`, `Heal`, …). The host applies them on the main thread after scripts run. This IS the single-thread mutation contract. |
 | **Predefined behavior library** | core | Curated, first-party, parameterized behaviors addressable by stable id — the gamepad-authorable, safety-audited set. |
 | **Godot behavior glue** | `game/Behavior` | Builds runtime object bodies, feeds engine collision/enter/leave events into the bus, applies intents to Godot nodes (`Player`, object bodies, tilemap). |
 
@@ -159,11 +159,11 @@ A **behavior binding** is the small shared value all four subjects use: either a
 
 ### 5.6 Intent buffer + intent types (core)
 
-**Owns:** the closed set of mutation *intents* a script can request (`MoveTo`, `MoveBy`, `SetState`, `Hurt`, `Spawn`, `Despawn`, `SetTile`, `SendMessage`, `SetPlayerPhysics`, …), collected during the behavior phase and returned to the host for main-thread application in a deterministic order. **This is the single-thread `Read`+mutation contract:** scripts *read* a consistent snapshot and *write* only intents; nothing mutates mid-phase. **Does not own:** the actual mutation (glue applies it).
+**Owns:** the closed set of mutation *intents* a script can request (`MoveTo`, `MoveBy`, `SetState`, `Hurt`, `Heal`), collected during the behavior phase and returned to the host for main-thread application in a deterministic order. `Spawn`, `Despawn`, `SetTile`, `SendMessage`/`Message`, and `SetPhysics`/`Teleport`/`SetSpawn` were declared here at design time but never wired to `BehaviorRuntime.ApplyIntents`; deleted per DiVoid #8237 rather than shipped half-working — a future phase reintroduces whichever of these it implements. **This is the single-thread `Read`+mutation contract:** scripts *read* a consistent snapshot and *write* only intents; nothing mutates mid-phase. **Does not own:** the actual mutation (glue applies it).
 
 ### 5.7 Predefined behavior library (core)
 
-**Owns:** the curated, first-party, **safety-audited**, parameterized behaviors (e.g. "Hurt on contact", "Patrol between two cells", "Rise on hit then fall", "Teleport player to spawn on enter"). Each is addressable by a **stable id** and declares its **parameters** (typed, with ranges/pickers) so the editor can offer them on a gamepad. **Does not own:** free-text scripts (those are author-supplied resources).
+**Owns:** the curated, first-party, **safety-audited**, parameterized behaviors (e.g. "Hurt on contact", "Heal on enter", "Patrol between two cells", "Rise on hit then fall"). Each is addressable by a **stable id** and declares its **parameters** (typed, with ranges/pickers) so the editor can offer them on a gamepad. **Does not own:** free-text scripts (those are author-supplied resources).
 
 ### 5.8 `game/Behavior` (Godot glue)
 
@@ -195,9 +195,9 @@ Package (VFS)
 - **Type-level defaults** (a tile's "spikes hurt", an object type's default patrol) live on the **tileset / objectset** (reusable across levels).
 - **Instance-level wiring and deltas** (this placement's override, this trigger's rect, per-cell tile overrides, the level script) live on the **level**.
 - **Behavior text** lives in **`script` resources**; **predefined** behaviors live in the **engine's library**, not the package (they ship with Uberkarl and are referenced by stable id — a package that uses a predefined id is portable because every Uberkarl install has the library).
-- **Runtime state** (an object's live pixel position, its state map, timers) is **not** stored in the package — it is born from the definition's defaults at play start and lives only for the play session. Authoring stores *initial* state only.
+- **Runtime state** (an object's live pixel position, its state map) is **not** stored in the package — it is born from the definition's defaults at play start and lives only for the play session. Authoring stores *initial* state only.
 
-**Runtime entities (play session only):** `BehaviorInstance` (per scripted subject) holds its `CompiledBehavior`, its live **state map**, its scheduled timers, and a **quarantine flag**. An **object** additionally has a live free position + velocity + Godot body handle.
+**Runtime entities (play session only):** `BehaviorInstance` (per scripted subject) holds its `CompiledBehavior`, its live **state map**, and a **quarantine flag**. An **object** additionally has a live free position + velocity + Godot body handle.
 
 ---
 
@@ -208,14 +208,15 @@ Scripts react to a **closed, curated event set**. Each behavior binding may impl
 | Subject | Events | Payload (conceptual) |
 |---|---|---|
 | **Tile** (scripted) | `onContact`, `onContactLeave` | the other party (player or object), the tile's cell |
-| **Object** | `onSpawn`/`onReady`, `onUpdate(delta)`, `onContact`, `onContactLeave`, `onMessage(name, data)`, `onDespawn` | contacting party, delta seconds, message name/payload |
+| **Object** | `onSpawn`, `onUpdate(delta)`, `onContact`, `onContactLeave` | contacting party, delta seconds |
 | **Area trigger** | `onEnter(who)`, `onLeave(who)` | who entered/left (player or object), the region |
-| **Level (global)** | `onLevelStart`, `onUpdate(delta)`, `onPlayerDeath`/`onPlayerRespawn`, `onMessage` | delta, lifecycle context |
-| **Any (via host timers)** | scheduled callbacks (`after` / `every`, host-driven) | the timer's tag |
+| **Level (global)** | `onLevelStart`, `onUpdate(delta)` | delta, lifecycle context |
+
+`onMessage`, `onDespawn`, `onPlayerDeath`/`onPlayerRespawn`, `onTimer` and host-driven timer scheduling (`self.after`/`self.every`) were declared and never wired to a live call site; deleted per the DiVoid #8237 ruling (a declared-but-unreachable member does not exist) rather than implemented against undefined semantics. A later phase adds each one once its behavior is decided and it ships wired end to end.
 
 **Handler discovery (recommended shape — Decision D-1):** a behavior script exposes handlers by **assigning named handler lambdas** to conventional variables during a one-time initialization execute (e.g. the script body sets `onContact`, `onUpdate`, …). The loader runs the script **once** at level load with an init facade, reads back the handler delegates, and caches them on the `CompiledBehavior`. Per event, the scheduler invokes only the cached delegate for that event — **parse + init once, cheap invoke per event.** Closures naturally give the behavior a place to keep helper values, while durable per-instance state uses the explicit `self.state` facade (§8.5 determinism/reset). *Alternative considered and rejected:* re-executing the whole script per event with an `event.kind` the script branches on — simpler to explain but re-runs top-level work every event and muddies per-instance state; rejected on cost + clarity.
 
-**Timers — no `wait` (Decision D-3):** blocking `wait` ignores the CT (#2899) and would defeat the watchdog, so it is **banned from behavior scripts**. Timing is expressed as **host-driven scheduled callbacks** — a script calls `self.after(ms, tag)` / `self.every(ms, tag)`; the scheduler fires an `onTimer(tag)` handler later. All time advances between frames under host control, never inside a blocking script call. This sidesteps the single worst Pooscript safety gap by construction.
+**Timers — no `wait` (Decision D-3):** blocking `wait` ignores the CT (#2899) and would defeat the watchdog, so it is **banned from behavior scripts**. Timing was meant to be expressed as **host-driven scheduled callbacks** — a script calling `self.after(ms, tag)` / `self.every(ms, tag)`, the scheduler firing an `onTimer(tag)` handler later — but that surface was declared and never wired; removed per DiVoid #8237. A future phase reintroduces it once implemented end to end. All time advances between frames under host control, never inside a blocking script call — this sidesteps the single worst Pooscript safety gap by construction.
 
 **Dispatch order (per frame, deterministic):**
 
@@ -239,11 +240,13 @@ Grouped by the bound object a script sees. All are *interfaces defined in the co
 
 | Bound object | Reads (queries) | Actions (recorded as intents) | Gamepad-authorable? |
 |---|---|---|---|
-| **`self`** (the running entity) | `cell`, `position`, `state[key]`, `name`, `kind` | `moveTo(cell/pos)`, `moveBy(dx,dy)`, `setState(key,val)`, `setGraphic(id)`, `despawn()`, `after/every(ms,tag)` | moveTo/setState/setGraphic: **yes** (pick target/value); logic combining them: no |
-| **`level`** | `tileAt(layer,cell)`, `objectsNamed(name)`, `object(name)`, `state[key]` | `spawn(objectDefRef, cell)`, `setTile(layer,cell,tileId)`, `setState(key,val)`, `message(target,name,data)` | spawn/setTile: **yes**; queries in logic: no |
-| **`player`** | `position`, `velocity`, `isOnGround`, `state[key]` | `hurt(amount)`, `heal(amount)`, `teleport(cell)`, `setSpawn(name)`, `setPhysics(field,val)` | hurt/teleport/setSpawn: **yes** |
+| **`self`** (the running entity) | `cell`, `position`, `state[key]`, `name`, `kind` | `moveTo(cell/pos)`, `moveBy(dx,dy)`, `setState(key,val)` | moveTo/setState: **yes** (pick target/value); logic combining them: no |
+| **`level`** | `tileAt(layer,cell)`, `objectsNamed(name)`, `object(name)`, `state[key]` | `setState(key,val)` | queries in logic: no |
+| **`player`** | `position`, `velocity`, `isOnGround`, `state[key]` | `hurt(amount)`, `heal(amount)` | hurt: **yes** |
 | **`event`** | `kind`, `other` (contacting party), enter/leave `who` | — | n/a (payload) |
-| **another `object`** (via `level.object(name)`) | its `cell`, `state[key]` | `moveTo`, `setState`, `message` | via "move another object" template: **yes** |
+| **another `object`** (via `level.object(name)`) | its `cell`, `state[key]` | `moveTo`, `setState` | via "move another object" template: **yes** |
+
+`setGraphic`, `despawn`, `after`/`every` (self); `spawn`, `setTile`, `message` (level); `teleport`, `setSpawn`, `setPhysics` (player); `message` (another object) were declared and never wired to `BehaviorRuntime.ApplyIntents`; deleted per DiVoid #8237 rather than shipped half-working. Each is added back only once a phase implements and wires it.
 
 **Design stance: keep it narrow.** Start with roughly this set; add verbs only when a concrete author need appears. Every added verb is a permanent capability-surface and product-surface commitment.
 
@@ -293,7 +296,7 @@ Each frame (driven from the glue's `_PhysicsProcess`): physics step → collect 
 
 ### 9.3 Scripted tiles at runtime
 
-Tiles are grid-fixed and numerous, so **tiles do not each get a live body.** Contact is detected by the glue from the player/object physics contact against the collision tilemap, mapped back to a **cell → tile-behavior binding** lookup (resolved from tileset default + level per-cell override). Only cells whose resolved binding is non-empty are tracked. `onContact` fires on first contact of a cell, `onContactLeave` when the contact ends. Tile scripts may mutate level structure via `level.setTile(...)` (per the vision's "limited unless it mutates level structure").
+Tiles are grid-fixed and numerous, so **tiles do not each get a live body.** Contact is detected by the glue from the player/object physics contact against the collision tilemap, mapped back to a **cell → tile-behavior binding** lookup (resolved from tileset default + level per-cell override). Only cells whose resolved binding is non-empty are tracked. `onContact` fires on first contact of a cell, `onContactLeave` when the contact ends. Tile scripts do not mutate level structure — `level.setTile(...)` was declared and never wired; removed per DiVoid #8237 (per the vision's "limited unless it mutates level structure", a future phase can reintroduce it once implemented).
 
 ### 9.4 Free-moving objects at runtime (the key new primitive)
 
@@ -303,8 +306,8 @@ Tiles are grid-fixed and numerous, so **tiles do not each get a live body.** Con
   - `platform` → one-way / passthrough-from-below variant of solid.
   - `passthrough` → a body that detects contact but does not block (a collectible, the question-block's contact sensor).
   - `trigger` → detection only (rarely needed as an object since area triggers exist; kept for completeness).
-- **Motion via intents:** `self.moveTo(cell/pos)` / `moveBy(dx,dy)` record intents; the glue applies them by moving the body (tweened toward the target across frames, or an immediate set, per intent semantics). A **moving platform** is a `patrol` predefined behavior issuing `moveTo` between two cells on a loop; a **jumping question-block** is a behavior that, on `onContact` from below, issues a short rise-then-fall `moveBy` sequence and a `setState`/`setGraphic` (used → inert).
-- **Object↔object & object↔player:** `level.object("gate")?.setState("open", true)` etc. — cross-entity actions are just intents targeting another instance, applied in the same main-thread pass. Player interaction (`player.hurt`, `player.teleport`) rides the same intent path onto the existing `Player` node (whose physics fields are already `[Export]` seams, C-5).
+- **Motion via intents:** `self.moveTo(cell/pos)` / `moveBy(dx,dy)` record intents; the glue applies them by moving the body (tweened toward the target across frames, or an immediate set, per intent semantics). A **moving platform** is a `patrol` predefined behavior issuing `moveTo` between two cells on a loop; a **jumping question-block** is a behavior that, on `onContact` from below, issues a short rise-then-fall `moveBy` sequence and a `setState` (used → inert).
+- **Object↔object & object↔player:** `level.object("gate")?.setState("open", true)` etc. — cross-entity actions are just intents targeting another instance, applied in the same main-thread pass. Player interaction (`player.hurt`) rides the same intent path onto the existing `Player` node (whose physics fields are already `[Export]` seams, C-5).
 - **Objects vs tiles runtime model (Decision D-2):** tiles = static grid cells, no per-tile node, contact-via-tilemap; objects = live free bodies with per-frame update. This split is the recommendation — it keeps the (numerous) tiles cheap while giving the (fewer) objects full freedom.
 
 ### 9.5 Cost posture
@@ -402,13 +405,13 @@ Each phase is an independently shippable PR (per the one-feature-one-PR discipli
 - *No Godot, no gameplay* — this is the testable spine. **Ships the safety architecture first.**
 
 ### Phase 1 — Scripted tiles + area triggers + level script (event→action MVP)
-*Deliverable:* wire the core into `PlayRuntimeBuilder`; facade v0 (minimal action set: `setState`, `hurt`, `setTile`, a couple of reads); a small **predefined library** seed; contact/contact-leave on tiles, enter/leave on triggers, level `onLevelStart`/`onUpdate`.
+*Deliverable:* wire the core into `PlayRuntimeBuilder`; facade v0 (minimal action set: `setState`, `hurt`, a couple of reads — `setTile` was targeted here but shipped unwired and was later deleted per DiVoid #8237); a small **predefined library** seed; contact/contact-leave on tiles, enter/leave on triggers, level `onLevelStart`/`onUpdate`.
 - Godot glue: feed engine contacts/area signals into the bus; apply intents to `Player`/tilemap.
 - Safety posture: **curated/first-party scripts only** (D-5 interim).
-- A sample level that reacts (e.g. spikes hurt, a trigger teleports).
+- A sample level that reacts (e.g. spikes hurt, a trigger heals — `teleport` was targeted here but shipped unwired and was later deleted per DiVoid #8237).
 
 ### Phase 2 — Free-moving objects
-*Deliverable:* object bodies (collision roles), `moveTo`/`moveBy`/`spawn`/`despawn`, object↔object messaging, per-frame `onUpdate`.
+*Deliverable:* object bodies (collision roles), `moveTo`/`moveBy`, per-frame `onUpdate` — `spawn`/`despawn`/object↔object messaging were targeted here but shipped unwired and were later deleted per DiVoid #8237.
 - Demo: a **moving platform** (patrol predefined) that carries the player + a **jumping question-block** (rise-on-hit predefined).
 - Extends facade with the object/motion verbs.
 

@@ -33,38 +33,11 @@ public sealed record MoveByIntent(string SubjectId, double Dx, double Dy) : Beha
 /// <summary>Set a key in the subject's state map.</summary>
 public sealed record SetStateIntent(string SubjectId, string Key, object? Value) : BehaviorIntent(SubjectId);
 
-/// <summary>Change the subject's displayed graphic.</summary>
-public sealed record SetGraphicIntent(string SubjectId, string GraphicId) : BehaviorIntent(SubjectId);
-
-/// <summary>Remove the subject from play.</summary>
-public sealed record DespawnIntent(string SubjectId) : BehaviorIntent(SubjectId);
-
-/// <summary>Schedule a host-driven timer (design D-3 — no blocking <c>wait</c>; <paramref name="Repeating"/> distinguishes <c>after</c> from <c>every</c>).</summary>
-public sealed record ScheduleTimerIntent(string SubjectId, double Milliseconds, string Tag, bool Repeating) : BehaviorIntent(SubjectId);
-
-/// <summary>Spawn a new object instance from an object-definition reference at a cell. <paramref name="SubjectId"/> is the issuing subject (typically <see cref="BehaviorSubjectIds.Level"/>).</summary>
-public sealed record SpawnIntent(string SubjectId, string ObjectDefinitionRef, GridCell Cell) : BehaviorIntent(SubjectId);
-
-/// <summary>Change a tile at a cell on a layer.</summary>
-public sealed record SetTileIntent(string SubjectId, int Layer, GridCell Cell, string TileId) : BehaviorIntent(SubjectId);
-
-/// <summary>Send a named message with an optional payload to a target subject.</summary>
-public sealed record MessageIntent(string SubjectId, string Target, string Name, object? Data) : BehaviorIntent(SubjectId);
-
 /// <summary>Damage the player.</summary>
 public sealed record HurtIntent(string SubjectId, double Amount) : BehaviorIntent(SubjectId);
 
 /// <summary>Heal the player.</summary>
 public sealed record HealIntent(string SubjectId, double Amount) : BehaviorIntent(SubjectId);
-
-/// <summary>Teleport the player to a cell.</summary>
-public sealed record TeleportIntent(string SubjectId, GridCell Cell) : BehaviorIntent(SubjectId);
-
-/// <summary>Set the player's active named spawn point.</summary>
-public sealed record SetSpawnIntent(string SubjectId, string SpawnName) : BehaviorIntent(SubjectId);
-
-/// <summary>Override a player physics field.</summary>
-public sealed record SetPhysicsIntent(string SubjectId, string Field, object? Value) : BehaviorIntent(SubjectId);
 
 /// <summary>
 /// Collects intents recorded by facade objects during a behavior phase, in issuance order (design #7704

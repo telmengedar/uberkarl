@@ -2,10 +2,9 @@ namespace Uberkarl.Behavior;
 
 /// <summary>
 /// The facade bound as <c>self</c> — the running entity itself (design #7704 §8.1, "self" row). Not
-/// <see cref="IObjectFacade"/>-derived: self's capability set is a sibling, not a superset (self lacks
-/// <c>message</c> — sending a message to yourself is meaningless; another object lacks despawn/setGraphic/
-/// timers — those are self-only lifecycle actions). Every action records a <see cref="BehaviorIntent"/>;
-/// nothing here mutates state directly (design #7704 §8.5, the single-thread mutation contract).
+/// <see cref="IObjectFacade"/>-derived: self's capability set is a sibling, not a superset. Every action
+/// records a <see cref="BehaviorIntent"/>; nothing here mutates state directly (design #7704 §8.5, the
+/// single-thread mutation contract).
 /// </summary>
 public interface ISelfFacade
 {
@@ -38,16 +37,4 @@ public interface ISelfFacade
 
     /// <summary>Records an intent setting a value in this subject's state map.</summary>
     void SetState(string key, object? value);
-
-    /// <summary>Records an intent changing this subject's displayed graphic.</summary>
-    void SetGraphic(string graphicId);
-
-    /// <summary>Records an intent removing this subject from play.</summary>
-    void Despawn();
-
-    /// <summary>Records an intent scheduling a one-shot <see cref="BehaviorEventKind.OnTimer"/> callback after the given delay (design D-3 — host-driven timers, no blocking <c>wait</c>).</summary>
-    void After(double milliseconds, string tag);
-
-    /// <summary>Records an intent scheduling a repeating <see cref="BehaviorEventKind.OnTimer"/> callback.</summary>
-    void Every(double milliseconds, string tag);
 }

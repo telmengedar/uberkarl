@@ -25,7 +25,7 @@ public sealed class IntentBufferTests
     public void Drain_ReturnsRecordedIntents_AndClearsTheBuffer()
     {
         var buffer = new IntentBuffer();
-        buffer.Record(new DespawnIntent("x"));
+        buffer.Record(new SetStateIntent("x", "k", 1));
 
         var drained = buffer.Drain();
 

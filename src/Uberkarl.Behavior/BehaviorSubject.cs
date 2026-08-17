@@ -48,14 +48,4 @@ public sealed class BehaviorSubject : ISelfFacade, IObjectFacade
     public void MoveBy(double dx, double dy) => intents.Record(new MoveByIntent(Id, dx, dy));
 
     public void SetState(string key, object? value) => intents.Record(new SetStateIntent(Id, key, value));
-
-    public void SetGraphic(string graphicId) => intents.Record(new SetGraphicIntent(Id, graphicId));
-
-    public void Despawn() => intents.Record(new DespawnIntent(Id));
-
-    public void After(double milliseconds, string tag) => intents.Record(new ScheduleTimerIntent(Id, milliseconds, tag, Repeating: false));
-
-    public void Every(double milliseconds, string tag) => intents.Record(new ScheduleTimerIntent(Id, milliseconds, tag, Repeating: true));
-
-    public void Message(string name, object? data) => intents.Record(new MessageIntent(Id, Id, name, data));
 }

@@ -2,10 +2,10 @@ namespace Uberkarl.Behavior;
 
 /// <summary>
 /// The facade a script sees when it reaches ANOTHER object via <c>level.object(name)</c> (design #7704
-/// §8.1, "another object" row) — narrower than <see cref="ISelfFacade"/> by design: a script may move,
-/// restate, or message another object, but not despawn it, change its graphic, or schedule its timers.
-/// Narrow and purpose-built per the capability boundary (C-8/§8.2): never a live engine node, only value
-/// reads and recorded intents.
+/// §8.1, "another object" row) — narrower than <see cref="ISelfFacade"/> by design: a script may move or
+/// set state on another object, but not read its id/kind/position or move it by a relative delta. Narrow
+/// and purpose-built per the capability boundary (C-8/§8.2): never a live engine node, only value reads
+/// and recorded intents.
 /// </summary>
 public interface IObjectFacade
 {
@@ -26,7 +26,4 @@ public interface IObjectFacade
 
     /// <summary>Records an intent setting a value in this object's state map.</summary>
     void SetState(string key, object? value);
-
-    /// <summary>Records an intent sending a message to this object.</summary>
-    void Message(string name, object? data);
 }

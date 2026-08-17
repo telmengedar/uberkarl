@@ -59,9 +59,8 @@ public sealed class LevelDefinition
 
     /// <summary>
     /// The level's single global behavior binding (DiVoid #7738, design #7704 §6 — "the level gains an
-    /// optional <c>levelScript</c> behavior binding (global)"), reacting to lifecycle events
-    /// (<c>onLevelStart</c>, <c>onPlayerDeath</c>/<c>onPlayerRespawn</c>) and <c>onUpdate(delta)</c>. Null
-    /// when the level declares no global script.
+    /// optional <c>levelScript</c> behavior binding (global)"), reacting to <c>onLevelStart</c> and
+    /// <c>onUpdate(delta)</c>. Null when the level declares no global script.
     /// </summary>
     public BehaviorBinding? LevelScript { get; init; }
 }

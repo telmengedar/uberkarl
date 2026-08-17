@@ -54,12 +54,6 @@ public sealed class BehaviorScheduler
         return Dispatch(subjectId, BehaviorEventKind.OnSpawn);
     }
 
-    public bool DispatchDespawn(string subjectId)
-    {
-        CurrentEvent.Reset(BehaviorEventKind.OnDespawn);
-        return Dispatch(subjectId, BehaviorEventKind.OnDespawn);
-    }
-
     public bool DispatchContact(string subjectId, EventParty other)
     {
         CurrentEvent.Reset(BehaviorEventKind.OnContact);
@@ -95,36 +89,9 @@ public sealed class BehaviorScheduler
         return Dispatch(subjectId, BehaviorEventKind.OnUpdate, deltaSeconds);
     }
 
-    public bool DispatchMessage(string subjectId, string name, object? data)
-    {
-        CurrentEvent.Reset(BehaviorEventKind.OnMessage);
-        CurrentEvent.MessageName = name;
-        CurrentEvent.MessagePayload = data;
-        return Dispatch(subjectId, BehaviorEventKind.OnMessage, name, data);
-    }
-
     public bool DispatchLevelStart(string subjectId)
     {
         CurrentEvent.Reset(BehaviorEventKind.OnLevelStart);
         return Dispatch(subjectId, BehaviorEventKind.OnLevelStart);
-    }
-
-    public bool DispatchPlayerDeath(string subjectId)
-    {
-        CurrentEvent.Reset(BehaviorEventKind.OnPlayerDeath);
-        return Dispatch(subjectId, BehaviorEventKind.OnPlayerDeath);
-    }
-
-    public bool DispatchPlayerRespawn(string subjectId)
-    {
-        CurrentEvent.Reset(BehaviorEventKind.OnPlayerRespawn);
-        return Dispatch(subjectId, BehaviorEventKind.OnPlayerRespawn);
-    }
-
-    public bool DispatchTimer(string subjectId, string tag)
-    {
-        CurrentEvent.Reset(BehaviorEventKind.OnTimer);
-        CurrentEvent.Tag = tag;
-        return Dispatch(subjectId, BehaviorEventKind.OnTimer, tag);
     }
 }

@@ -19,20 +19,12 @@ public sealed class BehaviorSubjectTests
         subject.MoveTo(new GridCell(3, 4));
         subject.MoveBy(1, -1);
         subject.SetState("armed", true);
-        subject.SetGraphic("spike-broken");
-        subject.After(500, "rearm");
-        subject.Every(1000, "pulse");
-        subject.Despawn();
 
         Assert.That(intents.Intents, Is.EqualTo(new BehaviorIntent[]
         {
             new MoveToCellIntent("spike-1", new GridCell(3, 4)),
             new MoveByIntent("spike-1", 1, -1),
             new SetStateIntent("spike-1", "armed", true),
-            new SetGraphicIntent("spike-1", "spike-broken"),
-            new ScheduleTimerIntent("spike-1", 500, "rearm", Repeating: false),
-            new ScheduleTimerIntent("spike-1", 1000, "pulse", Repeating: true),
-            new DespawnIntent("spike-1"),
         }));
     }
 
@@ -108,17 +100,11 @@ public sealed class BehaviorLevelTests
         var intents = new IntentBuffer();
         var level = new BehaviorLevel(intents);
 
-        level.SetTile(0, new GridCell(1, 1), "lava");
-        level.Spawn("objects/coin.json", new GridCell(2, 2));
         level.SetState("cleared", true);
-        level.Message("gate-1", "open", null);
 
         Assert.That(intents.Intents, Is.EqualTo(new BehaviorIntent[]
         {
-            new SetTileIntent(BehaviorSubjectIds.Level, 0, new GridCell(1, 1), "lava"),
-            new SpawnIntent(BehaviorSubjectIds.Level, "objects/coin.json", new GridCell(2, 2)),
             new SetStateIntent(BehaviorSubjectIds.Level, "cleared", true),
-            new MessageIntent(BehaviorSubjectIds.Level, "gate-1", "open", null),
         }));
     }
 }
@@ -134,17 +120,11 @@ public sealed class BehaviorPlayerTests
 
         player.Hurt(10);
         player.Heal(5);
-        player.Teleport(new GridCell(0, 0));
-        player.SetSpawn("checkpoint-1");
-        player.SetPhysics("jumpSpeed", 420.0);
 
         Assert.That(intents.Intents, Is.EqualTo(new BehaviorIntent[]
         {
             new HurtIntent(BehaviorSubjectIds.Player, 10),
             new HealIntent(BehaviorSubjectIds.Player, 5),
-            new TeleportIntent(BehaviorSubjectIds.Player, new GridCell(0, 0)),
-            new SetSpawnIntent(BehaviorSubjectIds.Player, "checkpoint-1"),
-            new SetPhysicsIntent(BehaviorSubjectIds.Player, "jumpSpeed", 420.0),
         }));
     }
 
