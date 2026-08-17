@@ -39,7 +39,7 @@ namespace Uberkarl {
         readonly HashSet<string> contactedObjectIds = new HashSet<string>();
         readonly HashSet<string> quarantinedSubjectIds = new HashSet<string>();
 
-        /// <summary>Subject ids quarantined since <see cref="Configure"/>, for headless probes and diagnostics.</summary>
+        /// <summary>Subject ids quarantined so far.</summary>
         public IReadOnlyCollection<string> QuarantinedSubjectIds => quarantinedSubjectIds;
 
         bool loggedFirstTick;

@@ -158,6 +158,28 @@ public sealed class ScriptLimitQuarantineTests
     }
 
     [Test]
+    [CancelAfter(30_000)]
+    public void BumpOnHitFromBelowHandler_DispatchedAcrossSixtySevenCycles_UnderDefaultBudget_NeverQuarantines()
+    {
+        var ctx = new BehaviorTestContext();
+        var subject = ctx.CreateSubject("object:1", "object", "jump-block");
+        var binding = ResolvedBehaviorBinding.FromPredefined(PredefinedBehaviors.BumpOnHitFromBelow);
+        var compiled = ctx.CompileResolved(subject, binding);
+        Assert.That(compiled.IsQuarantined, Is.False);
+
+        for (var cycle = 0; cycle < 67; cycle++)
+        {
+            subject.SeedState("bumping", true);
+            subject.SeedState("bumpFrames", 12);
+
+            for (var frame = 0; frame < 60; frame++)
+                Assert.That(ctx.Scheduler.DispatchUpdate("object:1", 1.0 / 60), Is.True, $"quarantined at cycle {cycle} frame {frame}");
+        }
+
+        Assert.That(ctx.Scheduler.IsQuarantined("object:1"), Is.False);
+    }
+
+    [Test]
     [CancelAfter(10_000)]
     public void RunawaySingleDispatch_StillQuarantines_UnderTheRealProductionBudget()
     {
@@ -233,7 +255,7 @@ public sealed class ScriptLimitQuarantineTests
         ctx.Compile(subjectA, HealthySource);
         ctx.Compile(subjectB, HealthySource);
 
-        for (var i = 0; i < 100; i++)
+        for (var i = 0; i < 500; i++)
         {
             Assert.That(ctx.Scheduler.DispatchUpdate("obj-a", 0.016), Is.True, $"obj-a dispatch #{i}");
             Assert.That(ctx.Scheduler.DispatchUpdate("obj-b", 0.016), Is.True, $"obj-b dispatch #{i}");
