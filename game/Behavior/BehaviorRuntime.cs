@@ -37,6 +37,10 @@ namespace Uberkarl {
         readonly HashSet<string> contactedTileIds = new HashSet<string>();
         readonly HashSet<string> insideTriggerIds = new HashSet<string>();
         readonly HashSet<string> contactedObjectIds = new HashSet<string>();
+        readonly HashSet<string> quarantinedSubjectIds = new HashSet<string>();
+
+        /// <summary>Subject ids quarantined since <see cref="Configure"/>, for headless probes and diagnostics.</summary>
+        public IReadOnlyCollection<string> QuarantinedSubjectIds => quarantinedSubjectIds;
 
         bool loggedFirstTick;
         GridCell lastLoggedCell = new GridCell(int.MinValue, int.MinValue);
@@ -363,6 +367,7 @@ namespace Uberkarl {
         }
 
         void OnQuarantined(BehaviorQuarantineEvent quarantine) {
+            quarantinedSubjectIds.Add(quarantine.SubjectId);
             GD.PrintErr($"BehaviorRuntime: subject '{quarantine.SubjectId}' quarantined " +
                 $"({(quarantine.TriggeringEvent is { } kind ? kind.ToString() : "init")}): {quarantine.Reason}");
         }
