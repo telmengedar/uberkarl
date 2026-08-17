@@ -1,3 +1,4 @@
+using System.Text;
 using Uberkarl.Content;
 using Uberkarl.Content.Json;
 using Uberkarl.Packages;
@@ -57,14 +58,22 @@ public static class LevelMergeWriter
                     Terrain = layer.Terrain.Any(id => id != LayerDefinition.EmptyCell) ? layer.Terrain.ToArray() : Array.Empty<int>(),
                 })
                 .ToArray(),
+            TileBehaviorOverrides = level.TileBehaviorOverrides.ToArray(),
+            Triggers = level.Triggers.ToArray(),
+            Objects = level.Objects.Select(placement => placement.Placement).ToArray(),
+            LevelScript = level.LevelScript,
         };
 
-        return new[]
+        var contributions = new List<PendingResource>(1 + level.Scripts.Count)
         {
             new PendingResource(
                 level.LevelPath, ResourceKind.Level, PackageFormat.DefaultMediaType,
                 LevelContentSerializer.WriteLevel(levelDefinition), attribution: null),
         };
+        foreach (var script in level.Scripts)
+            contributions.Add(new PendingResource(script.Key, ResourceKind.Script, PackageFormat.ScriptMediaType, Encoding.UTF8.GetBytes(script.Value), attribution: null));
+
+        return contributions;
     }
 
     /// <summary>Merges <paramref name="contributions"/> onto <paramref name="existingPackage"/>. Delegates to <see cref="PackageMergeWriter.Compose"/> — see that type for the shared contract.</summary>

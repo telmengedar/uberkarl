@@ -11,4 +11,6 @@ public static class PackageFormat
     public const string FileExtension = ".pkg";
 
     public const string DefaultMediaType = "application/octet-stream";
+
+    public const string ScriptMediaType = "text/x-pooscript";
 }

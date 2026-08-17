@@ -39,6 +39,7 @@ public sealed class EditableLevel
     private readonly List<EditableLayer> layers;
     private IReadOnlyList<EditableTile> tiles;
     private IReadOnlyList<EditableTerrainSet> terrainSets;
+    private IReadOnlyDictionary<ResourcePath, string> tileScripts;
 
     public EditableLevel(
         string name,
@@ -52,12 +53,14 @@ public sealed class EditableLevel
         string? defaultSpawn,
         IReadOnlyList<EditableTile> tiles,
         IReadOnlyList<EditableLayer> layers,
+        IReadOnlyDictionary<ResourcePath, string> tileScripts,
         bool isAttached = false,
         IReadOnlyList<EditableTerrainSet>? terrainSets = null,
-        IReadOnlyDictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>? tileBehaviorOverrides = null,
-        IReadOnlyList<ResolvedAreaTrigger>? triggers = null,
-        IReadOnlyList<ResolvedObjectPlacement>? objects = null,
-        ResolvedBehaviorBinding? levelScript = null)
+        IReadOnlyList<TileBehaviorOverride>? tileBehaviorOverrides = null,
+        IReadOnlyList<AreaTriggerDefinition>? triggers = null,
+        IReadOnlyList<EditableObjectPlacement>? objects = null,
+        BehaviorBinding? levelScript = null,
+        IReadOnlyDictionary<ResourcePath, string>? scripts = null)
     {
         if (tileSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(tileSize));
@@ -79,10 +82,12 @@ public sealed class EditableLevel
             throw new ArgumentNullException(nameof(layers));
         this.layers = new List<EditableLayer>(layers);
         IsAttached = isAttached;
-        TileBehaviorOverrides = tileBehaviorOverrides ?? new Dictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>();
-        Triggers = triggers ?? Array.Empty<ResolvedAreaTrigger>();
-        Objects = objects ?? Array.Empty<ResolvedObjectPlacement>();
+        TileBehaviorOverrides = tileBehaviorOverrides ?? Array.Empty<TileBehaviorOverride>();
+        Triggers = triggers ?? Array.Empty<AreaTriggerDefinition>();
+        Objects = objects ?? Array.Empty<EditableObjectPlacement>();
         LevelScript = levelScript;
+        this.tileScripts = tileScripts ?? throw new ArgumentNullException(nameof(tileScripts));
+        Scripts = scripts ?? new Dictionary<ResourcePath, string>();
 
         var expected = width * height;
         foreach (var layer in this.layers)
@@ -144,33 +149,30 @@ public sealed class EditableLevel
     /// <see cref="AppendLayer"/>/<see cref="RemoveLayerAt"/>/<see cref="MoveLayer"/>/<see cref="SetLayerProperties"/>.</summary>
     public IReadOnlyList<EditableLayer> Layers => layers;
 
-    /// <summary>
-    /// The level's sparse per-instance tile-behavior override/removal map (DiVoid #7738, design #7704 §6),
-    /// carried through unedited from whatever the package authored (DiVoid #7747 — read-through only; there
-    /// is no authoring UX for this yet, P3 scope per #7738's own known-gap note). Keyed exactly like
-    /// <see cref="Content.ResolvedLevel.TileBehaviorOverrides"/> so <see cref="EditableLevelSnapshot"/> can
-    /// pass it straight through to the <c>ResolvedLevel</c> a playtest run actually plays.
-    /// </summary>
-    public IReadOnlyDictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?> TileBehaviorOverrides { get; }
+    /// <summary>The level's sparse per-instance tile-behavior overrides/removals.</summary>
+    public IReadOnlyList<TileBehaviorOverride> TileBehaviorOverrides { get; }
+
+    /// <summary>The level's grid-rect area triggers.</summary>
+    public IReadOnlyList<AreaTriggerDefinition> Triggers { get; }
+
+    /// <summary>The level's placed free-moving objects.</summary>
+    public IReadOnlyList<EditableObjectPlacement> Objects { get; }
+
+    /// <summary>The level's global lifecycle/<c>onUpdate</c> script binding, or <c>null</c> when the level declares none.</summary>
+    public BehaviorBinding? LevelScript { get; }
 
     /// <summary>
-    /// The level's grid-rect area triggers (DiVoid #7738, design #7704 §6), carried through unedited —
-    /// same read-through-only status as <see cref="TileBehaviorOverrides"/> (DiVoid #7747).
+    /// Script source text for every script-kind tile behavior binding declared by the currently-bound tile
+    /// set, keyed by its <see cref="ResourcePath"/> — a cache kept in sync with <see cref="Tiles"/> via
+    /// <see cref="BindTileSet"/>/<see cref="RefreshTiles"/>.
     /// </summary>
-    public IReadOnlyList<ResolvedAreaTrigger> Triggers { get; }
+    public IReadOnlyDictionary<ResourcePath, string> TileScripts => tileScripts;
 
     /// <summary>
-    /// The level's placed free-moving objects (DiVoid #7863, design #7704 §5.2/§6), carried through unedited
-    /// — same read-through-only status as <see cref="Triggers"/> (no authoring UX yet, P3 scope).
+    /// Script source text for every script-kind behavior binding this level itself declares (tile-behavior
+    /// overrides, triggers, objects, the level script), keyed by its <see cref="ResourcePath"/>.
     /// </summary>
-    public IReadOnlyList<ResolvedObjectPlacement> Objects { get; }
-
-    /// <summary>
-    /// The level's global lifecycle/<c>onUpdate</c> script binding (DiVoid #7738, design #7704 §6), or
-    /// <c>null</c> when the level declares none — carried through unedited, same status as
-    /// <see cref="TileBehaviorOverrides"/> (DiVoid #7747).
-    /// </summary>
-    public ResolvedBehaviorBinding? LevelScript { get; }
+    public IReadOnlyDictionary<ResourcePath, string> Scripts { get; }
 
     /// <summary>Whether <paramref name="x"/>,<paramref name="y"/> is a cell inside the grid.</summary>
     public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < Width && y < Height;
@@ -456,10 +458,11 @@ public sealed class EditableLevel
     /// cache in sync after an in-place edit to the SAME bound tile set (add/remove/rename a tile via
     /// <c>TileSetEditor</c> without rebinding to a different resource).
     /// </summary>
-    public void BindTileSet(ResourceReference tileSetReference, IReadOnlyList<EditableTile> tiles, IReadOnlyList<EditableTerrainSet>? terrainSets = null)
+    public void BindTileSet(ResourceReference tileSetReference, IReadOnlyList<EditableTile> tiles, IReadOnlyDictionary<ResourcePath, string> tileScripts, IReadOnlyList<EditableTerrainSet>? terrainSets = null)
     {
         TileSetReference = tileSetReference;
         this.tiles = tiles ?? throw new ArgumentNullException(nameof(tiles));
+        this.tileScripts = tileScripts ?? throw new ArgumentNullException(nameof(tileScripts));
         this.terrainSets = terrainSets ?? Array.Empty<EditableTerrainSet>();
     }
 
@@ -469,9 +472,10 @@ public sealed class EditableLevel
     /// through <c>TileSetEditor</c> (add/remove/rename a tile, define/edit a terrain, in the tile set this
     /// level already has open) uses to keep <see cref="Tiles"/>/<see cref="TerrainSets"/> current.
     /// </summary>
-    public void RefreshTiles(IReadOnlyList<EditableTile> tiles, IReadOnlyList<EditableTerrainSet>? terrainSets = null)
+    public void RefreshTiles(IReadOnlyList<EditableTile> tiles, IReadOnlyDictionary<ResourcePath, string> tileScripts, IReadOnlyList<EditableTerrainSet>? terrainSets = null)
     {
         this.tiles = tiles ?? throw new ArgumentNullException(nameof(tiles));
+        this.tileScripts = tileScripts ?? throw new ArgumentNullException(nameof(tileScripts));
         this.terrainSets = terrainSets ?? Array.Empty<EditableTerrainSet>();
     }
 
@@ -514,6 +518,7 @@ public sealed class EditableLevel
             defaultSpawn: null,
             palette,
             new[] { layer },
+            new Dictionary<ResourcePath, string>(),
             isAttached: false);
     }
 }

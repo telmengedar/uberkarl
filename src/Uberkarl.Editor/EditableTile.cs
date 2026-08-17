@@ -19,7 +19,7 @@ public sealed class EditableTile
         int id, ResourcePath graphicPath, byte[] graphic, Content.CollisionShapeDefinition collisionShape, string? name = null,
         IReadOnlyList<EditableTileFrame>? frames = null, double animationSpeed = DefaultAnimationSpeed,
         int? terrain = null, Content.TerrainPeering peeringBits = Content.TerrainPeering.None,
-        ResolvedBehaviorBinding? behavior = null)
+        BehaviorBinding? behavior = null)
     {
         if (id == Content.LayerDefinition.EmptyCell)
             throw new ArgumentException($"Tile id {Content.LayerDefinition.EmptyCell} is reserved for empty cells.", nameof(id));
@@ -68,16 +68,6 @@ public sealed class EditableTile
     /// <summary>Whether this tile currently belongs to a terrain (DiVoid #7551 Phase 3).</summary>
     public bool IsTerrainVariant => Terrain.HasValue;
 
-    /// <summary>
-    /// This tile TYPE's default contact/contact-leave behavior binding (DiVoid #7738, design #7704 §6), or
-    /// <c>null</c> when the type declares none. Carried through unchanged by every in-place tile edit below
-    /// (mirrors <see cref="Terrain"/>/<see cref="PeeringBits"/>'s "unrelated edits don't drop it" treatment)
-    /// so the editor's palette cache stays faithful to what the package actually authored — DiVoid #7747:
-    /// before this field existed, <see cref="EditableLevelSnapshot"/> had no way to project a tile's behavior
-    /// into a playtest's <c>ResolvedLevel</c> at all, so a scripted tile (e.g. the demo spike) silently did
-    /// nothing when played from the editor's playtest overlay even though the same package plays correctly
-    /// stand-alone. There is still no authoring UX for this (assigning/clearing a tile's default behavior
-    /// remains P3 scope, per DiVoid #7738's own known-gap note) — this is read-through only.
-    /// </summary>
-    public ResolvedBehaviorBinding? Behavior { get; }
+    /// <summary>This tile TYPE's default contact/contact-leave behavior binding, or <c>null</c> when the type declares none.</summary>
+    public BehaviorBinding? Behavior { get; }
 }

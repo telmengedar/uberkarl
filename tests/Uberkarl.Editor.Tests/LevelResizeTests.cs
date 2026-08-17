@@ -338,7 +338,7 @@ public sealed class LevelResizeTests
             "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
-            Palette(), new[] { layer });
+            Palette(), new[] { layer }, new Dictionary<ResourcePath, string>());
     }
 
     private static EditableLevel PaintedLevel(int paintX = 1, int paintY = 1)

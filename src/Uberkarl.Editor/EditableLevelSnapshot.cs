@@ -21,9 +21,6 @@ public static class EditableLevelSnapshot
         var colliding = new HashSet<int>();
         var collisionShapes = new Dictionary<int, CollisionShapeDefinition>(level.Tiles.Count);
         var animations = new Dictionary<int, ResolvedAnimation>();
-        // DiVoid #7747: keyed by tile id exactly like ResolvedLevel.TileBehaviors / LevelLoader's own
-        // ResolveTileBehaviors, so EffectiveTileBehaviors() (the only correct way to enumerate scripted tile
-        // cells) works identically whether the level came from a playtest snapshot or a stand-alone load.
         var tileBehaviors = new Dictionary<int, ResolvedBehaviorBinding>();
         var terrainSetIdByTerrainId = level.TerrainSets
             .SelectMany(set => set.Terrains.Select(terrain => (TerrainId: terrain.Id, TerrainSetId: set.Id)))
@@ -36,7 +33,7 @@ public static class EditableLevelSnapshot
             if (tile.CollisionShape.Kind != CollisionShapeKind.None)
                 colliding.Add(tile.Id);
             if (tile.Behavior is { } behavior)
-                tileBehaviors[tile.Id] = behavior;
+                tileBehaviors[tile.Id] = EditableBehaviorBindings.Resolve(behavior, level.TileScripts)!;
 
             // DiVoid #7551 Phase 2: the live canvas preview must resolve animated tiles the SAME way
             // LevelLoader does at runtime (frame 0 = the tile's own graphic, then its extra frames in
@@ -76,6 +73,38 @@ public static class EditableLevelSnapshot
             })
             .ToArray();
 
+        var tileBehaviorOverrides = new Dictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>();
+        foreach (var entry in level.TileBehaviorOverrides)
+        {
+            var key = (entry.Layer, entry.Cell);
+            if (!tileBehaviorOverrides.TryAdd(key, entry.Removed ? null : EditableBehaviorBindings.Resolve(entry.Binding, level.Scripts)))
+                throw new LevelContentException($"Tile behavior override at layer {entry.Layer} cell ({entry.Cell.X},{entry.Cell.Y}) is defined more than once.");
+        }
+
+        var triggers = level.Triggers
+            .Select(trigger => new ResolvedAreaTrigger
+            {
+                Name = trigger.Name,
+                X = trigger.X,
+                Y = trigger.Y,
+                Width = trigger.Width,
+                Height = trigger.Height,
+                Binding = EditableBehaviorBindings.Resolve(trigger.Binding, level.Scripts)!,
+            })
+            .ToArray();
+
+        var objects = level.Objects
+            .Select(placement => new ResolvedObjectPlacement
+            {
+                Name = placement.Placement.Name,
+                Cell = placement.Placement.Cell,
+                CollisionRole = placement.CollisionRole,
+                Graphic = placement.Graphic,
+                Binding = EditableBehaviorBindings.Resolve(placement.EffectiveBehavior, level.Scripts),
+                State = placement.State,
+            })
+            .ToArray();
+
         RgbaColor? background = null;
         if (!string.IsNullOrWhiteSpace(level.BackgroundColor) && RgbaColor.TryParse(level.BackgroundColor, out var parsed))
             background = parsed;
@@ -107,17 +136,11 @@ public static class EditableLevelSnapshot
             TileTerrains = tileTerrains,
             Spawns = new Dictionary<string, GridPosition>(level.Spawns),
             DefaultSpawn = level.DefaultSpawn,
-            // DiVoid #7747: without these three, a level played via PlaytestOverlay (which is fed exactly
-            // this snapshot) always looked like it declared zero scripted tiles/triggers/level-script,
-            // regardless of what the package actually authored — the HUD would show (it does not depend on
-            // any of this) but touching a scripted tile (e.g. the demo hurt-on-contact spike) did nothing,
-            // because EffectiveTileBehaviors() had nothing to yield. LevelPlay's stand-alone LevelLoader.Load
-            // path was never affected — this gap was specific to the editor's projection.
             TileBehaviors = tileBehaviors,
-            TileBehaviorOverrides = level.TileBehaviorOverrides,
-            Triggers = level.Triggers,
-            Objects = level.Objects,
-            LevelScript = level.LevelScript,
+            TileBehaviorOverrides = tileBehaviorOverrides,
+            Triggers = triggers,
+            Objects = objects,
+            LevelScript = EditableBehaviorBindings.Resolve(level.LevelScript, level.Scripts),
         };
     }
 }

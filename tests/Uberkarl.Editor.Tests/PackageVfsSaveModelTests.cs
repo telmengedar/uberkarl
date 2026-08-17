@@ -402,6 +402,7 @@ public sealed class PackageVfsSaveModelTests
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null, Palette(),
             new[] { new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, new int[Width * Height]) },
+            new Dictionary<ResourcePath, string>(),
             isAttached: true);
         var session = new LevelEditSession(loadedLevel);
         session.RenameLevel("Veriforest");

@@ -312,7 +312,7 @@ public sealed class TerrainDefaultTileAuthoringTests
             "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
             TileSize, Width, Height, backgroundColor: null,
             new Dictionary<string, GridPosition>(), defaultSpawn: null,
-            tileSet.Tiles, new[] { layer }, terrainSets: tileSet.TerrainSets);
+            tileSet.Tiles, new[] { layer }, tileSet.Scripts, terrainSets: tileSet.TerrainSets);
     }
 
     private static Package BuildPackageFrom(IReadOnlyList<PendingResource> contributions)
