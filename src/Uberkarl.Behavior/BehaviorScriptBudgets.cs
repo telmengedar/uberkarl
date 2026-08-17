@@ -7,7 +7,7 @@ public static class BehaviorScriptBudgets
 {
     /// <summary>Tight defaults for a tile/trigger/object behavior script.</summary>
     public static ScriptLimits DefaultBehavior() => new() {
-        Timeout = TimeSpan.FromMilliseconds(20),
+        Timeout = TimeSpan.FromMilliseconds(250),
         MaxSteps = 4_000,
         MaxDepth = 8,
         MaxVariables = 24,
@@ -17,7 +17,7 @@ public static class BehaviorScriptBudgets
 
     /// <summary>Raised defaults for the level script's one-time init/setup work.</summary>
     public static ScriptLimits DefaultInit() => new() {
-        Timeout = TimeSpan.FromMilliseconds(150),
+        Timeout = TimeSpan.FromMilliseconds(1000),
         MaxSteps = 40_000,
         MaxDepth = 12,
         MaxVariables = 128,

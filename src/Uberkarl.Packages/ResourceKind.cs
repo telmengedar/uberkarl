@@ -6,6 +6,8 @@ public static class ResourceKind
 
     public const string TileSet = "tileset";
 
+    public const string ObjectSet = "objectset";
+
     public const string TileGraphic = "tilegraphic";
 
     public const string Track = "track";

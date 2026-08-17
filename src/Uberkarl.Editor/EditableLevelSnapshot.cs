@@ -116,6 +116,7 @@ public static class EditableLevelSnapshot
             TileBehaviors = tileBehaviors,
             TileBehaviorOverrides = level.TileBehaviorOverrides,
             Triggers = level.Triggers,
+            Objects = level.Objects,
             LevelScript = level.LevelScript,
         };
     }

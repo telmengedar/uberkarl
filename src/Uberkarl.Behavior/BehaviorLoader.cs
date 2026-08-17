@@ -80,7 +80,7 @@ public sealed class BehaviorLoader
                 && BehaviorEventNames.TryParse(name, out var kind)
                 && entry.Value is LambdaMethod lambda)
             {
-                handlers[kind] = new BehaviorHandler(arguments => lambda.Invoke(arguments!));
+                handlers[kind] = new BehaviorHandler(arguments => lambda.InvokeAsExecution(arguments!));
             }
         }
 

@@ -56,6 +56,7 @@ public sealed class EditableLevel
         IReadOnlyList<EditableTerrainSet>? terrainSets = null,
         IReadOnlyDictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>? tileBehaviorOverrides = null,
         IReadOnlyList<ResolvedAreaTrigger>? triggers = null,
+        IReadOnlyList<ResolvedObjectPlacement>? objects = null,
         ResolvedBehaviorBinding? levelScript = null)
     {
         if (tileSize <= 0)
@@ -80,6 +81,7 @@ public sealed class EditableLevel
         IsAttached = isAttached;
         TileBehaviorOverrides = tileBehaviorOverrides ?? new Dictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>();
         Triggers = triggers ?? Array.Empty<ResolvedAreaTrigger>();
+        Objects = objects ?? Array.Empty<ResolvedObjectPlacement>();
         LevelScript = levelScript;
 
         var expected = width * height;
@@ -156,6 +158,12 @@ public sealed class EditableLevel
     /// same read-through-only status as <see cref="TileBehaviorOverrides"/> (DiVoid #7747).
     /// </summary>
     public IReadOnlyList<ResolvedAreaTrigger> Triggers { get; }
+
+    /// <summary>
+    /// The level's placed free-moving objects (DiVoid #7863, design #7704 §5.2/§6), carried through unedited
+    /// — same read-through-only status as <see cref="Triggers"/> (no authoring UX yet, P3 scope).
+    /// </summary>
+    public IReadOnlyList<ResolvedObjectPlacement> Objects { get; }
 
     /// <summary>
     /// The level's global lifecycle/<c>onUpdate</c> script binding (DiVoid #7738, design #7704 §6), or

@@ -8,7 +8,7 @@ using Uberkarl.Content;
 namespace Uberkarl {
 
     /// <summary>
-    /// Godot glue wiring the Godot-free <c>Uberkarl.Behavior</c> core onto real level subjects: scripted tiles, area triggers, and the level script.
+    /// Godot glue wiring the Godot-free <c>Uberkarl.Behavior</c> core onto real level subjects: scripted tiles, area triggers, the level script, and free-moving objects.
     /// </summary>
     public partial class BehaviorRuntime : Node {
 
@@ -30,10 +30,17 @@ namespace Uberkarl {
         Vector2 respawnPosition;
 
         readonly Dictionary<string, BehaviorSubject> subjectsById = new Dictionary<string, BehaviorSubject>();
+        readonly Dictionary<string, Node2D> objectBodiesById = new Dictionary<string, Node2D>();
         readonly List<ScriptedTile> scriptedTiles = new List<ScriptedTile>();
         readonly List<ScriptedTrigger> scriptedTriggers = new List<ScriptedTrigger>();
+        readonly List<ScriptedObject> scriptedObjects = new List<ScriptedObject>();
         readonly HashSet<string> contactedTileIds = new HashSet<string>();
         readonly HashSet<string> insideTriggerIds = new HashSet<string>();
+        readonly HashSet<string> contactedObjectIds = new HashSet<string>();
+        readonly HashSet<string> quarantinedSubjectIds = new HashSet<string>();
+
+        /// <summary>Subject ids quarantined since <see cref="Configure"/>, for headless probes and diagnostics.</summary>
+        public IReadOnlyCollection<string> QuarantinedSubjectIds => quarantinedSubjectIds;
 
         bool loggedFirstTick;
         GridCell lastLoggedCell = new GridCell(int.MinValue, int.MinValue);
@@ -56,6 +63,19 @@ namespace Uberkarl {
             }
             public string SubjectId { get; }
             public Rect2 WorldRect { get; }
+        }
+
+        readonly struct ScriptedObject {
+            public ScriptedObject(string subjectId, Node2D body, Area2D sensor, bool hasBehavior) {
+                SubjectId = subjectId;
+                Body = body;
+                Sensor = sensor;
+                HasBehavior = hasBehavior;
+            }
+            public string SubjectId { get; }
+            public Node2D Body { get; }
+            public Area2D Sensor { get; }
+            public bool HasBehavior { get; }
         }
 
         public override void _Ready() {
@@ -85,12 +105,16 @@ namespace Uberkarl {
             RegisterScriptedTiles(level);
             RegisterTriggers(level);
             RegisterLevelScript(level);
+            RegisterObjects(level);
 
             if (DiagnosticsEnabled)
-                GD.Print($"[behavior] Configure: {scriptedTiles.Count} tile cells, {scriptedTriggers.Count} triggers, levelScript={hasLevelScript}");
+                GD.Print($"[behavior] Configure: {scriptedTiles.Count} tile cells, {scriptedTriggers.Count} triggers, " +
+                    $"{scriptedObjects.Count} objects, levelScript={hasLevelScript}");
 
             if (hasLevelScript)
                 scheduler.DispatchLevelStart(LevelScriptSubjectId);
+
+            ApplyIntents();
         }
 
         Dictionary<string, object> Globals(BehaviorSubject self) => new Dictionary<string, object> {
@@ -142,6 +166,35 @@ namespace Uberkarl {
             hasLevelScript = true;
         }
 
+        void RegisterObjects(ResolvedLevel level) {
+            for (int i = 0; i < level.Objects.Count; i++) {
+                ResolvedObjectPlacement placement = level.Objects[i];
+                string subjectId = $"object:{i}";
+
+                Node2D body = ObjectBodyBuilder.Build(placement, tileSize);
+                AddChild(body);
+                objectBodiesById[subjectId] = body;
+
+                var subject = new BehaviorSubject(subjectId, "object", placement.Name, intents) {
+                    Cell = new GridCell(placement.Cell.X, placement.Cell.Y),
+                    Position = new BehaviorVector2(body.Position.X, body.Position.Y),
+                };
+                foreach (KeyValuePair<string, object?> state in placement.State)
+                    subject.SeedState(state.Key, state.Value);
+                subjectsById[subjectId] = subject;
+                levelFacade.Objects[subjectId] = subject;
+
+                bool hasBehavior = false;
+                if (placement.Binding is { } binding) {
+                    hasBehavior = true;
+                    scheduler.Register(new BehaviorInstance(subjectId, loader.CompileBinding(binding, Globals(subject))));
+                    scheduler.DispatchSpawn(subjectId);
+                }
+
+                scriptedObjects.Add(new ScriptedObject(subjectId, body, body as Area2D, hasBehavior));
+            }
+        }
+
         public override void _PhysicsProcess(double delta) {
             if (player is null)
                 return;
@@ -168,9 +221,11 @@ namespace Uberkarl {
 
             DispatchTileContacts(playerAabb);
             DispatchTriggerOverlaps(playerAabb, playerCell);
+            DispatchObjectContacts();
 
             if (hasLevelScript)
                 scheduler.DispatchUpdate(LevelScriptSubjectId, delta);
+            DispatchObjectUpdates(delta);
 
             ApplyIntents();
         }
@@ -213,6 +268,40 @@ namespace Uberkarl {
             }
         }
 
+        void DispatchObjectContacts() {
+            foreach (ScriptedObject obj in scriptedObjects) {
+                if (obj.Sensor is null)
+                    continue;
+
+                bool touching = obj.Sensor.GetOverlappingBodies().Contains(player);
+                bool wasTouching = contactedObjectIds.Contains(obj.SubjectId);
+                if (touching == wasTouching)
+                    continue;
+
+                GridCell cell = new GridCell(Mathf.FloorToInt(obj.Body.Position.X / tileSize), Mathf.FloorToInt(obj.Body.Position.Y / tileSize));
+                var other = new EventParty("player", string.Empty, cell);
+                if (touching) {
+                    contactedObjectIds.Add(obj.SubjectId);
+                    scheduler.DispatchContact(obj.SubjectId, other);
+                } else {
+                    contactedObjectIds.Remove(obj.SubjectId);
+                    scheduler.DispatchContactLeave(obj.SubjectId, other);
+                }
+            }
+        }
+
+        void DispatchObjectUpdates(double delta) {
+            foreach (ScriptedObject obj in scriptedObjects) {
+                if (!obj.HasBehavior)
+                    continue;
+
+                BehaviorSubject subject = subjectsById[obj.SubjectId];
+                subject.Position = new BehaviorVector2(obj.Body.Position.X, obj.Body.Position.Y);
+                subject.Cell = new GridCell(Mathf.FloorToInt(obj.Body.Position.X / tileSize), Mathf.FloorToInt(obj.Body.Position.Y / tileSize));
+                scheduler.DispatchUpdate(obj.SubjectId, delta);
+            }
+        }
+
         void ApplyIntents() {
             List<BehaviorIntent> drained = intents.Drain().ToList();
             if (DiagnosticsEnabled && drained.Count > 0)
@@ -233,6 +322,15 @@ namespace Uberkarl {
                     case SetStateIntent setState:
                         ApplySetState(setState);
                         break;
+                    case MoveToCellIntent moveToCell:
+                        ApplyMoveToCell(moveToCell);
+                        break;
+                    case MoveToPositionIntent moveToPosition:
+                        ApplyMoveToPosition(moveToPosition);
+                        break;
+                    case MoveByIntent moveBy:
+                        ApplyMoveBy(moveBy);
+                        break;
                     default:
                         break;
                 }
@@ -248,12 +346,28 @@ namespace Uberkarl {
                 subject.SeedState(intent.Key, intent.Value);
         }
 
+        void ApplyMoveToCell(MoveToCellIntent intent) {
+            if (objectBodiesById.TryGetValue(intent.SubjectId, out Node2D body))
+                body.Position = new Vector2(intent.Cell.X * tileSize + tileSize / 2f, intent.Cell.Y * tileSize + tileSize / 2f);
+        }
+
+        void ApplyMoveToPosition(MoveToPositionIntent intent) {
+            if (objectBodiesById.TryGetValue(intent.SubjectId, out Node2D body))
+                body.Position = new Vector2((float)intent.Position.X, (float)intent.Position.Y);
+        }
+
+        void ApplyMoveBy(MoveByIntent intent) {
+            if (objectBodiesById.TryGetValue(intent.SubjectId, out Node2D body))
+                body.Position += new Vector2((float)intent.Dx, (float)intent.Dy);
+        }
+
         void OnPlayerDied() {
             GD.Print("BehaviorRuntime: player died, respawning at level spawn.");
             player.Respawn(respawnPosition);
         }
 
         void OnQuarantined(BehaviorQuarantineEvent quarantine) {
+            quarantinedSubjectIds.Add(quarantine.SubjectId);
             GD.PrintErr($"BehaviorRuntime: subject '{quarantine.SubjectId}' quarantined " +
                 $"({(quarantine.TriggeringEvent is { } kind ? kind.ToString() : "init")}): {quarantine.Reason}");
         }
