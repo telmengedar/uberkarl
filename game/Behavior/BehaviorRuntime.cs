@@ -42,6 +42,9 @@ namespace Uberkarl {
         /// <summary>Subject ids quarantined so far.</summary>
         public IReadOnlyCollection<string> QuarantinedSubjectIds => quarantinedSubjectIds;
 
+        /// <summary>Object subject ids the player is currently in contact with, for host-level tests the core suite cannot reach (DiVoid #8237).</summary>
+        public IReadOnlyCollection<string> ContactedObjectIds => contactedObjectIds;
+
         bool loggedFirstTick;
         GridCell lastLoggedCell = new GridCell(int.MinValue, int.MinValue);
 
@@ -191,7 +194,7 @@ namespace Uberkarl {
                     scheduler.DispatchSpawn(subjectId);
                 }
 
-                scriptedObjects.Add(new ScriptedObject(subjectId, body, body as Area2D, hasBehavior));
+                scriptedObjects.Add(new ScriptedObject(subjectId, body, ObjectBodyBuilder.ContactSensor(body), hasBehavior));
             }
         }
 

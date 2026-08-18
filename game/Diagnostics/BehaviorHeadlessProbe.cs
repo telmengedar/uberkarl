@@ -30,6 +30,7 @@ namespace Uberkarl.Diagnostics {
         const int PlatformLateWindowFrames = 90;
         const float PlatformMovedThreshold = 1f;
         const float PlatformRideToleranceX = 4f;
+        const float PlatformContactRestTolerance = 4f;
         const int JumpBlockGroundRow = 12;
         const int JumpBlockCycleFrames = 60;
         const int JumpBlockCycleCount = 67;
@@ -54,13 +55,15 @@ namespace Uberkarl.Diagnostics {
             bool pathBReal = await RunPath("PathB-RealFall(stand-alone LevelLoader, real physics)", () => BuildPathB(bytes), forceOverlap: false);
 
             bool platformRides = await RunPlatformCheck(bytes);
+            bool platformReceivesContact = await RunPlatformContactCheck(bytes);
             bool jumpBlockReacts = await RunJumpBlockCheck(bytes);
 
             GD.Print($"[probe] SUMMARY PathA-Forced={(pathAForced ? "OK" : "NO DAMAGE")} PathB-Forced={(pathBForced ? "OK" : "NO DAMAGE")} " +
                 $"PathA-RealFall={(pathAReal ? "OK" : "NO DAMAGE")} PathB-RealFall={(pathBReal ? "OK" : "NO DAMAGE")} " +
-                $"Platform={(platformRides ? "OK" : "NO MOVEMENT/RIDE")} JumpBlock={(jumpBlockReacts ? "OK" : "NO REACTION")}");
+                $"Platform={(platformRides ? "OK" : "NO MOVEMENT/RIDE")} PlatformContact={(platformReceivesContact ? "OK" : "NO CONTACT")} " +
+                $"JumpBlock={(jumpBlockReacts ? "OK" : "NO REACTION")}");
 
-            bool allOk = pathAReal && platformRides && jumpBlockReacts;
+            bool allOk = pathAReal && platformRides && platformReceivesContact && jumpBlockReacts;
             GetTree().Quit(allOk ? 0 : 1);
         }
 
@@ -130,6 +133,59 @@ namespace Uberkarl.Diagnostics {
             root.QueueFree();
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             return platformMoved && playerRode && platformStillMovingLate && noQuarantine;
+        }
+
+        /// <summary>Lands the player on the solid moving platform and asserts the contact sweep sees it — the passthrough jump-block already proves the sensor path, this proves a <see cref="ObjectCollisionRole.Solid"/> body reaches it too (DiVoid #8237).</summary>
+        async Task<bool> RunPlatformContactCheck(byte[] bytes) {
+            const string Label = "ObjectCheck-PlatformContact(a SOLID object receives contact)";
+            GD.Print($"[probe] ==== {Label} ====");
+            var root = new Node2D { Name = "World_" + Label };
+            AddChild(root);
+
+            ResolvedLevel level = BuildPathB(bytes);
+            Player player = PlayRuntimeBuilder.Populate(root, level);
+            BehaviorRuntime runtime = root.FindChild(BehaviorRuntimeNodeName, recursive: true, owned: false) as BehaviorRuntime;
+            Node2D platform = root.FindChild(PlatformBodyName, recursive: true, owned: false) as Node2D;
+            if (platform is null || runtime is null) {
+                GD.PrintErr($"[probe] {Label}: FAILED to find platform body node '{PlatformBodyName}' or '{BehaviorRuntimeNodeName}'.");
+                root.QueueFree();
+                return false;
+            }
+
+            string platformSubjectId = null;
+            for (int i = 0; i < level.Objects.Count; i++) {
+                if (level.Objects[i].Name != PlatformBodyName)
+                    continue;
+                platformSubjectId = $"object:{i}";
+                break;
+            }
+            if (platformSubjectId is null) {
+                GD.PrintErr($"[probe] {Label}: FAILED to resolve a subject id for placement '{PlatformBodyName}'.");
+                root.QueueFree();
+                return false;
+            }
+
+            player.Position = new Vector2(platform.Position.X, platform.Position.Y - level.TileSize * 2);
+            player.Velocity = Vector2.Zero;
+            GD.Print($"[probe] {Label}: platform '{PlatformBodyName}' is subject '{platformSubjectId}', player dropped from {player.Position}");
+
+            bool sawContact = false;
+            for (int frame = 0; frame < PlatformLandingFrames + PlatformRideFrames; frame++) {
+                await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+                player.Position = new Vector2(platform.Position.X, player.Position.Y);
+                player.Velocity = new Vector2(0, player.Velocity.Y);
+                if (runtime.ContactedObjectIds.Contains(platformSubjectId))
+                    sawContact = true;
+            }
+
+            bool grounded = Mathf.Abs(player.Position.Y - (platform.Position.Y - Player.CollisionHalfExtents.Y - level.TileSize / 2f)) < PlatformContactRestTolerance;
+            bool noQuarantine = runtime.QuarantinedSubjectIds.Count == 0;
+            GD.Print($"[probe] VERDICT {Label}: sawContact={sawContact} playerRestingOnPlatform={grounded} noQuarantine={noQuarantine} " +
+                $"(contacted=[{string.Join(",", runtime.ContactedObjectIds)}] player={player.Position} platform={platform.Position})");
+
+            root.QueueFree();
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            return sawContact && noQuarantine;
         }
 
         /// <summary>Drives the jump-block through repeated hit-bump-settle cycles and asserts it stays unquarantined and keeps reacting on every cycle.</summary>
