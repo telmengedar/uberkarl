@@ -45,6 +45,9 @@ namespace Uberkarl {
         /// <summary>Object subject ids the player is currently in contact with, for host-level tests the core suite cannot reach (DiVoid #8237).</summary>
         public IReadOnlyCollection<string> ContactedObjectIds => contactedObjectIds;
 
+        /// <summary>Names a script can resolve through <c>level.object(...)</c>, for host-level tests the core suite cannot reach (DiVoid #8051).</summary>
+        public IReadOnlyCollection<string> ScriptVisibleObjectNames => levelFacade.Objects.Keys;
+
         bool loggedFirstTick;
         GridCell lastLoggedCell = new GridCell(int.MinValue, int.MinValue);
 
@@ -185,7 +188,15 @@ namespace Uberkarl {
                 foreach (KeyValuePair<string, object?> state in placement.State)
                     subject.SeedState(state.Key, state.Value);
                 subjectsById[subjectId] = subject;
-                levelFacade.Objects[subjectId] = subject;
+
+                // level.object(name) is a lookup by the AUTHORED name, not by the positional runtime id
+                // (DiVoid #8051). Two contract decisions, both deliberate:
+                //   - a placement with no name occupies no slot: it cannot be addressed by name anyway, and
+                //     letting it take the empty-string key would shadow every other nameless object;
+                //   - names are explicitly not unique (that is why ObjectsNamed returns a list), so the
+                //     single lookup answers with the FIRST placement of that name rather than the last.
+                if (!string.IsNullOrEmpty(placement.Name) && !levelFacade.Objects.ContainsKey(placement.Name))
+                    levelFacade.Objects[placement.Name] = subject;
 
                 bool hasBehavior = false;
                 if (placement.Binding is { } binding) {

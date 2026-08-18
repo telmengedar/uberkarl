@@ -57,13 +57,14 @@ namespace Uberkarl.Diagnostics {
             bool platformRides = await RunPlatformCheck(bytes);
             bool platformReceivesContact = await RunPlatformContactCheck(bytes);
             bool jumpBlockReacts = await RunJumpBlockCheck(bytes);
+            bool objectsResolveByName = RunObjectLookupCheck(bytes);
 
             GD.Print($"[probe] SUMMARY PathA-Forced={(pathAForced ? "OK" : "NO DAMAGE")} PathB-Forced={(pathBForced ? "OK" : "NO DAMAGE")} " +
                 $"PathA-RealFall={(pathAReal ? "OK" : "NO DAMAGE")} PathB-RealFall={(pathBReal ? "OK" : "NO DAMAGE")} " +
                 $"Platform={(platformRides ? "OK" : "NO MOVEMENT/RIDE")} PlatformContact={(platformReceivesContact ? "OK" : "NO CONTACT")} " +
-                $"JumpBlock={(jumpBlockReacts ? "OK" : "NO REACTION")}");
+                $"JumpBlock={(jumpBlockReacts ? "OK" : "NO REACTION")} ObjectLookup={(objectsResolveByName ? "OK" : "NOT BY NAME")}");
 
-            bool allOk = pathAReal && platformRides && platformReceivesContact && jumpBlockReacts;
+            bool allOk = pathAReal && platformRides && platformReceivesContact && jumpBlockReacts && objectsResolveByName;
             GetTree().Quit(allOk ? 0 : 1);
         }
 
@@ -133,6 +134,33 @@ namespace Uberkarl.Diagnostics {
             root.QueueFree();
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             return platformMoved && playerRode && platformStillMovingLate && noQuarantine;
+        }
+
+        /// <summary>Asserts a script could reach the sample level's objects by their authored names, which is what <c>level.object(name)</c> promises (DiVoid #8051). Needs no frames: the registry is built during Configure.</summary>
+        bool RunObjectLookupCheck(byte[] bytes) {
+            const string Label = "ObjectCheck-Lookup(level.object resolves authored names)";
+            GD.Print($"[probe] ==== {Label} ====");
+            var root = new Node2D { Name = "World_" + Label };
+            AddChild(root);
+
+            ResolvedLevel level = BuildPathB(bytes);
+            PlayRuntimeBuilder.Populate(root, level);
+            BehaviorRuntime runtime = root.FindChild(BehaviorRuntimeNodeName, recursive: true, owned: false) as BehaviorRuntime;
+            if (runtime is null) {
+                GD.PrintErr($"[probe] {Label}: FAILED to find '{BehaviorRuntimeNodeName}'.");
+                root.QueueFree();
+                return false;
+            }
+
+            var visible = runtime.ScriptVisibleObjectNames;
+            bool platformResolves = visible.Contains(PlatformBodyName);
+            bool jumpBlockResolves = visible.Contains(JumpBlockBodyName);
+
+            GD.Print($"[probe] VERDICT {Label}: platform={platformResolves} jumpBlock={jumpBlockResolves} " +
+                $"(script-visible names=[{string.Join(",", visible)}])");
+
+            root.QueueFree();
+            return platformResolves && jumpBlockResolves;
         }
 
         /// <summary>Lands the player on the solid moving platform and asserts the contact sweep sees it — the passthrough jump-block already proves the sensor path, this proves a <see cref="ObjectCollisionRole.Solid"/> body reaches it too (DiVoid #8237).</summary>
