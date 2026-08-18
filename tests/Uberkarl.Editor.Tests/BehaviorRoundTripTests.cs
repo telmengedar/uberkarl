@@ -184,6 +184,66 @@ public sealed class BehaviorRoundTripTests
         Assert.Throws<LevelContentException>(() => EditableLevelSnapshot.ToResolvedLevel(level));
     }
 
+    // ----- The editor door validates overrides exactly as the package door does (DiVoid #8259) -----
+    //
+    // Nothing validates overrides at deserialize time, so all of these arrive from authored content -- a
+    // hand-edited package, a partially-written file, or a tool predating a validation. The editor is where
+    // such a package gets opened, and it was the door WITHOUT the checks: LevelLoader rejected all four,
+    // EditableLevelSnapshot rejected only the duplicate. Both now call TileBehaviorOverrideRules.
+
+    [Test]
+    public void OverrideOnAnOutOfBoundsLayer_IsRejectedByTheEditorDoorToo()
+    {
+        var level = LevelWithOverride(new TileBehaviorOverride { Layer = 7, Cell = new GridPosition(0, 0), Removed = true });
+
+        var ex = Assert.Throws<LevelContentException>(() => EditableLevelSnapshot.ToResolvedLevel(level));
+        Assert.That(ex!.Message, Does.Contain("layer 7"), "the diagnostic has to locate the bad override -- there is a human present to fix it");
+    }
+
+    [Test]
+    public void OverrideOnAnOutOfBoundsCell_IsRejectedByTheEditorDoorToo()
+    {
+        var level = LevelWithOverride(new TileBehaviorOverride { Layer = 0, Cell = new GridPosition(Width, 0), Removed = true });
+
+        var ex = Assert.Throws<LevelContentException>(() => EditableLevelSnapshot.ToResolvedLevel(level));
+        Assert.That(ex!.Message, Does.Contain($"{Width}x{Height}"));
+    }
+
+    [Test]
+    public void OverrideDeclaringBothABindingAndRemoved_IsRejectedByTheEditorDoorToo()
+    {
+        var level = LevelWithOverride(new TileBehaviorOverride
+        {
+            Layer = 0,
+            Cell = new GridPosition(0, 0),
+            Removed = true,
+            Binding = BehaviorBinding.FromPredefined(PredefinedBehaviors.HurtOnContact),
+        });
+
+        var ex = Assert.Throws<LevelContentException>(() => EditableLevelSnapshot.ToResolvedLevel(level));
+        Assert.That(ex!.Message, Does.Contain("exactly one"),
+            "ambiguous intent used to be resolved silently by whichever code read it first");
+    }
+
+    [Test]
+    public void OverrideDeclaringNeitherABindingNorRemoved_IsRejectedByTheEditorDoorToo()
+    {
+        var level = LevelWithOverride(new TileBehaviorOverride { Layer = 0, Cell = new GridPosition(0, 0) });
+
+        var ex = Assert.Throws<LevelContentException>(() => EditableLevelSnapshot.ToResolvedLevel(level));
+        Assert.That(ex!.Message, Does.Contain("neither"),
+            "an override that says nothing used to load clean and silently do nothing");
+    }
+
+    private static EditableLevel LevelWithOverride(TileBehaviorOverride entry) => new(
+        "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
+        TileSize, Width, Height, backgroundColor: null,
+        new Dictionary<string, GridPosition>(), defaultSpawn: null,
+        Array.Empty<EditableTile>(),
+        new[] { new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, new int[Width * Height]) },
+        new Dictionary<ResourcePath, string>(),
+        tileBehaviorOverrides: new[] { entry });
+
     [Test]
     public void Migration_PreservesTileOverridesTriggersObjectsAndLevelScript_OnTheRewrittenLevel()
     {

@@ -93,18 +93,11 @@ public static class LevelLoader
         var overrides = new Dictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>();
         foreach (var entry in level.TileBehaviorOverrides)
         {
-            if (entry.Layer < 0 || entry.Layer >= level.Layers.Count)
-                throw new LevelContentException($"Tile behavior override references layer {entry.Layer}, but the level has {level.Layers.Count} layer(s).");
-            if (entry.Cell.X < 0 || entry.Cell.Y < 0 || entry.Cell.X >= level.Width || entry.Cell.Y >= level.Height)
-                throw new LevelContentException($"Tile behavior override cell ({entry.Cell.X},{entry.Cell.Y}) is outside the {level.Width}x{level.Height} grid.");
-            if (entry.Binding is not null && entry.Removed)
-                throw new LevelContentException($"Tile behavior override at layer {entry.Layer} cell ({entry.Cell.X},{entry.Cell.Y}) declares both a replacement binding and 'removed' — exactly one is allowed.");
-            if (entry.Binding is null && !entry.Removed)
-                throw new LevelContentException($"Tile behavior override at layer {entry.Layer} cell ({entry.Cell.X},{entry.Cell.Y}) declares neither a binding nor 'removed'.");
+            TileBehaviorOverrideRules.Validate(entry, level.Layers.Count, level.Width, level.Height);
 
             var key = (entry.Layer, entry.Cell);
             if (!overrides.TryAdd(key, entry.Removed ? null : ResolveBinding(resolver, entry.Binding!, $"tile behavior override at layer {entry.Layer} cell ({entry.Cell.X},{entry.Cell.Y})")))
-                throw new LevelContentException($"Tile behavior override at layer {entry.Layer} cell ({entry.Cell.X},{entry.Cell.Y}) is defined more than once.");
+                throw new LevelContentException(TileBehaviorOverrideRules.DuplicateMessage(entry));
         }
 
         return overrides;
