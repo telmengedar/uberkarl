@@ -76,9 +76,11 @@ public static class EditableLevelSnapshot
         var tileBehaviorOverrides = new Dictionary<(int Layer, GridPosition Cell), ResolvedBehaviorBinding?>();
         foreach (var entry in level.TileBehaviorOverrides)
         {
+            TileBehaviorOverrideRules.Validate(entry, level.Layers.Count, level.Width, level.Height);
+
             var key = (entry.Layer, entry.Cell);
             if (!tileBehaviorOverrides.TryAdd(key, entry.Removed ? null : EditableBehaviorBindings.Resolve(entry.Binding, level.Scripts)))
-                throw new LevelContentException($"Tile behavior override at layer {entry.Layer} cell ({entry.Cell.X},{entry.Cell.Y}) is defined more than once.");
+                throw new LevelContentException(TileBehaviorOverrideRules.DuplicateMessage(entry));
         }
 
         var triggers = level.Triggers
