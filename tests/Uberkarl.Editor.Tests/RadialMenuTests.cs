@@ -139,6 +139,13 @@ public sealed class RadialMenuTests
     }
 
     [Test]
+    public void Model_SelectObjectTypeOutcome_CarriesTheRightPayload()
+    {
+        Assert.That(MenuOutcome.SelectObjectType(3).Kind, Is.EqualTo(MenuOutcomeKind.SelectObjectType));
+        Assert.That(MenuOutcome.SelectObjectType(3).Index, Is.EqualTo(3));
+    }
+
+    [Test]
     public void Model_OutcomeAt_IsBoundsChecked()
     {
         var menu = new RadialMenuModel("Tiles", new[] { new RadialMenuItem("a", MenuOutcome.SelectTile(0)) });

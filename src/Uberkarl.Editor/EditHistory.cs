@@ -20,7 +20,7 @@ public sealed class EditHistory
     public bool CanRedo => redo.Count > 0;
 
     /// <summary>Applies a command, records it for undo, and clears the redo stack.</summary>
-    public CellChange Execute(IEditCommand command, EditableLevel level)
+    public CellChange? Execute(IEditCommand command, EditableLevel level)
     {
         if (command is null)
             throw new ArgumentNullException(nameof(command));
