@@ -143,11 +143,13 @@ public sealed class TileSetMigrationTests
     }
 
     private const string ContentSignatureGuardScriptSource = "$onContact = $other => { player.hurt(1); }\n{ \"onContact\": onContact }";
+    private const string ContentSignatureGuardAltScriptSource = "$onEnter = $who => { player.heal(1); }\n{ \"onEnter\": onEnter }";
 
     private static readonly ResourcePath ContentSignatureGuardGraphicPath = ResourcePath.Create("graphics/content-signature-guard/base.png");
     private static readonly ResourcePath ContentSignatureGuardAltGraphicPath = ResourcePath.Create("graphics/content-signature-guard/alt.png");
     private static readonly ResourcePath ContentSignatureGuardFramePath = ResourcePath.Create("graphics/content-signature-guard/frame.png");
     private static readonly ResourcePath ContentSignatureGuardScriptPath = ResourcePath.Create("scripts/content-signature-guard.poo");
+    private static readonly ResourcePath ContentSignatureGuardAltScriptPath = ResourcePath.Create("scripts/content-signature-guard-alt.poo");
 
     private static TileDefinition ContentSignatureGuardTile(
         int id = 1,
@@ -250,6 +252,57 @@ public sealed class TileSetMigrationTests
     [TestCaseSource(nameof(ContentSignaturePropertyCases))]
     [Description("DiVoid #8433 CF-2: two tile sets whose only difference is this one TileDefinition property must not be merged by TileSetMigration.Migrate.")]
     public void Migrate_DoesNotDedupeTileSets_DifferingOnlyInOneContentSignatureProperty(string propertyName, TileDefinition tileA, TileDefinition tileB, Action<PackageBuilder> registerResources)
+        => AssertContentSignatureDistinguishes(propertyName, tileA, tileB, registerResources);
+
+    private static IEnumerable<TestCaseData> ContentSignatureBranchCases()
+    {
+        yield return new TestCaseData(
+            "Behavior: same predefined id, different parameter values",
+            ContentSignatureGuardTile(behavior: BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter, new Dictionary<string, object?> { ["amount"] = 5 })),
+            ContentSignatureGuardTile(behavior: BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter, new Dictionary<string, object?> { ["amount"] = 50 })),
+            (Action<PackageBuilder>)(_ => { }));
+
+        yield return new TestCaseData(
+            "Behavior: two different predefined ids",
+            ContentSignatureGuardTile(behavior: BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter, new Dictionary<string, object?> { ["amount"] = 5 })),
+            ContentSignatureGuardTile(behavior: BehaviorBinding.FromPredefined(PredefinedBehaviors.HurtOnContact, new Dictionary<string, object?> { ["amount"] = 5 })),
+            (Action<PackageBuilder>)(_ => { }));
+
+        yield return new TestCaseData(
+            "Behavior: two different scripts",
+            ContentSignatureGuardTile(behavior: BehaviorBinding.FromScript(ResourceReference.ToSelf(ContentSignatureGuardScriptPath))),
+            ContentSignatureGuardTile(behavior: BehaviorBinding.FromScript(ResourceReference.ToSelf(ContentSignatureGuardAltScriptPath))),
+            (Action<PackageBuilder>)(builder =>
+            {
+                builder.AddResource(ResourceKind.Script, ContentSignatureGuardScriptPath, Encoding.UTF8.GetBytes(ContentSignatureGuardScriptSource));
+                builder.AddResource(ResourceKind.Script, ContentSignatureGuardAltScriptPath, Encoding.UTF8.GetBytes(ContentSignatureGuardAltScriptSource));
+            }));
+
+        yield return new TestCaseData(
+            "Behavior: script vs none",
+            ContentSignatureGuardTile(behavior: BehaviorBinding.FromScript(ResourceReference.ToSelf(ContentSignatureGuardScriptPath))),
+            ContentSignatureGuardTile(behavior: null),
+            (Action<PackageBuilder>)(builder => builder.AddResource(ResourceKind.Script, ContentSignatureGuardScriptPath, Encoding.UTF8.GetBytes(ContentSignatureGuardScriptSource))));
+
+        yield return new TestCaseData(
+            "Behavior: predefined vs none",
+            ContentSignatureGuardTile(behavior: BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter, new Dictionary<string, object?> { ["amount"] = 5 })),
+            ContentSignatureGuardTile(behavior: null),
+            (Action<PackageBuilder>)(_ => { }));
+
+        yield return new TestCaseData(
+            "CollisionShape: Rect branch, different rects same kind",
+            ContentSignatureGuardTile(collisionShape: CollisionShapeDefinition.FromRect(0.1f, 0.1f, 0.5f, 0.5f)),
+            ContentSignatureGuardTile(collisionShape: CollisionShapeDefinition.FromRect(0.2f, 0.2f, 0.6f, 0.6f)),
+            (Action<PackageBuilder>)(_ => { }));
+    }
+
+    [TestCaseSource(nameof(ContentSignatureBranchCases))]
+    [Description("DiVoid #8443: BehaviorSignature and CollisionShapeSignature's branch bodies are entered by existing tests but not covered — each branch's OUTPUT, not just its entry, must distinguish these tile sets.")]
+    public void Migrate_DoesNotDedupeTileSets_DifferingOnlyInAContentSignatureBranch(string caseLabel, TileDefinition tileA, TileDefinition tileB, Action<PackageBuilder> registerResources)
+        => AssertContentSignatureDistinguishes(caseLabel, tileA, tileB, registerResources);
+
+    private static void AssertContentSignatureDistinguishes(string caseLabel, TileDefinition tileA, TileDefinition tileB, Action<PackageBuilder> registerResources)
     {
         var tileSetAPath = ResourcePath.Create("tilesets/first.json");
         var tileSetBPath = ResourcePath.Create("tilesets/second.json");
@@ -268,7 +321,7 @@ public sealed class TileSetMigrationTests
 
         var result = TileSetMigration.Migrate(package);
 
-        Assert.That(result.LevelsRewritten, Is.EqualTo(0), $"tile sets differing only in {propertyName} must not be deduped");
+        Assert.That(result.LevelsRewritten, Is.EqualTo(0), $"tile sets differing only in {caseLabel} must not be deduped");
     }
 
     private static LevelDefinition ContentSignatureGuardLevel(ResourcePath tileSetPath) => new()
