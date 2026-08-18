@@ -51,7 +51,7 @@ public sealed class BehaviorLoader
         if (!ScriptExecutionGuard.TryRun(() => script.Execute(initVariables), out var initResult, out var failureReason))
             return Quarantined($"init {failureReason}");
 
-        return new CompiledBehavior(ExtractHandlers(initResult));
+        return FromInitResult(initResult);
     }
 
     private ScriptParser CreateSandboxedParser(BehaviorScriptRole role) => new() {
@@ -68,24 +68,53 @@ public sealed class BehaviorLoader
         return behavior;
     }
 
-    private static IReadOnlyDictionary<BehaviorEventKind, BehaviorHandler> ExtractHandlers(object? initResult)
+    /// <summary>
+    /// Turns what the init execute evaluated to into a compiled behavior. A script that produced nothing usable
+    /// is quarantined with a reason naming what was rejected, rather than compiling into a behavior with zero
+    /// handlers that loads clean and silently never reacts (DiVoid #8237 item 1).
+    /// </summary>
+    private static CompiledBehavior FromInitResult(object? initResult)
     {
         if (initResult is not IDictionary raw)
-            return EmptyHandlers;
+            return Quarantined($"script must end with a map of handler lambdas, but ended with {Describe(initResult)}");
 
         var handlers = new Dictionary<BehaviorEventKind, BehaviorHandler>();
+        var rejected = new List<string>();
+
         foreach (DictionaryEntry entry in raw)
         {
-            if (entry.Key is string name
-                && BehaviorEventNames.TryParse(name, out var kind)
-                && entry.Value is LambdaMethod lambda)
-            {
-                handlers[kind] = new BehaviorHandler(arguments => lambda.InvokeAsExecution(arguments!));
+            if (entry.Key is not string name) {
+                rejected.Add($"a {Describe(entry.Key)} key (handler names must be text)");
+                continue;
             }
+
+            if (!BehaviorEventNames.TryParse(name, out var kind)) {
+                rejected.Add($"'{name}' (not an event name)");
+                continue;
+            }
+
+            if (entry.Value is not LambdaMethod lambda) {
+                rejected.Add($"'{name}' (is {Describe(entry.Value)}, not a function)");
+                continue;
+            }
+
+            handlers[kind] = new BehaviorHandler(arguments => lambda.InvokeAsExecution(arguments!));
         }
 
-        return handlers;
+        // An empty map is how a script says "I deliberately have no handlers"; a map whose every entry was
+        // rejected is a mistake, and is the case worth being loud about.
+        if (handlers.Count > 0 || rejected.Count == 0)
+            return new CompiledBehavior(handlers);
+
+        return Quarantined($"script declares no usable handlers -- rejected {string.Join(", ", rejected)}");
     }
+
+    private static string Describe(object? value) => value switch {
+        null => "nothing",
+        string => "text",
+        LambdaMethod => "a function",
+        _ => $"a {value.GetType().Name}",
+    };
 
     private static readonly IReadOnlyDictionary<BehaviorEventKind, BehaviorHandler> EmptyHandlers =
         new Dictionary<BehaviorEventKind, BehaviorHandler>();
