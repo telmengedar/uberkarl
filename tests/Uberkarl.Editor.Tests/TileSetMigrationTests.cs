@@ -150,6 +150,8 @@ public sealed class TileSetMigrationTests
     private static readonly ResourcePath ContentSignatureGuardFramePath = ResourcePath.Create("graphics/content-signature-guard/frame.png");
     private static readonly ResourcePath ContentSignatureGuardScriptPath = ResourcePath.Create("scripts/content-signature-guard.poo");
     private static readonly ResourcePath ContentSignatureGuardAltScriptPath = ResourcePath.Create("scripts/content-signature-guard-alt.poo");
+    private static readonly ResourcePath ContentSignatureGuardScriptPathA = ResourcePath.Create("scripts/content-signature-guard-route-a.poo");
+    private static readonly ResourcePath ContentSignatureGuardScriptPathB = ResourcePath.Create("scripts/content-signature-guard-route-b.poo");
 
     private static TileDefinition ContentSignatureGuardTile(
         int id = 1,
@@ -295,6 +297,18 @@ public sealed class TileSetMigrationTests
             ContentSignatureGuardTile(collisionShape: CollisionShapeDefinition.FromRect(0.1f, 0.1f, 0.5f, 0.5f)),
             ContentSignatureGuardTile(collisionShape: CollisionShapeDefinition.FromRect(0.2f, 0.2f, 0.6f, 0.6f)),
             (Action<PackageBuilder>)(_ => { }));
+
+        yield return new TestCaseData(
+            "CollisionShape: Polygon branch, different points same kind",
+            ContentSignatureGuardTile(collisionShape: CollisionShapeDefinition.FromPolygon(new[] { new CollisionPointDefinition(0f, 0f), new CollisionPointDefinition(1f, 0f), new CollisionPointDefinition(0f, 1f) })),
+            ContentSignatureGuardTile(collisionShape: CollisionShapeDefinition.FromPolygon(new[] { new CollisionPointDefinition(0f, 0f), new CollisionPointDefinition(1f, 0f), new CollisionPointDefinition(1f, 1f) })),
+            (Action<PackageBuilder>)(_ => { }));
+
+        yield return new TestCaseData(
+            "CollisionShape: Preset branch, different presets same kind",
+            ContentSignatureGuardTile(collisionShape: CollisionShapeDefinition.FromPreset(CollisionPreset.TopHalf)),
+            ContentSignatureGuardTile(collisionShape: CollisionShapeDefinition.FromPreset(CollisionPreset.BottomHalf)),
+            (Action<PackageBuilder>)(_ => { }));
     }
 
     [TestCaseSource(nameof(ContentSignatureBranchCases))]
@@ -302,7 +316,31 @@ public sealed class TileSetMigrationTests
     public void Migrate_DoesNotDedupeTileSets_DifferingOnlyInAContentSignatureBranch(string caseLabel, TileDefinition tileA, TileDefinition tileB, Action<PackageBuilder> registerResources)
         => AssertContentSignatureDistinguishes(caseLabel, tileA, tileB, registerResources);
 
-    private static void AssertContentSignatureDistinguishes(string caseLabel, TileDefinition tileA, TileDefinition tileB, Action<PackageBuilder> registerResources)
+    private static IEnumerable<TestCaseData> ContentSignatureDualRouteCases()
+    {
+        yield return new TestCaseData(
+            "Behavior script: identical content at different paths",
+            ContentSignatureGuardTile(behavior: BehaviorBinding.FromScript(ResourceReference.ToSelf(ContentSignatureGuardScriptPathA))),
+            ContentSignatureGuardTile(behavior: BehaviorBinding.FromScript(ResourceReference.ToSelf(ContentSignatureGuardScriptPathB))),
+            (Action<PackageBuilder>)(builder =>
+            {
+                builder.AddResource(ResourceKind.Script, ContentSignatureGuardScriptPathA, Encoding.UTF8.GetBytes(ContentSignatureGuardScriptSource));
+                builder.AddResource(ResourceKind.Script, ContentSignatureGuardScriptPathB, Encoding.UTF8.GetBytes(ContentSignatureGuardScriptSource));
+            }));
+
+        yield return new TestCaseData(
+            "Behavior predefined parameters: same id and values, written in a different key order",
+            ContentSignatureGuardTile(behavior: BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter, new Dictionary<string, object?> { ["amount"] = 5, ["cooldown"] = 2 })),
+            ContentSignatureGuardTile(behavior: BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter, new Dictionary<string, object?> { ["cooldown"] = 2, ["amount"] = 5 })),
+            (Action<PackageBuilder>)(_ => { }));
+    }
+
+    [TestCaseSource(nameof(ContentSignatureDualRouteCases))]
+    [Description("DiVoid #8451: the dual of the branch-coverage guards — two tile sets reaching an identical field by a different route (content over path; sorted parameters) must still dedup.")]
+    public void Migrate_DedupesTileSets_WhenAContentSignatureFieldIsReachedByADifferentRoute(string caseLabel, TileDefinition tileA, TileDefinition tileB, Action<PackageBuilder> registerResources)
+        => AssertContentSignatureDedups(caseLabel, tileA, tileB, registerResources);
+
+    private static Package BuildContentSignatureGuardPackage(TileDefinition tileA, TileDefinition tileB, Action<PackageBuilder> registerResources)
     {
         var tileSetAPath = ResourcePath.Create("tilesets/first.json");
         var tileSetBPath = ResourcePath.Create("tilesets/second.json");
@@ -317,11 +355,25 @@ public sealed class TileSetMigrationTests
 
         using var buffer = new MemoryStream();
         builder.Write(buffer);
-        using var package = PackageReader.Open(new MemoryStream(buffer.ToArray()));
+        return PackageReader.Open(new MemoryStream(buffer.ToArray()));
+    }
+
+    private static void AssertContentSignatureDistinguishes(string caseLabel, TileDefinition tileA, TileDefinition tileB, Action<PackageBuilder> registerResources)
+    {
+        using var package = BuildContentSignatureGuardPackage(tileA, tileB, registerResources);
 
         var result = TileSetMigration.Migrate(package);
 
         Assert.That(result.LevelsRewritten, Is.EqualTo(0), $"tile sets differing only in {caseLabel} must not be deduped");
+    }
+
+    private static void AssertContentSignatureDedups(string caseLabel, TileDefinition tileA, TileDefinition tileB, Action<PackageBuilder> registerResources)
+    {
+        using var package = BuildContentSignatureGuardPackage(tileA, tileB, registerResources);
+
+        var result = TileSetMigration.Migrate(package);
+
+        Assert.That(result.LevelsRewritten, Is.EqualTo(1), $"tile sets reaching an identical {caseLabel} by a different route must still dedup");
     }
 
     private static LevelDefinition ContentSignatureGuardLevel(ResourcePath tileSetPath) => new()
