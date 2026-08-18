@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Uberkarl.Behavior;
 using Uberkarl.Content;
 using Uberkarl.Content.Json;
 using Uberkarl.Packages;
@@ -13,8 +14,8 @@ namespace Uberkarl.Editor;
 /// redundancy Toni flagged without discarding any level's data or touching a genuinely distinct tile set.
 ///
 /// <b>Scope (content-identical, same package):</b> two tile sets are considered "the same tileset" when
-/// they declare the exact same tiles — same ids, same <see cref="TileDefinition.CollisionShape"/>/<see cref="TileDefinition.Name"/>,
-/// and byte-identical GRAPHIC content per tile (order-independent). This is deliberately content-aware
+/// they declare the exact same tiles — same ids and every other declared field, with graphic content (not
+/// path) compared byte-for-byte per tile (order-independent; see <see cref="ContentSignature"/>). This is deliberately content-aware
 /// rather than a raw byte-comparison of the tileset.json payload: the redundancy this fixes is namespaced
 /// PER LEVEL (<c>tilesets/&lt;level-slug&gt;.json</c> referencing <c>graphics/&lt;level-slug&gt;/&lt;id&gt;.png</c>),
 /// so two levels saved from an unmodified starter palette produce tile sets whose PATHS (and therefore
@@ -62,9 +63,6 @@ public static class TileSetMigration
 
         var levelEntries = package.Manifest.Resources.Where(entry => entry.Kind == ResourceKind.Level).ToList();
 
-        // Pass 1: group levels by their (self-referenced) tile set's CONTENT signature (see class doc for
-        // why this is not a raw byte comparison). First sighting per signature wins as canonical; every
-        // later level referencing a distinct PATH with the same signature is queued for rewrite.
         var canonicalPathBySignature = new Dictionary<string, ResourcePath>(StringComparer.Ordinal);
         var referencedPaths = new HashSet<string>(StringComparer.Ordinal);
         var rewrites = new List<(ResourcePath LevelPath, LevelDefinition Definition)>();
@@ -73,7 +71,7 @@ public static class TileSetMigration
         {
             var levelDefinition = LevelContentSerializer.ReadLevel(package.ReadBytes(levelEntry.Path));
             if (!levelDefinition.TileSet.IsSelf)
-                continue; // cross-package reference: out of migration scope.
+                continue;
 
             var tileSetPath = levelDefinition.TileSet.Path;
             var signature = ContentSignature(package, LevelContentSerializer.ReadTileSet(package.ReadBytes(tileSetPath)));
@@ -97,9 +95,6 @@ public static class TileSetMigration
             return new Result(unchanged.ToArray(), 0, 0, 0);
         }
 
-        // Pass 2: every tile-set resource whose path never ended up "referenced" (i.e. it was some level's
-        // OWN duplicate, now superseded) is orphaned. Graphics are orphaned too, but ONLY if no surviving
-        // tile set (canonical or otherwise untouched) still points at them.
         var allTileSetPaths = package.Manifest.Resources.Where(entry => entry.Kind == ResourceKind.TileSet).Select(entry => entry.Path).ToList();
         var orphanedTileSetPaths = allTileSetPaths.Where(path => !referencedPaths.Contains(path.Value)).ToList();
 
@@ -107,16 +102,19 @@ public static class TileSetMigration
         foreach (var path in allTileSetPaths.Where(path => !orphanedTileSetPaths.Contains(path)))
         {
             foreach (var tile in LevelContentSerializer.ReadTileSet(package.ReadBytes(path)).Tiles)
-                if (tile.Graphic.IsSelf)
-                    survivingGraphicPaths.Add(tile.Graphic.Path.Value);
+                foreach (var reference in TileGraphicReferences(tile))
+                    if (reference.IsSelf)
+                        survivingGraphicPaths.Add(reference.Path.Value);
         }
 
         var orphanedGraphicPaths = new List<ResourcePath>();
+        var orphanedGraphicPathValues = new HashSet<string>(StringComparer.Ordinal);
         foreach (var tileSetPath in orphanedTileSetPaths)
         {
             foreach (var tile in LevelContentSerializer.ReadTileSet(package.ReadBytes(tileSetPath)).Tiles)
-                if (tile.Graphic.IsSelf && !survivingGraphicPaths.Contains(tile.Graphic.Path.Value))
-                    orphanedGraphicPaths.Add(tile.Graphic.Path);
+                foreach (var reference in TileGraphicReferences(tile))
+                    if (reference.IsSelf && !survivingGraphicPaths.Contains(reference.Path.Value) && orphanedGraphicPathValues.Add(reference.Path.Value))
+                        orphanedGraphicPaths.Add(reference.Path);
         }
 
         var builder = new PackageBuilder().SeedFrom(package);
@@ -132,28 +130,49 @@ public static class TileSetMigration
         return new Result(buffer.ToArray(), rewrites.Count, orphanedTileSetPaths.Count, orphanedGraphicPaths.Count);
     }
 
-    // A tile set's render-determining content, order-independent over tiles: per declared tile (sorted by
-    // id) — id, collision shape, name, and the hash of its graphic's actual bytes (not its path, which is
-    // exactly what differs between two otherwise-identical per-level copies). A cross-package or missing
-    // graphic cannot be content-compared, so it is folded in as an always-distinct marker (never dedups).
     private static string ContentSignature(Package package, TileSetDefinition tileSet)
     {
         var parts = new List<string>(tileSet.Tiles.Count);
         foreach (var tile in tileSet.Tiles.OrderBy(t => t.Id))
         {
-            var graphicHash = tile.Graphic.IsSelf && package.Contains(tile.Graphic.Path)
-                ? Convert.ToBase64String(SHA256.HashData(package.ReadBytes(tile.Graphic.Path)))
-                : $"unresolved:{tile.Graphic}";
-            parts.Add($"{tile.Id}|{CollisionShapeSignature(tile.CollisionShape)}|{tile.Name}|{graphicHash}");
+            parts.Add(string.Join("|",
+                tile.Id,
+                tile.Name ?? string.Empty,
+                ResourceSignature(package, tile.Graphic),
+                CollisionShapeSignature(tile.CollisionShape),
+                string.Join(",", tile.Frames.Select(frame => ResourceSignature(package, frame))),
+                tile.AnimationSpeed,
+                tile.Terrain,
+                (int)tile.PeeringBits,
+                BehaviorSignature(package, tile.Behavior)));
         }
 
         return Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(";", parts))));
     }
 
-    // A stable string signature of a collision shape's render-determining fields (DiVoid #7551 Phase 4) —
-    // CollisionShapeDefinition is a plain class, not a record, so it carries no structural ToString/Equals
-    // of its own; this is deliberately explicit about which fields matter per Kind, mirroring
-    // EditableTileSet.CollisionShapesEqual's own per-Kind comparison.
+    private static string ResourceSignature(Package package, ResourceReference reference) =>
+        reference.IsSelf && package.Contains(reference.Path)
+            ? Convert.ToBase64String(SHA256.HashData(package.ReadBytes(reference.Path)))
+            : $"unresolved:{reference}";
+
+    private static string BehaviorSignature(Package package, BehaviorBinding? behavior)
+    {
+        if (behavior is null)
+            return "none";
+
+        if (behavior.IsScript)
+            return $"script:{ResourceSignature(package, behavior.Script!.Value)}";
+
+        return $"predefined:{behavior.PredefinedId}:{string.Join(",", behavior.Parameters.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => $"{p.Key}={p.Value}"))}";
+    }
+
+    private static IEnumerable<ResourceReference> TileGraphicReferences(TileDefinition tile)
+    {
+        yield return tile.Graphic;
+        foreach (var frame in tile.Frames)
+            yield return frame;
+    }
+
     private static string CollisionShapeSignature(CollisionShapeDefinition shape) => shape.Kind switch
     {
         CollisionShapeKind.Rect => $"rect:{shape.RectX}:{shape.RectY}:{shape.RectWidth}:{shape.RectHeight}",
