@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     Three things keep this fast and visible, each of which replaced a slower or
-    quieter approach (DiVoid #8296):
+    quieter approach (DiVoid #8338):
 
     * The build is a plain `dotnet build`. The project is an ordinary
       Godot.NET.Sdk project, so `godot --build-solutions` is not needed -- and it
