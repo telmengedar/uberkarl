@@ -118,11 +118,21 @@ public static class PredefinedBehaviors
     private static string FormatAmount(IReadOnlyDictionary<string, object?> parameters, double fallback)
         => FormatParameter(parameters, AmountParameter, fallback);
 
+    /// <summary>
+    /// Renders one numeric template parameter. A value that cannot be read as a number is bad package data
+    /// rather than a bug, so the failure is rethrown naming the key and the offending value: the loader turns
+    /// it into a quarantine, which is what keeps a malformed package from throwing during level load (#8237).
+    /// </summary>
     private static string FormatParameter(IReadOnlyDictionary<string, object?> parameters, string key, double fallback)
     {
-        var value = parameters.TryGetValue(key, out var raw) && raw is not null
-            ? Convert.ToDouble(raw, CultureInfo.InvariantCulture)
-            : fallback;
-        return value.ToString(CultureInfo.InvariantCulture);
+        if (!parameters.TryGetValue(key, out var raw) || raw is null)
+            return fallback.ToString(CultureInfo.InvariantCulture);
+
+        try {
+            return Convert.ToDouble(raw, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException) {
+            throw new FormatException($"parameter '{key}' must be a number, but was '{raw}'", ex);
+        }
     }
 }
