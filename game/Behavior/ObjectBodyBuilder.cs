@@ -4,19 +4,17 @@ using Uberkarl.Content;
 namespace Uberkarl {
 
     /// <summary>
-    /// Builds the free-moving Godot body for a resolved object placement (DiVoid #7863, design #7704 §9.4):
+    /// Builds the free-moving Godot body for a resolved object placement:
     /// an <see cref="AnimatableBody2D"/> for <see cref="ObjectCollisionRole.Solid"/> (blocks and carries the
     /// player — a moving platform) or an <see cref="Area2D"/> sensor for <see cref="ObjectCollisionRole.Passthrough"/>
     /// (detects contact but never blocks — a jump-block). Spawned at the placement's grid cell, then free.
-    /// A solid body carries a child sensor as well, because a body that blocks the player can never overlap them
-    /// and would otherwise be invisible to the contact sweep (DiVoid #8237).
     /// </summary>
     public static class ObjectBodyBuilder {
 
-        /// <summary>Node name of the child sensor a solid body carries; see <see cref="ContactSensor"/>.</summary>
+        /// <summary>Node name of the child sensor a solid body carries.</summary>
         public const string ContactSensorName = "ContactSensor";
 
-        /// <summary>Pixels the solid body's sensor extends past its collision shape, so a player resting against the surface still registers.</summary>
+        /// <summary>Pixels the solid body's sensor extends past its collision shape.</summary>
         const float SensorMargin = 1f;
 
         public static Node2D Build(ResolvedObjectPlacement placement, int tileSize) {
@@ -38,10 +36,7 @@ namespace Uberkarl {
             return node;
         }
 
-        /// <summary>
-        /// The <see cref="Area2D"/> that reports player contact for <paramref name="body"/>: a passthrough body is
-        /// its own sensor, a solid body carries one as a child. Null for a body that has neither.
-        /// </summary>
+        /// <summary>The <see cref="Area2D"/> that reports player contact for <paramref name="body"/>, or null if it has none.</summary>
         public static Area2D ContactSensor(Node2D body) => body as Area2D ?? body.GetNodeOrNull<Area2D>(ContactSensorName);
 
         static Area2D BuildContactSensor(int tileSize) {

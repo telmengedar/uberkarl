@@ -136,7 +136,7 @@ namespace Uberkarl.Diagnostics {
             return platformMoved && playerRode && platformStillMovingLate && noQuarantine;
         }
 
-        /// <summary>Asserts a script could reach the sample level's objects by their authored names, which is what <c>level.object(name)</c> promises (DiVoid #8051). Needs no frames: the registry is built during Configure.</summary>
+        /// <summary>Asserts the sample level's objects are reachable by their authored names.</summary>
         bool RunObjectLookupCheck(byte[] bytes) {
             const string Label = "ObjectCheck-Lookup(level.object resolves authored names)";
             GD.Print($"[probe] ==== {Label} ====");
@@ -163,7 +163,7 @@ namespace Uberkarl.Diagnostics {
             return platformResolves && jumpBlockResolves;
         }
 
-        /// <summary>Lands the player on the solid moving platform and asserts the contact sweep sees it — the passthrough jump-block already proves the sensor path, this proves a <see cref="ObjectCollisionRole.Solid"/> body reaches it too (DiVoid #8237).</summary>
+        /// <summary>Lands the player on the solid moving platform and asserts the contact sweep sees it.</summary>
         async Task<bool> RunPlatformContactCheck(byte[] bytes) {
             const string Label = "ObjectCheck-PlatformContact(a SOLID object receives contact)";
             GD.Print($"[probe] ==== {Label} ====");

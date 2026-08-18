@@ -7,16 +7,7 @@ using Uberkarl.Packages;
 
 namespace Uberkarl.Content.Tests;
 
-/// <summary>
-/// Guards the one asymmetry in the content model (DiVoid #8254). Every other authored shape is
-/// reflection-serialized, so a new property persists for free. <see cref="TileDefinition"/> alone is
-/// handled by a hand-written converter that enumerates each property explicitly in <c>Read</c> AND
-/// <c>Write</c> — so a property added to the type and not to both halves is silently absent from disk and
-/// silently default on load. It compiles, it works in memory, and every in-memory test still passes.
-///
-/// Nothing at the declaration site says a converter owns its serialization, and nothing at the converter
-/// says it must be revisited when the type changes. These two tests are that missing signal.
-/// </summary>
+/// <summary>Guards <see cref="TileDefinition"/>, the one authored shape whose serialization is hand-written.</summary>
 [TestFixture]
 public sealed class TileDefinitionConverterCoverageTests
 {
@@ -24,11 +15,7 @@ public sealed class TileDefinitionConverterCoverageTests
     private static readonly ResourcePath FramePath = ResourcePath.Create("tiles/grass-2.png");
     private static readonly ResourcePath ScriptPath = ResourcePath.Create("scripts/tile.poo");
 
-    /// <summary>
-    /// Every settable property of <see cref="TileDefinition"/>, as of the last time this guard was reviewed.
-    /// Adding a property here without teaching both halves of the converter about it is the defect this
-    /// fixture exists to catch — update the converter first, then this list.
-    /// </summary>
+    /// <summary>Every settable property of <see cref="TileDefinition"/>, as of the last review of this guard.</summary>
     private static readonly string[] KnownProperties =
     {
         nameof(TileDefinition.Id),
@@ -43,6 +30,7 @@ public sealed class TileDefinitionConverterCoverageTests
     };
 
     [Test]
+    [Description("A tile property missing from either converter half is silently absent from disk while every in-memory test still passes.")]
     public void EverySettableProperty_IsAccountedForByThisFixture()
     {
         var settable = typeof(TileDefinition)
@@ -53,10 +41,8 @@ public sealed class TileDefinitionConverterCoverageTests
             .ToArray();
 
         Assert.That(settable, Is.EqualTo(KnownProperties.OrderBy(name => name).ToArray()),
-            "TileDefinition gained or lost a property. It is the ONLY authored shape whose serialization is "
-            + "hand-written, so a new property must be added to BOTH TileDefinitionJsonConverter.Read and "
-            + ".Write, then to KnownProperties and the round-trip test below. Without that it compiles, works "
-            + "in memory, passes every other test, and silently never reaches disk (DiVoid #8254 / #8050).");
+            "Add the property to both TileDefinitionJsonConverter.Read and .Write, then to KnownProperties "
+            + "and the round-trip test below.");
     }
 
     [Test]
@@ -93,12 +79,8 @@ public sealed class TileDefinitionConverterCoverageTests
         });
     }
 
-    /// <summary>
-    /// Every value above is deliberately NON-default, because a round-trip test built from defaults passes
-    /// even when the converter drops the property entirely — the restored object would carry the same
-    /// default it was never given. That is precisely how a dropped property hides.
-    /// </summary>
     [Test]
+    [Description("A round-trip built from defaults passes even when the converter drops the property, which is how a dropped property hides.")]
     public void TheRoundTripFixture_UsesNonDefaultValues_SoADroppedPropertyCannotHide()
     {
         var defaults = new TileDefinition { Id = 0, Graphic = ResourceReference.ToSelf(GraphicPath) };
