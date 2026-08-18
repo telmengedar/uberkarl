@@ -30,8 +30,16 @@ public sealed class BehaviorLoader
         if (binding.IsScript)
             return Compile(binding.Script!, facadeGlobals, role);
 
-        if (!PredefinedBehaviors.TryGetSource(binding.PredefinedId!, binding.Parameters, out var source))
-            return Quarantined($"unknown predefined behavior id '{binding.PredefinedId}'");
+        string source;
+        try {
+            if (!PredefinedBehaviors.TryGetSource(binding.PredefinedId!, binding.Parameters, out source))
+                return Quarantined($"unknown predefined behavior id '{binding.PredefinedId}'");
+        }
+        catch (FormatException ex) {
+            // A package can legally declare a non-numeric parameter, so this is bad content, not a bug --
+            // and this method promises to always return a usable result (#8237 item 5).
+            return Quarantined($"predefined behavior '{binding.PredefinedId}': {ex.Message}");
+        }
 
         return Compile(source, facadeGlobals, role);
     }
