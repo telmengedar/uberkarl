@@ -118,11 +118,7 @@ public static class PredefinedBehaviors
     private static string FormatAmount(IReadOnlyDictionary<string, object?> parameters, double fallback)
         => FormatParameter(parameters, AmountParameter, fallback);
 
-    /// <summary>
-    /// Renders one numeric template parameter. A value that cannot be read as a number is bad package data
-    /// rather than a bug, so the failure is rethrown naming the key and the offending value: the loader turns
-    /// it into a quarantine, which is what keeps a malformed package from throwing during level load (#8237).
-    /// </summary>
+    /// <summary>Renders one numeric template parameter, throwing a <see cref="FormatException"/> naming the key when the value is not a number.</summary>
     private static string FormatParameter(IReadOnlyDictionary<string, object?> parameters, string key, double fallback)
     {
         if (!parameters.TryGetValue(key, out var raw) || raw is null)

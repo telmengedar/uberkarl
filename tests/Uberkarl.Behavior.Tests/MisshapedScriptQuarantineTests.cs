@@ -2,12 +2,7 @@ using NUnit.Framework;
 
 namespace Uberkarl.Behavior.Tests;
 
-/// <summary>
-/// Covers DiVoid #8237 item 1: a script that harvests to zero handlers used to compile clean, load, run and do
-/// nothing -- indistinguishable from a behavior that legitimately had nothing to say. Every shape below is now
-/// quarantined with a reason that names what was rejected, so an author can tell "my script is wrong" from
-/// "the engine ignored it".
-/// </summary>
+/// <summary>Covers the quarantining of a script that harvests to no usable handler.</summary>
 [TestFixture]
 public sealed class MisshapedScriptQuarantineTests
 {
@@ -23,8 +18,7 @@ public sealed class MisshapedScriptQuarantineTests
             """);
 
         Assert.That(instance.IsQuarantined, Is.True);
-        Assert.That(instance.Compiled.QuarantineReason, Does.Contain("onUpdte"),
-            "the author's misspelling is the one piece of information that makes this diagnosable");
+        Assert.That(instance.Compiled.QuarantineReason, Does.Contain("onUpdte"));
         Assert.That(instance.Compiled.QuarantineReason, Does.Contain("not an event name"));
     }
 
@@ -70,8 +64,7 @@ public sealed class MisshapedScriptQuarantineTests
             { "onContact": onContact, "onUpdte": onUpdte }
             """);
 
-        Assert.That(instance.IsQuarantined, Is.False,
-            "quarantining a working behavior over one typo'd sibling would be a worse trade than the silence it replaces");
+        Assert.That(instance.IsQuarantined, Is.False);
 
         var fired = ctx.Scheduler.DispatchContact("spike-1", new EventParty("player", string.Empty, new GridCell(1, 1)));
 
@@ -94,6 +87,7 @@ public sealed class MisshapedScriptQuarantineTests
     }
 
     [Test]
+    [Description("Leaves room for an init-only level script that seeds state at top level and declares no handlers.")]
     public void AnExplicitlyEmptyMap_IsAccepted_AsTheDeliberateNoHandlersOptOut()
     {
         var ctx = new BehaviorTestContext();
@@ -104,9 +98,7 @@ public sealed class MisshapedScriptQuarantineTests
             {}
             """);
 
-        Assert.That(instance.IsQuarantined, Is.False,
-            "a script that says in so many words that it has no handlers is not the mistake this guard is for");
-        Assert.That(ctx.Intents.Drain(), Is.EqualTo(new BehaviorIntent[] { new SetStateIntent("level", "seeded", true) }),
-            "its top-level init work must still have landed");
+        Assert.That(instance.IsQuarantined, Is.False);
+        Assert.That(ctx.Intents.Drain(), Is.EqualTo(new BehaviorIntent[] { new SetStateIntent("level", "seeded", true) }));
     }
 }

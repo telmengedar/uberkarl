@@ -36,8 +36,6 @@ public sealed class BehaviorLoader
                 return Quarantined($"unknown predefined behavior id '{binding.PredefinedId}'");
         }
         catch (FormatException ex) {
-            // A package can legally declare a non-numeric parameter, so this is bad content, not a bug --
-            // and this method promises to always return a usable result (#8237 item 5).
             return Quarantined($"predefined behavior '{binding.PredefinedId}': {ex.Message}");
         }
 
@@ -76,11 +74,7 @@ public sealed class BehaviorLoader
         return behavior;
     }
 
-    /// <summary>
-    /// Turns what the init execute evaluated to into a compiled behavior. A script that produced nothing usable
-    /// is quarantined with a reason naming what was rejected, rather than compiling into a behavior with zero
-    /// handlers that loads clean and silently never reacts (DiVoid #8237 item 1).
-    /// </summary>
+    /// <summary>Turns what the init execute evaluated to into a compiled behavior, quarantining one that yields no usable handler.</summary>
     private static CompiledBehavior FromInitResult(object? initResult)
     {
         if (initResult is not IDictionary raw)
@@ -109,8 +103,6 @@ public sealed class BehaviorLoader
             handlers[kind] = new BehaviorHandler(arguments => lambda.InvokeAsExecution(arguments!));
         }
 
-        // An empty map is how a script says "I deliberately have no handlers"; a map whose every entry was
-        // rejected is a mistake, and is the case worth being loud about.
         if (handlers.Count > 0 || rejected.Count == 0)
             return new CompiledBehavior(handlers);
 
