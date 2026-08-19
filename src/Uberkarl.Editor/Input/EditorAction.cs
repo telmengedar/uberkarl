@@ -68,7 +68,7 @@ public enum EditorAction
     /// <summary>Hold to reveal the actions radial (file ops, undo/redo, tool toggle).</summary>
     OpenActionMenu,
 
-    /// <summary>Hold to reveal the mouse context radial (tap instead erases the cell under the pointer).</summary>
+    /// <summary>Hold (mouse right-button) to reveal the Tiles menu (tap instead erases the cell under the pointer).</summary>
     OpenContextMenu,
 
     /// <summary>Launch a playtest of the level currently being edited (its in-memory buffer, not the

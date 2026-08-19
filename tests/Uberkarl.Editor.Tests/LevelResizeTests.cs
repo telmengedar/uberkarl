@@ -307,12 +307,12 @@ public sealed class LevelResizeTests
     }
 
     [Test]
-    public void RadialMenuModel_ResizeWedge_ResolvesToOpenResizePanel()
+    public void MenuModel_ResizeWedge_ResolvesToOpenResizePanel()
     {
-        var menu = new RadialMenuModel("Actions", new[]
+        var menu = new MenuModel("Actions", new[]
         {
-            new RadialMenuItem("Undo", MenuOutcome.Invoke(EditorAction.Undo)),
-            new RadialMenuItem("Resize…", MenuOutcome.OpenResizePanel()),
+            new MenuItem("Undo", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("Resize…", MenuOutcome.OpenResizePanel()),
         });
 
         var resolved = menu.Resolve(0, 1); // wedge 1 of 2 (bottom)

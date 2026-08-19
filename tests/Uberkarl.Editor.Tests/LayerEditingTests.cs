@@ -608,12 +608,12 @@ public sealed class LayerEditingTests
     }
 
     [Test]
-    public void RadialMenuModel_ManageWedge_ResolvesToOpenLayerManager()
+    public void MenuModel_ManageWedge_ResolvesToOpenLayerManager()
     {
-        var menu = new RadialMenuModel("Layers", new[]
+        var menu = new MenuModel("Layers", new[]
         {
-            new RadialMenuItem("terrain", MenuOutcome.SelectLayer(0)),
-            new RadialMenuItem("Manage…", MenuOutcome.OpenLayerManager()),
+            new MenuItem("terrain", MenuOutcome.SelectLayer(0)),
+            new MenuItem("Manage…", MenuOutcome.OpenLayerManager()),
         });
 
         var resolved = menu.Resolve(0, 1); // wedge 1 of 2 (bottom)

@@ -116,6 +116,15 @@ The ≤8 half gets one guard: **the radial's single entry point refuses a model 
 
 After U5 there is exactly **one radial** in the editor and **one list widget** with several callers. That smaller end state is the KISS argument for doing the Layers conversion nobody asked for: leaving Layers on the radial keeps two selection surfaces alive *and* leaves a level that adds a ninth layer hitting the cap guard at runtime.
 
+### A list surface has no continuous aim to track (added U3, QA #8605)
+
+The radial's per-frame loop (`StepOpenMenu`) exists to track a continuously aimed direction — a stick deflection or a mouse position relative to a centre — while the trigger is held. A list surface has no such concept: its rows are focus-chained buttons, resolved by the choice list's own focus/click callbacks, not by a polled direction. Two consequences follow directly and apply to every menu this rule converts (Tiles now, Layers/Actions-overflow later):
+
+- **Its trigger always auto-latches, tap or hold alike**, rather than passing through the radial's Transient aim-tracking phase first — a list has nothing for that phase to do.
+- **It is excluded from the per-frame aim-stepping loop.** Driving it from that loop would poll a direction the surface never reads.
+
+A corollary specific to Tiles: two physical triggers (the dedicated Tiles trigger and the right-mouse hold, formerly its own Context radial) both resolve to this one list-only surface, so there is no second, radial, fallback to keep in sync with it.
+
 ---
 
 ## 5. Decision — one menu model, one dispatch seam, two surfaces, per-device affordances inside each
@@ -227,6 +236,13 @@ This is a move, not a duplication, and it buys three things that matter to this 
 3. **The tiles menu's index arithmetic becomes testable.** The tiles menu concatenates three collections into one index space; `Dispatch` currently papers over the seams with bounds checks. The off-by-one that bounds check exists to survive is exactly the class of bug an engine-free test pins.
 
 No new vocabulary is introduced. The catalog holds the menus this phase builds and reaches, and nothing else.
+
+### The shared choice list can gain more than one driver (added U3, QA #8605)
+
+§7's "Ownership and wiring" already established one choice-list instance with multiple callers (`PackageBrowser`, then `LevelEditor`'s Tiles trigger). Once a second driver exists, two things follow and must hold for every future driver added the same way:
+
+- **`AnyModalOpen()` polls the choice list's own `IsOpen` directly**, never through a proxy that aliases to it (e.g. `PackageBrowser.IsOpen` forwarding to `choiceList.IsOpen`) — an alias resolves to whichever single driver minted it and goes stale the moment a second driver can hold the list open that the alias's owner does not know about.
+- **Every driver's own open-attempt guards on `AnyModalOpen()` before summoning the list**, so two drivers can never fight over the same widget's fields (one driver's `Open()` call stomping the row/callback state another driver mid-flow is relying on). For `PackageBrowser` specifically, the guard is not inline in `SummonBrowser()`/`SummonSaveBrowser()` — it sits one layer up, in the paths that can reach them: the global hotkeys, the toolbar's auto-hide gate, and the Actions radial dispatching only after `CloseMenu` has run. The invariant holds either way; a future driver added the same way should place its own guard at whichever layer actually gates its open-attempt, not assume it must be inline in the summon method itself (QA #8616 W9).
 
 ---
 

@@ -355,13 +355,36 @@ public sealed class MenuSessionTests
             new(justCrossedHold: false, releasedAsTap: false),
         };
 
-        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, hasSession: true, session);
+        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, autoLatch: _ => false, hasSession: true, session);
 
         Assert.Multiple(() =>
         {
             Assert.That(attempt.TriggerIndex, Is.EqualTo(1));
             Assert.That(attempt.LatchedImmediately, Is.False);
             Assert.That(session.State, Is.EqualTo(MenuSessionState.Transient));
+        });
+    }
+
+    [Test]
+    [Description("DiVoid #8525 §11 U3: a trigger targeting a list surface (Tiles) has no aim to track, so even a genuine hold-crossing must latch immediately rather than enter Transient — unlike a radial-targeting trigger, which the case above pins as staying Transient on the same reading.")]
+    public void MenuTriggerArbitration_HoldCrossing_OnAnAutoLatchIndex_LatchesImmediately()
+    {
+        MenuSession session = new();
+        MenuTriggerArbitration.Reading[] readings = {
+            new(justCrossedHold: true, releasedAsTap: false),
+            new(justCrossedHold: false, releasedAsTap: false),
+            new(justCrossedHold: false, releasedAsTap: false),
+            new(justCrossedHold: false, releasedAsTap: false),
+        };
+
+        MenuTriggerArbitration.Attempt attempt =
+            MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, autoLatch: index => index == 0, hasSession: true, session);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(attempt.TriggerIndex, Is.EqualTo(0));
+            Assert.That(attempt.LatchedImmediately, Is.True);
+            Assert.That(session.State, Is.EqualTo(MenuSessionState.Latched));
         });
     }
 
@@ -376,7 +399,7 @@ public sealed class MenuSessionTests
             new(justCrossedHold: false, releasedAsTap: false),
         };
 
-        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, hasSession: true, session);
+        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, autoLatch: _ => false, hasSession: true, session);
 
         Assert.That(attempt.TriggerIndex, Is.EqualTo(0));
     }
@@ -392,7 +415,7 @@ public sealed class MenuSessionTests
             new(justCrossedHold: false, releasedAsTap: false),
         };
 
-        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, hasSession: true, session);
+        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, autoLatch: _ => false, hasSession: true, session);
 
         Assert.Multiple(() =>
         {
@@ -413,7 +436,7 @@ public sealed class MenuSessionTests
             new(justCrossedHold: false, releasedAsTap: true),
         };
 
-        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, hasSession: true, session);
+        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, autoLatch: _ => false, hasSession: true, session);
 
         Assert.That(attempt.Opened, Is.False);
     }
@@ -429,7 +452,7 @@ public sealed class MenuSessionTests
             new(justCrossedHold: false, releasedAsTap: false),
         };
 
-        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, hasSession: true, session);
+        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, autoLatch: _ => false, hasSession: true, session);
 
         Assert.That(attempt.Opened, Is.False);
     }
@@ -446,7 +469,7 @@ public sealed class MenuSessionTests
             new(justCrossedHold: false, releasedAsTap: false),
         };
 
-        MenuTriggerArbitration.Attempt blocked = MenuTriggerArbitration.TryOpen(_ => false, readings, excludeTapIndex: 3, hasSession: true, session);
+        MenuTriggerArbitration.Attempt blocked = MenuTriggerArbitration.TryOpen(_ => false, readings, excludeTapIndex: 3, autoLatch: _ => false, hasSession: true, session);
 
         Assert.Multiple(() =>
         {
@@ -454,7 +477,7 @@ public sealed class MenuSessionTests
             Assert.That(session.State, Is.EqualTo(MenuSessionState.Closed));
         });
 
-        MenuTriggerArbitration.Attempt allowed = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, hasSession: true, session);
+        MenuTriggerArbitration.Attempt allowed = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, autoLatch: _ => false, hasSession: true, session);
 
         Assert.That(allowed.Opened, Is.True);
     }
@@ -471,7 +494,7 @@ public sealed class MenuSessionTests
             new(justCrossedHold: false, releasedAsTap: false),
         };
 
-        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, hasSession: true, session);
+        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, autoLatch: _ => false, hasSession: true, session);
 
         Assert.That(attempt.Opened, Is.False);
     }
@@ -488,7 +511,7 @@ public sealed class MenuSessionTests
             new(justCrossedHold: false, releasedAsTap: false),
         };
 
-        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, hasSession: false, session);
+        MenuTriggerArbitration.Attempt attempt = MenuTriggerArbitration.TryOpen(_ => true, readings, excludeTapIndex: 3, autoLatch: _ => false, hasSession: false, session);
 
         Assert.Multiple(() =>
         {

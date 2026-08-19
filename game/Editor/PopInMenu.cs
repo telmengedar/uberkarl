@@ -6,7 +6,7 @@ namespace Uberkarl {
 
     /// <summary>
     /// The pop-in / hold-to-reveal radial menu overlay. It is a passive front-end: it takes a
-    /// device-neutral <see cref="RadialMenuModel"/> (built by the controller from current editor state),
+    /// device-neutral <see cref="MenuModel"/> (built by the controller from current editor state),
     /// draws its wedges around a centre point, and tracks the live aim direction the controller feeds it
     /// (stick / arrows / mouse offset). A click, a confirm, or a cancel only records intent —
     /// <see cref="ConsumeResolveRequest"/> / <see cref="ConsumeCancelRequest"/> / <see cref="CurrentOutcome"/>
@@ -24,7 +24,7 @@ namespace Uberkarl {
         const float HitInnerRadius = ChipRadius;
         const float HitOuterRadius = WedgeRadius + ChipRadius;
 
-        RadialMenuModel model;
+        MenuModel model;
         Func<int, Texture2D> iconProvider;
         Vector2 centerGlobal;
         int highlighted = -1;
@@ -59,7 +59,7 @@ namespace Uberkarl {
         /// <summary>Pop the menu in around <paramref name="centerGlobalPosition"/>, rendering
         /// <paramref name="menu"/>. For a tile menu, <paramref name="icons"/> maps a wedge's tile index to
         /// its texture; pass null for text-only menus.</summary>
-        public void Open(RadialMenuModel menu, Vector2 centerGlobalPosition, Func<int, Texture2D> icons = null) {
+        public void Open(MenuModel menu, Vector2 centerGlobalPosition, Func<int, Texture2D> icons = null) {
             model = menu;
             iconProvider = icons;
             centerGlobal = centerGlobalPosition;
@@ -188,7 +188,7 @@ namespace Uberkarl {
                 DrawCircle(pos, ChipRadius, chipFill);
                 DrawArc(pos, ChipRadius, 0f, Mathf.Tau, 24, new Color(1f, 0.85f, 0.2f, active ? 1f : 0.4f), active ? 2.5f : 1.5f);
 
-                RadialMenuItem item = model.Items[i];
+                MenuItem item = model.Items[i];
                 Texture2D icon = iconProvider?.Invoke(item.Outcome.Index);
                 if (icon != null && item.Outcome.Kind == MenuOutcomeKind.SelectTile) {
                     Rect2 iconRect = new Rect2(pos - new Vector2(IconSize, IconSize) / 2f, new Vector2(IconSize, IconSize));

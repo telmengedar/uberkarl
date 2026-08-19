@@ -31,7 +31,15 @@ public static class MenuTriggerArbitration
         public bool Opened => TriggerIndex >= 0;
     }
 
-    public static Attempt TryOpen(System.Func<int, bool> canOpen, Reading[] readings, int excludeTapIndex, bool hasSession, MenuSession session)
+    /// <param name="canOpen">Whether the trigger at a given index has anything to open (e.g. a non-empty palette).</param>
+    /// <param name="readings">This frame's press-vs-hold reading for every trigger, index-aligned with <paramref name="canOpen"/> and <paramref name="autoLatch"/>.</param>
+    /// <param name="excludeTapIndex">A trigger index whose tap is a different gesture entirely (e.g. the mouse's tap-to-erase) and must never open a menu.</param>
+    /// <param name="autoLatch">
+    /// Whether the trigger at a given index always opens straight into <see cref="MenuSessionState.Latched"/>,
+    /// even on a genuine hold — true for a trigger whose target menu has no aim to track (a list surface),
+    /// false for one whose target menu needs continued Transient aim-tracking (a radial).
+    /// </param>
+    public static Attempt TryOpen(System.Func<int, bool> canOpen, Reading[] readings, int excludeTapIndex, System.Func<int, bool> autoLatch, bool hasSession, MenuSession session)
     {
         (int index, bool wasTap) = Resolve(readings, excludeTapIndex);
         if (index < 0 || !hasSession || !canOpen(index))
@@ -41,7 +49,7 @@ public static class MenuTriggerArbitration
         if (opening.Effect != MenuSessionEffect.Open)
             return new Attempt(-1, false);
 
-        if (!wasTap)
+        if (!wasTap && !autoLatch(index))
             return new Attempt(index, false);
 
         MenuSessionTransition latching = session.Step(openRequested: false, triggerReleased: true, releasedAsTap: true);
