@@ -3,7 +3,7 @@ using Uberkarl.Editor.Input;
 
 namespace Uberkarl.Editor.Tests;
 
-/// <summary>Covers the engine-agnostic pop-in menu lifecycle: press-vs-hold edge detection, trigger arbitration, session sequencing, and latch-direction reduction.</summary>
+/// <summary>Covers the engine-agnostic pop-in menu lifecycle: press-vs-hold edge detection, trigger arbitration, close arbitration, session sequencing, and latch-direction reduction.</summary>
 [TestFixture]
 public sealed class MenuSessionTests
 {
@@ -139,7 +139,7 @@ public sealed class MenuSessionTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(resolved.Effect, Is.EqualTo(MenuSessionEffect.Commit));
+            Assert.That(resolved.Effect, Is.EqualTo(MenuSessionEffect.Close));
             Assert.That(resolved.State, Is.EqualTo(MenuSessionState.Closed));
         });
     }
@@ -220,6 +220,93 @@ public sealed class MenuSessionTests
         session.Reset();
 
         Assert.That(session.State, Is.EqualTo(MenuSessionState.Closed));
+    }
+
+    [Test]
+    public void MenuSession_Resolve_WhileLatched_ClosesTheSession()
+    {
+        MenuSession session = new();
+        session.Step(openRequested: true, triggerReleased: false, releasedAsTap: false);
+        session.Step(openRequested: false, triggerReleased: true, releasedAsTap: true);
+
+        MenuSessionTransition resolved = session.Resolve();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(resolved.Effect, Is.EqualTo(MenuSessionEffect.Close));
+            Assert.That(resolved.State, Is.EqualTo(MenuSessionState.Closed));
+            Assert.That(session.State, Is.EqualTo(MenuSessionState.Closed));
+        });
+    }
+
+    [Test]
+    public void MenuSession_Resolve_WhileTransient_ClosesTheSession()
+    {
+        MenuSession session = new();
+        session.Step(openRequested: true, triggerReleased: false, releasedAsTap: false);
+
+        MenuSessionTransition resolved = session.Resolve();
+
+        Assert.That(resolved.Effect, Is.EqualTo(MenuSessionEffect.Close));
+    }
+
+    [Test]
+    public void MenuSession_Resolve_WhileClosed_IsANoOp()
+    {
+        MenuSession session = new();
+
+        MenuSessionTransition resolved = session.Resolve();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(resolved.Effect, Is.EqualTo(MenuSessionEffect.None));
+            Assert.That(resolved.State, Is.EqualTo(MenuSessionState.Closed));
+        });
+    }
+
+    [Test]
+    [Description("Pins the fifth #8525 §9 property for the latched path: every terminal transition produces exactly one Close effect. A stray second Resolve() after the session already closed must not produce a second Close — this is the invariant that lets the glue call EndMenu() from a single site without a discipline-only guarantee.")]
+    public void MenuSession_Resolve_AfterResolving_TheSameResolveDoesNotCloseAgain()
+    {
+        MenuSession session = new();
+        session.Step(openRequested: true, triggerReleased: false, releasedAsTap: false);
+        session.Step(openRequested: false, triggerReleased: true, releasedAsTap: true);
+        session.Resolve();
+
+        MenuSessionTransition repeated = session.Resolve();
+
+        Assert.That(repeated.Effect, Is.EqualTo(MenuSessionEffect.None));
+    }
+
+    [Test]
+    [Description("The two ways to reach Close — a trigger release (Step) and a surface-driven interaction (Resolve) — must agree on a single terminal transition: once Step has already closed the session, a same-frame Resolve must not close it a second time.")]
+    public void MenuSession_Resolve_AfterStepAlreadyClosed_DoesNotCloseAgain()
+    {
+        MenuSession session = new();
+        session.Step(openRequested: true, triggerReleased: false, releasedAsTap: false);
+        session.Step(openRequested: false, triggerReleased: true, releasedAsTap: false);
+
+        MenuSessionTransition resolved = session.Resolve();
+
+        Assert.That(resolved.Effect, Is.EqualTo(MenuSessionEffect.None));
+    }
+
+    [Test]
+    [Description("DiVoid #8590 W-2: a same-frame cancel arriving on a Step-driven close — the gamepad/keyboard hold-release path — must still force-cancel. Pre-fix, ForceCancel was only assigned inside the Effect == None branch, so a cancel landing on the same frame Step() itself already returned Close was silently dropped and the aimed wedge got committed instead. This is exactly the path a Resolve(cancel:true) -> Cancel test cannot reach, since Step already produced Close before Resolve() is ever considered.")]
+    public void MenuCloseArbitration_CancelRequested_OnAStepDrivenClose_StillForcesCancel()
+    {
+        MenuSession session = new();
+        session.Step(openRequested: true, triggerReleased: false, releasedAsTap: false);
+        MenuSessionTransition stepClosed = session.Step(openRequested: false, triggerReleased: true, releasedAsTap: false);
+
+        MenuCloseArbitration.Resolution resolution =
+            MenuCloseArbitration.Resolve(session, stepClosed, cancelRequested: true, resolveRequested: false);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(resolution.Transition.Effect, Is.EqualTo(MenuSessionEffect.Close));
+            Assert.That(resolution.ForceCancel, Is.True);
+        });
     }
 
     [Test]

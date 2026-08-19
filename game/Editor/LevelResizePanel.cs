@@ -10,7 +10,7 @@ namespace Uberkarl {
     /// The summoned, gamepad-first level-resize surface (DiVoid #7550): set the level's width/height via
     /// two +/- steppers, then Apply. Reuses the <see cref="PackageBrowser"/>/<see cref="LayerManagerPanel"/>
     /// scaffolding verbatim — full-rect dim backdrop, centered panel, grab-focus-on-summon (deferred, so it
-    /// wins the race against <c>LevelEditor.EndMenu</c>'s synchronous canvas focus grab), <c>ui_cancel</c>
+    /// wins the race against <c>LevelEditor.CloseMenu</c>'s synchronous canvas focus grab), <c>ui_cancel</c>
     /// closes with nothing applied. It holds no resize logic itself: Apply calls
     /// <see cref="LevelEditSession.Resize"/> directly, then raises <see cref="LevelModelChanged"/> so the
     /// controller re-snapshots the canvas from the model's new truth — the panel never touches the canvas
