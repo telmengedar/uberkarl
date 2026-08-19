@@ -13,8 +13,8 @@ namespace Uberkarl {
     /// device input into grid-cell interactions it raises to the controller. It supports three input
     /// modes with parity: the <b>mouse</b> hovers and clicks a cell; a <b>grid cursor</b> — the pointer
     /// stand-in for gamepad and keyboard, which have none — is moved cell-by-cell with the cursor actions
-    /// and acted on with paint/erase. The two stay coherent: a mouse click snaps the grid cursor to the
-    /// clicked cell. It owns only the view, the pointer→cell mapping, and the grid cursor position; it
+    /// and acted on with paint/erase. The two stay coherent: the grid cursor follows the pointer as it
+    /// hovers or clicks. It owns only the view, the pointer→cell mapping, and the grid cursor position; it
     /// never touches the edit model.
     /// </summary>
     public partial class EditorCanvas : Control {
@@ -46,6 +46,7 @@ namespace Uberkarl {
 
         int hoverX = -1;
         int hoverY = -1;
+        Vector2 lastPointerLocal;
         bool pointerDown;
         int lastCellX = int.MinValue;
         int lastCellY = int.MinValue;
@@ -64,6 +65,13 @@ namespace Uberkarl {
         /// focus" assumption alone did not guarantee — Godot's directional focus navigation can bounce focus
         /// off the radial onto this full-rect canvas while a stick/D-pad aim is held.</summary>
         public bool DirectionalInputCaptured { get; set; }
+
+        /// <summary>True when the pointer was the last input to position the grid cursor.</summary>
+        public bool PointerDrivesCursor { get; private set; }
+
+        /// <summary>The pointer's own global (viewport-space) position, from the most recent motion event
+        /// this surface received.</summary>
+        public Vector2 PointerGlobalPosition => GlobalPosition + lastPointerLocal;
 
         /// <summary>Set once by the controller in <c>BuildUi</c> to <c>AnyModalOpen</c> — a live predicate,
         /// not a per-frame snapshot, so a modal opened or closed mid-frame is still seen correctly. Checked
@@ -222,10 +230,21 @@ namespace Uberkarl {
         }
 
         void StepCursor(int dx, int dy) {
+            PointerDrivesCursor = false;
             if (cursor.TryMove(dx, dy)) {
                 UpdateView(); // scroll to keep the cursor's new cell in view, clamped to the level bounds
                 QueueRedraw();
             }
+        }
+
+        bool MoveCursorToCell(int cx, int cy, bool recenterView) {
+            if (cursor == null)
+                return false;
+            PointerDrivesCursor = true;
+            bool moved = cursor.MoveTo(cx, cy);
+            if (moved && recenterView)
+                UpdateView();
+            return moved;
         }
 
         static int AxisFor(EditorAction positive, EditorAction negative) {
@@ -267,9 +286,8 @@ namespace Uberkarl {
                     pointerDown = true;
                     lastCellX = int.MinValue;
                     lastCellY = int.MinValue;
-                    if (TryCell(button.Position, out int cx, out int cy) && cursor != null) {
-                        if (cursor.MoveTo(cx, cy))
-                            UpdateView();
+                    if (TryCell(button.Position, out int cx, out int cy)) {
+                        MoveCursorToCell(cx, cy, recenterView: true);
                         QueueRedraw();
                     }
                     EmitCellAt(button.Position);
@@ -335,10 +353,9 @@ namespace Uberkarl {
 
             Vector2 local = globalPosition - GlobalPosition;
             if (TryCell(local, out int cx, out int cy)) {
-                if (cursor != null && cursor.MoveTo(cx, cy)) {
-                    UpdateView();
+                lastPointerLocal = local;
+                if (MoveCursorToCell(cx, cy, recenterView: true))
                     QueueRedraw();
-                }
                 CellErased?.Invoke(cx, cy);
             }
         }
@@ -356,11 +373,13 @@ namespace Uberkarl {
         }
 
         void UpdateHover(Vector2 localPosition) {
+            lastPointerLocal = localPosition;
             int previousX = hoverX;
             int previousY = hoverY;
             if (TryCell(localPosition, out int cx, out int cy)) {
                 hoverX = cx;
                 hoverY = cy;
+                MoveCursorToCell(cx, cy, recenterView: false);
             } else {
                 hoverX = -1;
                 hoverY = -1;
