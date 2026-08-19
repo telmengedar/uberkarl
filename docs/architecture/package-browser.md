@@ -421,10 +421,12 @@ like a file browser - list of entries, for save specify filename and so on."*
   button that mirrors whatever `ui_cancel` currently does, since a file browser needs an on-screen
   affordance for a mouse-only user, not just a gamepad B / Esc binding.
 - **Back-navigation, generalized.** `HandleCancel()` is now the single place that decides what "cancel"
-  means for the *current* step: `Resources`/`ConfirmOverwrite` step back to `Packages`; `Packages` itself
-  closes the browser and raises `Cancelled`. Both `_GuiInput` and `_UnhandledInput` route through it
-  (belt-and-suspenders, matching `LayerManagerPanel`/`OnScreenKeyboard`'s existing pattern), each guarded
-  on the attached keyboard being closed.
+  means for the *current* step: `Resources` and `SaveResources` step back to `Packages`; `ConfirmOverwrite`
+  steps back to `SaveResources` when the confirmation was a resource overwrite (mirroring the confirm
+  dialog's own "no" branch) or to `Packages` otherwise; `Packages` itself closes the browser and raises
+  `Cancelled`. Both `_GuiInput` and `_UnhandledInput` route through it (belt-and-suspenders, matching
+  `LayerManagerPanel`/`OnScreenKeyboard`'s existing pattern), each guarded on the attached keyboard being
+  closed.
 - **Theming.** No new theme code was needed: `LevelEditor.Theme = EditorTheme.Build()` (already set) is a
   Godot `Theme` property that cascades to every descendant `Control`, so `PanelContainer`/`Button`/`Label`
   styleboxes already applied automatically once the panel's structure and metadata labels were rebuilt to

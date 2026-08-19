@@ -370,3 +370,13 @@ foundation — same `EditorAction` set, no rework of the edit/undo/save spine. I
 menu core, the three input mappings, the auto-hide/edge-reveal layout, and the resolution of the four
 follow-ups in §14) lives in its own document: **`editor-popin-menus.md`**. This foundation's persistent
 focus-navigable panels remain there as the auto-hidden, edge-revealed discoverable fallback.
+
+---
+
+## 18. Implementation note — canvas/toolbar `FocusZone` reveal (DiVoid #7464)
+
+`LevelEditor`'s `FocusZone` (`Canvas`/`Toolbar`) is where gamepad/keyboard focus rests, so the focus-next
+action can cycle between them. The two input families reveal the toolbar differently: gamepad/keyboard
+reveal it *by cycling focus onto it* (crossing into `FocusZone.Toolbar`); the mouse reveals it instead by
+edge-hover (§13's edge-reveal), independent of which `FocusZone` currently holds focus. A reader of the
+`FocusZone` enum alone would not see that the mouse's reveal path is deliberately decoupled from it.

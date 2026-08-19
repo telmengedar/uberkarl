@@ -3,8 +3,7 @@ namespace Uberkarl.Behavior;
 /// <summary>
 /// The facade bound as <c>self</c> — the running entity itself (design #7704 §8.1, "self" row). Not
 /// <see cref="IObjectFacade"/>-derived: self's capability set is a sibling, not a superset. Every action
-/// records a <see cref="BehaviorIntent"/>; nothing here mutates state directly (design #7704 §8.5, the
-/// single-thread mutation contract).
+/// records a <see cref="BehaviorIntent"/>; nothing here mutates state directly.
 /// </summary>
 public interface ISelfFacade
 {

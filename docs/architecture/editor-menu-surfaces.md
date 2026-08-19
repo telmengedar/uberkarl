@@ -183,6 +183,18 @@ Two input geometries, because they genuinely are two:
 
 `ui_cancel` — Esc, pad B, the list header's ✕/← button, or a left-click outside the wheel — dismisses the open surface: one step back in a multi-step list flow, or entirely for a radial. While a menu is open its own trigger is inert, which falls out of `_Process`'s existing early return and needs no new state.
 
+### A refused open must undo the arbitration's own step, not just its own (added U5, DiVoid #8635 W-1)
+
+`MenuTriggerArbitration.TryOpen` steps `menuSession` to Transient/Latched *before* its caller opens the menu — the arbitration commits its own state change ahead of the open it is arbitrating. If the open then fails, the failure handler must undo both `activeTrigger` and `menuSession`, not just `activeTrigger`: `menuSession`'s step already happened one level up and nothing else will unwind it. Skipping the `menuSession` half degrades a refusal from "nothing opened this frame" to a wedge that blocks every future trigger.
+
+### Validate before writing menu-open state, not after (added U5, DiVoid #8635 W-1)
+
+A trigger's open path validates (e.g. `MenuCatalog.EnforceRadialCap`) *before* `activeTrigger` is set, even though the same validation also runs downstream inside `PopInMenu.Open`. A refusal that only lands downstream has nothing left to undo it, because `activeTrigger` is already committed by the time control gets there. The guard belongs at the point the menu model is built, ahead of the state write it is guarding — not wherever it happens to already run.
+
+### Skip the discrete highlight step when a resolve or cancel already landed this frame (added U5)
+
+`StepOpenMenu`'s discrete (Latched) branch steps the highlight only when nothing resolved this frame. Stepping first and reading the resolve afterward would move the highlight between the click and the read, committing whichever wedge the step landed on rather than the one the user actually aimed at.
+
 ---
 
 ## 7. The list surface — extract it, do not grow `PackageBrowser`

@@ -31,8 +31,6 @@ namespace Uberkarl {
         // Which pop-in menu, if any, is currently open. One at a time; the owning trigger commits on release.
         enum Trigger { None, Tiles, Layers, Actions }
 
-        // Where gamepad/keyboard focus rests, so the focus action can cycle canvas ⇄ toolbar and reveal the
-        // toolbar it lands on (the mouse reveals by edge-hover instead).
         enum FocusZone { Canvas, Toolbar }
 
         const string SamplePackagePath = "res://content/sample.pkg";
@@ -202,10 +200,6 @@ namespace Uberkarl {
             try {
                 OpenMenu(trigger);
             } catch {
-                // DiVoid #8635 W-1: MenuTriggerArbitration.TryOpen (above) already stepped menuSession to
-                // Transient/Latched before OpenMenu ran. OpenMenu itself no longer commits activeTrigger on a
-                // refusal, but menuSession's step already happened one level up -- undo it here too, so a
-                // refusal degrades to "nothing opened this frame" instead of wedging every future trigger.
                 activeTrigger = Trigger.None;
                 menuSession.Reset();
                 throw;
@@ -231,8 +225,6 @@ namespace Uberkarl {
             if (menuSession.State == MenuSessionState.Transient) {
                 popIn.SetAim(CurrentAim());
             } else if (!resolving) {
-                // Skip this frame's discrete step when a resolve/cancel already landed: stepping first would
-                // move the highlight between the click and the read, committing a wedge the user never aimed at.
                 StepLatchedHighlight();
             }
 
@@ -325,9 +317,6 @@ namespace Uberkarl {
                     OpenLayersList();
                     break;
                 case Trigger.Actions:
-                    // DiVoid #8635 W-1: validate before committing any menu-open state. EnforceRadialCap also
-                    // runs inside popIn.Open, but a refusal that lands after activeTrigger is set has nothing
-                    // left to undo it -- so the guard is hoisted here, ahead of that assignment.
                     MenuModel actions = MenuCatalog.BuildActionsMenu();
                     MenuCatalog.EnforceRadialCap(actions);
                     activeTrigger = trigger;
