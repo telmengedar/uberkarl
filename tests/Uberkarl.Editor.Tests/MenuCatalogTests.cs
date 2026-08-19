@@ -143,12 +143,32 @@ public sealed class MenuCatalogTests
     }
 
     [Test]
-    public void BuildLayersMenu_NoLayers_StillOffersManage()
+    public void BuildLayersMenu_NoLayers_StillOffersManage_AndKeepsItsTitle()
     {
         MenuModel menu = MenuCatalog.BuildLayersMenu(System.Array.Empty<string>());
 
-        Assert.That(menu.Count, Is.EqualTo(1));
-        Assert.That(menu.Items[0].Outcome.Kind, Is.EqualTo(MenuOutcomeKind.OpenLayerManager));
+        Assert.Multiple(() =>
+        {
+            Assert.That(menu.Title, Is.EqualTo("Layers"));
+            Assert.That(menu.Count, Is.EqualTo(1));
+            Assert.That(menu.Items[0].Outcome.Kind, Is.EqualTo(MenuOutcomeKind.OpenLayerManager));
+        });
+    }
+
+    [Test]
+    [Description("The single-layer boundary: the layer segment is exactly one entry wide, so its first and last are the same row, immediately followed by the Manage seam.")]
+    public void BuildLayersMenu_OneLayer_LayerRowAndManageSeamBothLandAtTheirExactIndices()
+    {
+        MenuModel menu = MenuCatalog.BuildLayersMenu(new[] { "Ground" });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(menu.Count, Is.EqualTo(2));
+            Assert.That(menu.Items[0].Label, Is.EqualTo("Ground"));
+            Assert.That(menu.Items[0].Outcome, Is.EqualTo(MenuOutcome.SelectLayer(0)));
+            Assert.That(menu.Items[1].Label, Is.EqualTo("Manage…"));
+            Assert.That(menu.Items[1].Outcome.Kind, Is.EqualTo(MenuOutcomeKind.OpenLayerManager));
+        });
     }
 
     [Test]
