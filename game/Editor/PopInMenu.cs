@@ -58,8 +58,9 @@ namespace Uberkarl {
 
         /// <summary>Pop the menu in around <paramref name="centerGlobalPosition"/>, rendering
         /// <paramref name="menu"/>. For a tile menu, <paramref name="icons"/> maps a wedge's tile index to
-        /// its texture; pass null for text-only menus.</summary>
+        /// its texture; pass null for text-only menus. See <see cref="MenuCatalog.EnforceRadialCap"/>.</summary>
         public void Open(MenuModel menu, Vector2 centerGlobalPosition, Func<int, Texture2D> icons = null) {
+            MenuCatalog.EnforceRadialCap(menu);
             model = menu;
             iconProvider = icons;
             centerGlobal = centerGlobalPosition;

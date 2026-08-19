@@ -199,7 +199,17 @@ namespace Uberkarl {
                 return;
 
             Trigger trigger = TriggerOrder[attempt.TriggerIndex];
-            OpenMenu(trigger);
+            try {
+                OpenMenu(trigger);
+            } catch {
+                // DiVoid #8635 W-1: MenuTriggerArbitration.TryOpen (above) already stepped menuSession to
+                // Transient/Latched before OpenMenu ran. OpenMenu itself no longer commits activeTrigger on a
+                // refusal, but menuSession's step already happened one level up -- undo it here too, so a
+                // refusal degrades to "nothing opened this frame" instead of wedging every future trigger.
+                activeTrigger = Trigger.None;
+                menuSession.Reset();
+                throw;
+            }
             if (attempt.LatchedImmediately && trigger != Trigger.Tiles && trigger != Trigger.Layers)
                 PrimeLatchStepping();
         }
@@ -305,17 +315,24 @@ namespace Uberkarl {
             if (session == null)
                 return;
 
-            activeTrigger = trigger;
             switch (trigger) {
                 case Trigger.Tiles:
+                    activeTrigger = trigger;
                     OpenTilesList();
                     break;
                 case Trigger.Layers:
+                    activeTrigger = trigger;
                     OpenLayersList();
                     break;
                 case Trigger.Actions:
+                    // DiVoid #8635 W-1: validate before committing any menu-open state. EnforceRadialCap also
+                    // runs inside popIn.Open, but a refusal that lands after activeTrigger is set has nothing
+                    // left to undo it -- so the guard is hoisted here, ahead of that assignment.
+                    MenuModel actions = MenuCatalog.BuildActionsMenu();
+                    MenuCatalog.EnforceRadialCap(actions);
+                    activeTrigger = trigger;
                     menuCenterGlobal = canvas.CursorGlobalCenter();
-                    popIn.Open(MenuCatalog.BuildActionsMenu(), menuCenterGlobal);
+                    popIn.Open(actions, menuCenterGlobal);
                     break;
             }
         }
@@ -394,8 +411,20 @@ namespace Uberkarl {
                 case MenuOutcomeKind.OpenTileSetBindPanel:
                     SummonTileSetBindPanel();
                     break;
+                case MenuOutcomeKind.OpenActionsOverflow:
+                    OpenActionsOverflowList();
+                    break;
             }
         }
+
+        void OpenActionsOverflowList() {
+            MenuModel menu = MenuCatalog.BuildActionsOverflowMenu();
+            openListMenu = menu;
+            choiceList.Open(menu.Title, "✕ Close", menu.Count, index => ActionsOverflowListRow(menu, index),
+                string.Empty, OnListChosen, OnListDismissed);
+        }
+
+        ChoiceListRow ActionsOverflowListRow(MenuModel menu, int index) => new ChoiceListRow(menu.Items[index].Label, string.Empty);
 
         void SummonLayerManager() {
             if (session == null)
