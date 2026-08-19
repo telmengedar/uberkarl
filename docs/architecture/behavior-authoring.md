@@ -431,3 +431,89 @@ One feature per PR. Each unit branches fresh from `origin/main`.
 - This document does **not** supersede `behavior-system.md`; it is Phase 3 of it. It does correct that document's Phase 3/4 boundary (§6.4) and its D-2 collision-role list (§6.3).
 
 **Open forks:** none. Every decision this design was asked to make is made in-document.
+
+---
+
+## ADDENDUM 2026-08-18 — the trigger tool does not belong in M2. `AreaTriggerDefinition.Binding` stays required; the milestone boundary was wrong, not the content model
+
+Raised from M2 implementation (#8463). John implemented the trigger rect tool and found that `AreaTriggerDefinition.Binding` is `required` while assignment UX is M4 — so a newly placed trigger must be given *some* binding at placement time and there is no neutral one. He defaulted to `healOnEnter` and flagged it rather than deciding silently. That was the right call: the flag is the deliverable, not the default.
+
+**This addendum does not revise the sections above. They stay readable — the phase has been implementing against them. It corrects one boundary they drew wrong.**
+
+### The decision
+
+**Keep `AreaTriggerDefinition.Binding` required. Remove the trigger *creation* path from M2 and land it in a new milestone M4b, immediately after M4, where placement and binding assignment ship as one act. The read-only trigger overlay stays in M2.**
+
+The claim in §"Status" above — *"Design complete, no open forks"* — was wrong. This was the fork it missed.
+
+### What decides it: a trigger has no identity apart from its binding
+
+`AreaTriggerDefinition` is `{Name, X, Y, Width, Height, Binding}`. Subtract the binding and what remains is a named rectangle with no semantics anywhere in the system:
+
+- **Nothing reads a trigger except its own dispatch.** `ILevelFacade` exposes `TileAt`, `Object`, `ObjectsNamed`, `GetState`, `SetState` — **no trigger query at all**. A script cannot ask whether the player is inside a named region. A trigger is reachable only as the *subject* of its own `onEnter`/`onLeave`.
+- **`BehaviorRuntime.RegisterTriggers`** (`game/Behavior/BehaviorRuntime.cs:149`) compiles the binding, registers a `BehaviorInstance`, and only then adds the `ScriptedTrigger` world rect. The rect exists *in order to* dispatch. There is no other consumer.
+- **`Name` is not identity.** It is a non-unique author label surfaced as `BehaviorSubject.Name`; it does nothing on its own.
+
+So an unbound trigger is not "a rect that may later carry a behavior". It is a piece of level content that **exists and does nothing, with no way to observe it** — precisely the shape #8237's ruling deleted from the vocabulary: *"we implement them as soon as we know what they do and then they work."* Making `Binding` nullable would move that anti-pattern from the engine's vocabulary into the author's saved data, where it is worse: it persists into every `.pkg`.
+
+**Contrast with `ObjectPlacement`, which is why the asymmetry is correct and not an oversight.** `ResolvedObjectPlacement.Binding` *is* nullable, and `RegisterObjects` already guards `if (placement.Binding is { } binding)`. That is right, because a placed object has intrinsic content without any binding: its `ObjectDefinition` supplies graphic, collision role and default state. A decorative object is a real thing that renders and collides. **An object is a thing that may have a behavior; a trigger is a behavior that has a shape.** The two placement subjects are not symmetric, and the content model already says so correctly.
+
+That also settles the candidates as posed:
+
+| Candidate | Verdict |
+|---|---|
+| **Nullable `Binding`** — a trigger is a rect that may carry a behavior | **Rejected.** Not a weakening of a constraint but a redefinition of the type into something with no observable meaning. It also spends a behaviour-layer change (`AreaTriggerDefinition`, `LevelLoader.ResolveTriggers`, `ResolvedAreaTrigger`, `EditableLevelReader`, `EditableLevelSnapshot`, `BehaviorRuntime.RegisterTriggers`) to buy the ability to author inert content. |
+| **`healOnEnter` default** | **Rejected**, for the reason John flagged: placing a "trigger" silently grants a heal zone nobody asked for, baked into every saved package until M4. |
+| **Defer the trigger tool** | **Accepted**, with the milestone boundary moved rather than the model. |
+
+### The cost accepted, stated plainly
+
+**M2 loses half its announced scope, and working, reviewed code is removed from the M2 PR rather than merged.** #8463's acceptance bar (*"…same for a trigger rect"*) loses its trigger half, which moves to M4b. That is real waste and it is mine — the fork existed in this design, not in the implementation.
+
+Two things make it the cheaper side of the trade:
+
+1. **The work is not lost, it is re-homed.** The two-corner mode, `PlaceTriggerCommand`/`RemoveTriggerCommand`, and the session methods come back at M4b essentially as written, with a binding argument threaded through. What changes is *when*, and that they arrive with something to bind.
+2. **It shortens the path to M5**, which is the milestone Toni actually wants (*"it is still not possible to actually edit a script in the level editor"*). M2 gets smaller; M4b sits **after** M4 and does **not** block M5. The critical path M2 → M4 → M5 is unchanged in shape and lighter at M2.
+
+**What is explicitly not accepted as a cheaper variant:** keeping `LevelEditSession.PlaceTrigger` in M2 with a required `BehaviorBinding` parameter and simply not calling it from the UI. That leaves a public authoring member with no author-reachable call site — the exact thing the 2026-08-17 template addendum forbids designing, and what #8237's ruling deleted. Tests are not a consumer that makes a member reached; #8237's closing lesson is precisely that a green core suite says nothing about whether anything honours the contract.
+
+### Concrete change list
+
+**M2 (#8463) — remove the trigger *creation* path, keep everything else.**
+
+| Site | M2 action |
+|---|---|
+| `src/Uberkarl.Editor/PlaceTriggerCommand.cs` | Remove from the M2 PR. Returns at M4b. |
+| `src/Uberkarl.Editor/RemoveTriggerCommand.cs` | Remove from the M2 PR. Returns at M4b. |
+| `LevelEditSession.PlaceTrigger` / `EraseTriggerAt` | Remove. **Both** — an erase-only tool lets an author destroy a hand-authored trigger they cannot recreate until M4b. That is a worse trap than not shipping the tool. |
+| `EditableLevel.InsertTrigger` / `RemoveTriggerAt` / `FindTriggerIndexAt` | Remove (added by M2; no other consumer). The mutable backing list stays only insofar as the object path needs it. |
+| `EditableLevel.Objects` mutators, `CaptureBehavior`, object commands | **Unchanged.** Object placement is M2's remaining scope and is complete. |
+| `MenuOutcomeKind.SelectTriggerTool` + `MenuOutcome.SelectTriggerTool()` | Remove. `SelectObjectType` stays. |
+| `LevelEditor.PaintMode` | Back to three cases: `Tile`, `Terrain`, `Object`. Drop `TriggerRect`. |
+| `LevelEditor` two-corner state (`triggerCornerX/Y`, `CancelTriggerRect`, its commit branch, the `"Trigger Rect"` radial item) | Remove. |
+| `EditorCanvas.SetOverlay` + `DrawTriggerOverlay` | **Keep, both halves.** `sample.pkg` already contains a hand-authored trigger; drawing it is honest and useful — *placing invisible things is not authoring* applies equally to *inspecting* them. The overlay is read-only and reached today. |
+| `AreaTriggerDefinition`, `ResolvedAreaTrigger`, `LevelLoader.ResolveTriggers`, `EditableLevelReader`, `EditableLevelSnapshot`, `BehaviorRuntime.RegisterTriggers` | **Untouched.** That is the point of the decision: no behaviour-layer change lands inside an editor milestone. The `!` at `EditableLevelSnapshot.cs:93` stays correct because `Binding` stays required. |
+| `tests/Uberkarl.Editor.Tests/ObjectAndTriggerPlacementTests.cs` | Trigger placement/erase/undo cases move to M4b with the code; object cases stay. Rename to match. |
+| **M2 acceptance** | *An editor-placed **object** persists and runs in standalone `LevelPlay`; undo/redo work.* The trigger clause moves to M4b. Still an end-to-end bar crossing editor model → merge writers → package → play runtime — the seam that matters. Still verified red first, per the P2 carry-over. |
+
+**M4b (new milestone) — trigger rect tool.** Two-corner mode + placement/removal commands + naming, where the commit step **requires** a binding chosen through M4's assignment surface. Acceptance: *place a trigger, deliberately choose `healOnEnter` from the picker, it persists and fires in standalone `LevelPlay`; undo/redo work.* Note this is the same default John chose — the difference is that the author chose it, which is the entire disagreement.
+
+### Does M4 or M5 change shape?
+
+**M4: no change to its own scope or acceptance, but it gains a successor.** M4 remains *predefined descriptors + assignment/param UX*, still after M1/M2 and still after M3 so menu items do not lie. M4b is a separate milestone and a separate PR (one feature, one PR) — the trigger tool is not folded into M4's diff, it consumes M4's output.
+
+M4 does gain **one requirement it did not previously have to satisfy**: its assignment surface must be usable at *creation* time, not only to re-assign an existing subject's binding. This is not new UX — it is the constraint that the picker **returns** a `BehaviorBinding` to a caller rather than only mutating a selected subject in place. Named now so M4 is not designed as an in-place editor and then re-shaped at M4b.
+
+**M5: no change of shape.** M5 binds a script resource through the same assignment seam M4 builds; nothing in it depended on triggers being placeable. Its acceptance — *one script, two placed objects bound to it, both run, package contains exactly one script resource* — is stated over objects and is unaffected. M4b may run before or after M5.
+
+**Ordering after this addendum:** M1 done → M2 (objects only) → M3 (independent) → M4 → **M4b** → M5 → M6, with M4b and M5 independent of each other. M5 should go first: it is the milestone that answers the original ask.
+
+### What this forces open, deliberately left closed
+
+Named with size, not decided:
+
+1. **M5: what is a newly-created script's initial source text?** *(Small — one decision, at M5 briefing.)* The same fork shape one milestone later: creation-time required content with no neutral value. Since PR #38 a file that does not evaluate to a handler map is quarantined **with a reason**, so an empty new script is loud rather than silent — which is why this is a UX choice (empty handler map vs. commented template vs. a working `onUpdate` stub) and not a repeat of this defect. Watch it at M5; do not pre-decide it here.
+2. **Do triggers need author-facing naming at M4b?** *(Small.)* `Name` is currently write-only from the author's perspective — nothing reads it but the subject label. `OnScreenKeyboard` is already the naming path (§"Authoring UX"). Decide at M4b whether naming is part of the placement act or skipped until something reads names.
+3. **#8055 (objectset editor) is load-bearing for M2's palette and still out of scope.** `LevelEditor.PopulateObjectPalette` adopts the palette from the level's *first existing placement's* object set, so **a level with no placements has an empty palette and object placement is unavailable**. M2 ships correctly under that constraint; it is a real ceiling on the milestone, not a defect. *(Medium — already filed as #8055. Not opened here.)*
+
+**Not opened, and should not be:** nullable `Binding` (rejected above), a `noop` predefined (rejected by #8237 and by the 2026-08-17 template addendum — a member that exists and does nothing), and any re-planning of the phase beyond the single milestone boundary moved here.

@@ -100,6 +100,43 @@ public sealed class LevelEditSession
     public CellChange? EraseTerrain(int layerIndex, int x, int y)
         => PaintTerrain(layerIndex, x, y, LayerDefinition.EmptyCell);
 
+    /// <summary>Places an instance of <paramref name="objectType"/> from <paramref name="objectSet"/> at cell (x,y). No-op when out of bounds. Undoable.</summary>
+    public void PlaceObject(Package package, ResourceReference objectSet, EditableObjectType objectType, int x, int y, string name = "")
+    {
+        if (package is null)
+            throw new ArgumentNullException(nameof(package));
+        if (objectType is null)
+            throw new ArgumentNullException(nameof(objectType));
+        if (!Level.InBounds(x, y))
+            return;
+
+        var effectiveBehavior = Level.CaptureBehavior(package, objectType.Definition.Behavior, $"Object type '{objectType.Definition.Id}'");
+        var placement = new ObjectPlacement
+        {
+            ObjectSet = objectSet,
+            ObjectId = objectType.Definition.Id,
+            Cell = new GridPosition(x, y),
+            Name = name ?? string.Empty,
+        };
+        var editablePlacement = new EditableObjectPlacement(
+            placement, objectType.Definition.CollisionRole, objectType.Graphic, effectiveBehavior, objectType.Definition.State);
+
+        history.Execute(new PlaceObjectCommand(editablePlacement), Level);
+        IsDirty = true;
+    }
+
+    /// <summary>Removes the object occupying cell (x,y), if any — the object paint mode's erase. Returns <c>false</c> (no-op) when the cell holds no object. Undoable.</summary>
+    public bool EraseObjectAt(int x, int y)
+    {
+        var index = Level.FindObjectIndexAt(x, y);
+        if (index < 0)
+            return false;
+
+        history.Execute(new RemoveObjectCommand(index), Level);
+        IsDirty = true;
+        return true;
+    }
+
     /// <summary>Undoes the last edit and returns the cell to refresh, or <c>null</c> when nothing to undo.</summary>
     public CellChange? Undo()
     {

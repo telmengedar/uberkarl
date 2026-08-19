@@ -28,7 +28,7 @@ public sealed class SetCellCommand : IEditCommand
         this.newTileId = newTileId;
     }
 
-    public CellChange Apply(EditableLevel level)
+    public CellChange? Apply(EditableLevel level)
     {
         var index = Index(level);
         var layer = level.Layers[layerIndex];
@@ -39,7 +39,7 @@ public sealed class SetCellCommand : IEditCommand
         return new CellChange(layerIndex, x, y, newTileId);
     }
 
-    public CellChange Revert(EditableLevel level)
+    public CellChange? Revert(EditableLevel level)
     {
         var index = Index(level);
         var layer = level.Layers[layerIndex];

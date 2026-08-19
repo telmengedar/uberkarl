@@ -33,7 +33,7 @@ public sealed class SetTerrainCommand : IEditCommand
         this.newTerrainId = newTerrainId;
     }
 
-    public CellChange Apply(EditableLevel level)
+    public CellChange? Apply(EditableLevel level)
     {
         var index = Index(level);
         var layer = level.Layers[layerIndex];
@@ -48,7 +48,7 @@ public sealed class SetTerrainCommand : IEditCommand
         return new CellChange(layerIndex, x, y, LayerDefinition.EmptyCell);
     }
 
-    public CellChange Revert(EditableLevel level)
+    public CellChange? Revert(EditableLevel level)
     {
         var index = Index(level);
         var layer = level.Layers[layerIndex];

@@ -25,6 +25,8 @@ namespace Uberkarl {
 
         enum Tool { Paint, Erase }
 
+        enum PaintMode { Tile, Terrain, Object }
+
         // Which pop-in menu, if any, is currently open. One at a time; the owning trigger commits on release.
         enum Trigger { None, Tiles, Layers, Actions, Context }
 
@@ -55,15 +57,16 @@ namespace Uberkarl {
         Tool activeTool = Tool.Paint;
         int activeTileId = LayerDefinition.EmptyCell;
         int activePaletteIndex = -1;
-        // DiVoid #7551 Phase 3 (design #7580 §6.4): the level's terrain brush. Selecting a terrain from the
-        // Tiles radial (mirrors selecting a tile — "the author selects a terrain... from the Tiles radial")
-        // flips paintingTerrain on and remembers which terrain; selecting a plain tile flips it back off.
-        // Paint applies whichever is active; Erase always clears BOTH channels regardless of mode (the
-        // two-channel invariant SetCellCommand/SetTerrainCommand both enforce).
-        bool paintingTerrain;
+        PaintMode paintMode = PaintMode.Tile;
         int activeTerrainId = LayerDefinition.EmptyCell;
         readonly List<int> paletteTerrainIds = new List<int>();
         readonly List<string> paletteTerrainLabels = new List<string>();
+
+        readonly List<EditableObjectType> objectTypes = new List<EditableObjectType>();
+        readonly List<string> objectTypeLabels = new List<string>();
+        EditableObjectType activeObjectType;
+        ResourceReference activeObjectSetReference;
+
         int activeLayerIndex;
         string currentFilePath;
 
@@ -235,11 +238,13 @@ namespace Uberkarl {
         // MenuOutcomeKind.SelectTile), so it renders as a text label; "Terrain: <name>" makes the mode switch
         // legible at a glance in a wheel that otherwise shows bare tile ids.
         RadialMenuModel BuildTilesMenu() {
-            List<RadialMenuItem> items = new List<RadialMenuItem>(paletteTileIds.Count + paletteTerrainIds.Count);
+            List<RadialMenuItem> items = new List<RadialMenuItem>(paletteTileIds.Count + paletteTerrainIds.Count + objectTypes.Count);
             for (int i = 0; i < paletteTileIds.Count; i++)
                 items.Add(new RadialMenuItem($"#{paletteTileIds[i]}", MenuOutcome.SelectTile(i)));
             for (int i = 0; i < paletteTerrainIds.Count; i++)
                 items.Add(new RadialMenuItem($"Terrain: {paletteTerrainLabels[i]}", MenuOutcome.SelectTerrain(i)));
+            for (int i = 0; i < objectTypes.Count; i++)
+                items.Add(new RadialMenuItem($"Object: {objectTypeLabels[i]}", MenuOutcome.SelectObjectType(i)));
             return new RadialMenuModel("Tiles", items);
         }
 
@@ -284,6 +289,10 @@ namespace Uberkarl {
                 case MenuOutcomeKind.SelectTerrain:
                     if (outcome.Index >= 0 && outcome.Index < paletteTerrainIds.Count)
                         OnTerrainSelected(outcome.Index);
+                    break;
+                case MenuOutcomeKind.SelectObjectType:
+                    if (outcome.Index >= 0 && outcome.Index < objectTypes.Count)
+                        OnObjectTypeSelected(outcome.Index);
                     break;
                 case MenuOutcomeKind.SelectLayer:
                     if (session != null && outcome.Index >= 0 && outcome.Index < session.Level.Layers.Count)
@@ -778,10 +787,58 @@ namespace Uberkarl {
             session = new LevelEditSession(level);
             canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(level));
             PopulatePalette(level);
+            PopulateObjectPalette(level);
             PopulateLayers(level);
             SetTool(Tool.Paint);
             paintButton.ButtonPressed = true;
+            RefreshOverlay();
             UpdateState();
+        }
+
+        Package TryOpenCurrentPackage() {
+            try {
+                if (packageContext != null)
+                    return packageSource.Open(packageContext.Handle);
+                if (currentFilePath != null)
+                    return PackageReader.Open(currentFilePath);
+            } catch (Exception exception) {
+                GD.PrintErr($"LevelEditor: {exception.GetType().Name}: {exception.Message}");
+            }
+            return null;
+        }
+
+        void PopulateObjectPalette(EditableLevel level) {
+            objectTypes.Clear();
+            objectTypeLabels.Clear();
+            activeObjectType = null;
+            activeObjectSetReference = default;
+
+            if (level.Objects.Count == 0)
+                return;
+
+            using Package package = TryOpenCurrentPackage();
+            if (package == null)
+                return;
+
+            try {
+                ResourceReference reference = level.Objects[0].Placement.ObjectSet;
+                IReadOnlyList<EditableObjectType> types = EditableObjectSetReader.FromPackage(package, reference);
+                activeObjectSetReference = reference;
+                foreach (EditableObjectType type in types) {
+                    objectTypes.Add(type);
+                    objectTypeLabels.Add(string.IsNullOrEmpty(type.Definition.Name) ? type.Definition.Id : type.Definition.Name);
+                }
+                if (objectTypes.Count > 0)
+                    activeObjectType = objectTypes[0];
+            } catch (Exception exception) {
+                GD.PrintErr($"LevelEditor: failed to load object palette: {exception.GetType().Name}: {exception.Message}");
+            }
+        }
+
+        void RefreshOverlay() {
+            if (session == null)
+                return;
+            canvas.SetOverlay(session.Level.Objects, session.Level.Triggers);
         }
 
         // Rebuild the tile-selection STATE the Tiles radial reads: the ordered tile ids and their textures
@@ -816,7 +873,7 @@ namespace Uberkarl {
                 }
             }
 
-            paintingTerrain = false;
+            paintMode = PaintMode.Tile;
             activeTerrainId = LayerDefinition.EmptyCell;
         }
 
@@ -839,32 +896,66 @@ namespace Uberkarl {
             if (session == null)
                 return;
 
-            // DiVoid #7551 Phase 3: the terrain brush routes through PaintTerrain instead of PaintCell while
-            // active — everything else (tool dispatch, applying the returned change, reflowing terrain
-            // afterwards) is identical to the concrete-tile path.
-            CellChange? change = activeTool == Tool.Erase
-                ? session.EraseCell(activeLayerIndex, x, y)
-                : paintingTerrain
-                    ? session.PaintTerrain(activeLayerIndex, x, y, activeTerrainId)
-                    : activeTileId != LayerDefinition.EmptyCell
-                        ? session.PaintCell(activeLayerIndex, x, y, activeTileId)
-                        : null;
-
-            if (change is { } committed) {
-                canvas.Apply(committed);
-                ReflowTerrain(activeLayerIndex);
+            if (activeTool == Tool.Erase) {
+                EraseAtCell(x, y);
+            } else {
+                switch (paintMode) {
+                    case PaintMode.Terrain:
+                        ApplyCellChange(session.PaintTerrain(activeLayerIndex, x, y, activeTerrainId));
+                        break;
+                    case PaintMode.Object:
+                        PlaceActiveObject(x, y);
+                        break;
+                    default:
+                        if (activeTileId != LayerDefinition.EmptyCell)
+                            ApplyCellChange(session.PaintCell(activeLayerIndex, x, y, activeTileId));
+                        break;
+                }
             }
+
             UpdateState();
         }
 
         void OnCellErased(int x, int y) {
             if (session == null)
                 return;
-            if (session.EraseCell(activeLayerIndex, x, y) is { } committed) {
-                canvas.Apply(committed);
-                ReflowTerrain(activeLayerIndex);
-            }
+            EraseAtCell(x, y);
             UpdateState();
+        }
+
+        void EraseAtCell(int x, int y) {
+            switch (paintMode) {
+                case PaintMode.Object:
+                    if (session.EraseObjectAt(x, y))
+                        RefreshOverlay();
+                    break;
+                default:
+                    ApplyCellChange(session.EraseCell(activeLayerIndex, x, y));
+                    break;
+            }
+        }
+
+        void ApplyCellChange(CellChange? change) {
+            if (change is not { } committed)
+                return;
+            canvas.Apply(committed);
+            ReflowTerrain(committed.LayerIndex);
+        }
+
+        void PlaceActiveObject(int x, int y) {
+            if (activeObjectType == null)
+                return;
+
+            using Package package = TryOpenCurrentPackage();
+            if (package == null)
+                return;
+
+            try {
+                session.PlaceObject(package, activeObjectSetReference, activeObjectType, x, y);
+                RefreshOverlay();
+            } catch (Exception exception) {
+                GD.PrintErr($"LevelEditor: place object failed: {exception.GetType().Name}: {exception.Message}");
+            }
         }
 
         /// <summary>
@@ -980,19 +1071,19 @@ namespace Uberkarl {
         }
 
         void Undo() {
-            if (session?.Undo() is { } change) {
-                canvas.Apply(change);
-                ReflowTerrain(change.LayerIndex);
-                UpdateState();
-            }
+            if (session == null)
+                return;
+            ApplyCellChange(session.Undo());
+            RefreshOverlay();
+            UpdateState();
         }
 
         void Redo() {
-            if (session?.Redo() is { } change) {
-                canvas.Apply(change);
-                ReflowTerrain(change.LayerIndex);
-                UpdateState();
-            }
+            if (session == null)
+                return;
+            ApplyCellChange(session.Redo());
+            RefreshOverlay();
+            UpdateState();
         }
 
         // Plain Save reuses whichever attached slot the level already occupies — it never renames or
@@ -1135,7 +1226,7 @@ namespace Uberkarl {
                 activePaletteIndex = i;
                 activeTileId = paletteTileIds[i];
             }
-            paintingTerrain = false; // selecting a plain tile switches the brush back off terrain mode
+            paintMode = PaintMode.Tile;
             SetTool(Tool.Paint);
             paintButton.ButtonPressed = true;
             eraseButton.ButtonPressed = false;
@@ -1149,7 +1240,19 @@ namespace Uberkarl {
             int i = (int)index;
             if (i >= 0 && i < paletteTerrainIds.Count) {
                 activeTerrainId = paletteTerrainIds[i];
-                paintingTerrain = true;
+                paintMode = PaintMode.Terrain;
+            }
+            SetTool(Tool.Paint);
+            paintButton.ButtonPressed = true;
+            eraseButton.ButtonPressed = false;
+            UpdateState();
+        }
+
+        void OnObjectTypeSelected(long index) {
+            int i = (int)index;
+            if (i >= 0 && i < objectTypes.Count) {
+                activeObjectType = objectTypes[i];
+                paintMode = PaintMode.Object;
             }
             SetTool(Tool.Paint);
             paintButton.ButtonPressed = true;
@@ -1193,8 +1296,11 @@ namespace Uberkarl {
                 : "-";
             string tile = activeTool == Tool.Erase
                 ? "erase"
-                : paintingTerrain ? $"terrain #{activeTerrainId}"
-                : activeTileId == LayerDefinition.EmptyCell ? "none" : $"#{activeTileId}";
+                : paintMode switch {
+                    PaintMode.Terrain => $"terrain #{activeTerrainId}",
+                    PaintMode.Object => activeObjectType != null ? $"object: {activeObjectType.Definition.Id}" : "object: none",
+                    _ => activeTileId == LayerDefinition.EmptyCell ? "none" : $"#{activeTileId}",
+                };
             string tileSet = tileSetSession != null ? tileSetSession.TileSet.Name : "none";
             return $"{session.Level.Name}{dirty}  ·  package: {package}  ·  tileset: {tileSet}  ·  layer: {layer}  ·  tool: {activeTool} ({tile})";
         }

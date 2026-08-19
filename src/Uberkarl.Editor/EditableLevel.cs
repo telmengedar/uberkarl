@@ -40,6 +40,9 @@ public sealed class EditableLevel
     private IReadOnlyList<EditableTile> tiles;
     private IReadOnlyList<EditableTerrainSet> terrainSets;
     private IReadOnlyDictionary<ResourcePath, string> tileScripts;
+    private readonly List<AreaTriggerDefinition> triggers;
+    private readonly List<EditableObjectPlacement> objects;
+    private readonly Dictionary<ResourcePath, string> scripts;
 
     public EditableLevel(
         string name,
@@ -83,11 +86,11 @@ public sealed class EditableLevel
         this.layers = new List<EditableLayer>(layers);
         IsAttached = isAttached;
         TileBehaviorOverrides = tileBehaviorOverrides ?? Array.Empty<TileBehaviorOverride>();
-        Triggers = triggers ?? Array.Empty<AreaTriggerDefinition>();
-        Objects = objects ?? Array.Empty<EditableObjectPlacement>();
+        this.triggers = triggers is null ? new List<AreaTriggerDefinition>() : new List<AreaTriggerDefinition>(triggers);
+        this.objects = objects is null ? new List<EditableObjectPlacement>() : new List<EditableObjectPlacement>(objects);
         LevelScript = levelScript;
         this.tileScripts = tileScripts ?? throw new ArgumentNullException(nameof(tileScripts));
-        Scripts = scripts ?? new Dictionary<ResourcePath, string>();
+        this.scripts = scripts is null ? new Dictionary<ResourcePath, string>() : new Dictionary<ResourcePath, string>(scripts);
 
         var expected = width * height;
         foreach (var layer in this.layers)
@@ -152,11 +155,11 @@ public sealed class EditableLevel
     /// <summary>The level's sparse per-instance tile-behavior overrides/removals.</summary>
     public IReadOnlyList<TileBehaviorOverride> TileBehaviorOverrides { get; }
 
-    /// <summary>The level's grid-rect area triggers.</summary>
-    public IReadOnlyList<AreaTriggerDefinition> Triggers { get; }
+    /// <summary>The level's grid-rect area triggers, read-only in this milestone.</summary>
+    public IReadOnlyList<AreaTriggerDefinition> Triggers => triggers;
 
-    /// <summary>The level's placed free-moving objects.</summary>
-    public IReadOnlyList<EditableObjectPlacement> Objects { get; }
+    /// <summary>The level's placed free-moving objects. Mutated via <see cref="InsertObject"/>/<see cref="RemoveObjectAt"/>.</summary>
+    public IReadOnlyList<EditableObjectPlacement> Objects => objects;
 
     /// <summary>The level's global lifecycle/<c>onUpdate</c> script binding, or <c>null</c> when the level declares none.</summary>
     public BehaviorBinding? LevelScript { get; }
@@ -170,9 +173,10 @@ public sealed class EditableLevel
 
     /// <summary>
     /// Script source text for every script-kind behavior binding this level itself declares (tile-behavior
-    /// overrides, triggers, objects, the level script), keyed by its <see cref="ResourcePath"/>.
+    /// overrides, triggers, objects, the level script), keyed by its <see cref="ResourcePath"/>. Grows via
+    /// <see cref="CaptureBehavior"/> when a newly-placed object's binding references a script.
     /// </summary>
-    public IReadOnlyDictionary<ResourcePath, string> Scripts { get; }
+    public IReadOnlyDictionary<ResourcePath, string> Scripts => scripts;
 
     /// <summary>Whether <paramref name="x"/>,<paramref name="y"/> is a cell inside the grid.</summary>
     public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < Width && y < Height;
@@ -219,6 +223,39 @@ public sealed class EditableLevel
 
         return false;
     }
+
+    /// <summary>Inserts a placed object at <paramref name="index"/> (0..<see cref="Objects"/>.Count). Used by the placement/removal commands to keep undo/redo symmetric.</summary>
+    public void InsertObject(int index, EditableObjectPlacement placement)
+    {
+        if (placement is null)
+            throw new ArgumentNullException(nameof(placement));
+        objects.Insert(index, placement);
+    }
+
+    /// <summary>Removes and returns the object at <paramref name="index"/>. Throws when out of range.</summary>
+    public EditableObjectPlacement RemoveObjectAt(int index)
+    {
+        var removed = objects[index];
+        objects.RemoveAt(index);
+        return removed;
+    }
+
+    /// <summary>The index of the first placed object occupying cell (x,y), or -1 when none does.</summary>
+    public int FindObjectIndexAt(int x, int y)
+    {
+        for (var i = 0; i < objects.Count; i++)
+        {
+            var cell = objects[i].Placement.Cell;
+            if (cell.X == x && cell.Y == y)
+                return i;
+        }
+
+        return -1;
+    }
+
+    /// <summary>Captures <paramref name="binding"/>'s script source (if any) from <paramref name="package"/> into this level's script table. Returns <paramref name="binding"/> unchanged.</summary>
+    public BehaviorBinding? CaptureBehavior(Package package, BehaviorBinding? binding, string role)
+        => EditableBehaviorBindings.Capture(package, binding, role, scripts);
 
     // ----- layer structural mutations (create / delete / reorder / property edit) -----
 

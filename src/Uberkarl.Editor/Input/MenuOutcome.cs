@@ -9,6 +9,9 @@ public enum MenuOutcomeKind
     /// <summary>Select a terrain (a logical auto-tile type) by its index (DiVoid #7551 Phase 3).</summary>
     SelectTerrain,
 
+    /// <summary>Select an object type in the active object palette by its index — switches the active paint mode to object placement.</summary>
+    SelectObjectType,
+
     /// <summary>Select a layer by its index.</summary>
     SelectLayer,
 
@@ -77,6 +80,10 @@ public readonly struct MenuOutcome
     /// <summary>An outcome that selects the terrain at <paramref name="index"/> (DiVoid #7551 Phase 3) — switches the active paint mode to "terrain brush".</summary>
     public static MenuOutcome SelectTerrain(int index) =>
         new(MenuOutcomeKind.SelectTerrain, index, default, default);
+
+    /// <summary>An outcome that selects the object palette type at <paramref name="index"/> — switches the active paint mode to object placement.</summary>
+    public static MenuOutcome SelectObjectType(int index) =>
+        new(MenuOutcomeKind.SelectObjectType, index, default, default);
 
     /// <summary>An outcome that selects the layer at <paramref name="index"/>.</summary>
     public static MenuOutcome SelectLayer(int index) =>

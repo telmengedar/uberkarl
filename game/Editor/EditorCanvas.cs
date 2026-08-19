@@ -55,6 +55,9 @@ namespace Uberkarl {
         float moveCooldown;
         bool moveHeld;
 
+        IReadOnlyList<EditableObjectPlacement> overlayObjects = Array.Empty<EditableObjectPlacement>();
+        IReadOnlyList<AreaTriggerDefinition> overlayTriggers = Array.Empty<AreaTriggerDefinition>();
+
         /// <summary>Set by the controller while a pop-in radial is open or a toolbar/panel focus-zone is
         /// active: directional input is being consumed by that surface, so the grid cursor must freeze even
         /// if focus momentarily lands back on the canvas. This is the robust suppression the "menu holds
@@ -110,6 +113,13 @@ namespace Uberkarl {
                 cursor.Resize(width, height);
 
             UpdateView();
+            QueueRedraw();
+        }
+
+        /// <summary>Sets the placed-object/trigger data the authoring overlay draws. <c>null</c> lists are treated as empty.</summary>
+        public void SetOverlay(IReadOnlyList<EditableObjectPlacement> objects, IReadOnlyList<AreaTriggerDefinition> triggers) {
+            overlayObjects = objects ?? Array.Empty<EditableObjectPlacement>();
+            overlayTriggers = triggers ?? Array.Empty<AreaTriggerDefinition>();
             QueueRedraw();
         }
 
@@ -414,6 +424,9 @@ namespace Uberkarl {
             // Level border.
             DrawRect(new Rect2(origin, size), new Color(0.4f, 0.45f, 0.55f), false, 1.5f);
 
+            DrawObjectOverlay(origin, step);
+            DrawTriggerOverlay(origin, step);
+
             // Hovered-cell highlight (mouse) — a soft amber wash.
             if (hoverX >= 0 && hoverY >= 0) {
                 Vector2 cellPos = origin + new Vector2(hoverX, hoverY) * step;
@@ -430,6 +443,44 @@ namespace Uberkarl {
                 float thickness = active ? 2.5f : 1.5f;
                 DrawRect(new Rect2(cellPos, new Vector2(step, step)), new Color(1f, 0.85f, 0.2f, active ? 0.18f : 0.08f));
                 DrawRect(new Rect2(cellPos, new Vector2(step, step)), new Color(1f, 0.85f, 0.2f, alpha), false, thickness);
+            }
+        }
+
+        void DrawObjectOverlay(Vector2 origin, float step) {
+            if (overlayObjects.Count == 0)
+                return;
+
+            Color fill = new Color(1f, 0.55f, 0.15f, 0.35f);
+            Color outline = new Color(1f, 0.55f, 0.15f, 0.9f);
+            Font font = GetThemeDefaultFont();
+            int fontSize = GetThemeDefaultFontSize();
+
+            foreach (EditableObjectPlacement placement in overlayObjects) {
+                Vector2 cellPos = origin + new Vector2(placement.Placement.Cell.X, placement.Placement.Cell.Y) * step;
+                Rect2 rect = new Rect2(cellPos, new Vector2(step, step));
+                DrawRect(rect, fill);
+                DrawRect(rect, outline, false, 2f);
+                if (!string.IsNullOrEmpty(placement.Placement.Name))
+                    DrawString(font, cellPos + new Vector2(2f, step - 4f), placement.Placement.Name,
+                        HorizontalAlignment.Left, step - 4f, fontSize - 3, outline);
+            }
+        }
+
+        void DrawTriggerOverlay(Vector2 origin, float step) {
+            if (overlayTriggers.Count == 0)
+                return;
+
+            Color outline = new Color(0.25f, 0.85f, 0.95f, 0.9f);
+            Font font = GetThemeDefaultFont();
+            int fontSize = GetThemeDefaultFontSize();
+
+            foreach (AreaTriggerDefinition trigger in overlayTriggers) {
+                Vector2 rectPos = origin + new Vector2(trigger.X, trigger.Y) * step;
+                Vector2 rectSize = new Vector2(trigger.Width, trigger.Height) * step;
+                DrawRect(new Rect2(rectPos, rectSize), outline, false, 2f);
+                if (!string.IsNullOrEmpty(trigger.Name))
+                    DrawString(font, rectPos + new Vector2(2f, 14f), trigger.Name,
+                        HorizontalAlignment.Left, rectSize.X - 4f, fontSize - 3, outline);
             }
         }
     }
