@@ -31,7 +31,7 @@ namespace Uberkarl {
         public bool IsOpen => Visible;
 
         public override void _Ready() {
-            SetAnchorsPreset(LayoutPreset.FullRect);
+            EditorLayout.FillParent(this);
             MouseFilter = MouseFilterEnum.Stop;
             FocusMode = FocusModeEnum.All;
             Visible = false;
@@ -41,12 +41,12 @@ namespace Uberkarl {
 
         void BuildLayout() {
             ColorRect backdrop = new ColorRect { Color = new Color(0.05f, 0.06f, 0.08f, 0.75f) };
-            backdrop.SetAnchorsPreset(LayoutPreset.FullRect);
+            EditorLayout.FillParent(backdrop);
             backdrop.MouseFilter = MouseFilterEnum.Stop;
             AddChild(backdrop);
 
             PanelContainer panel = new PanelContainer { CustomMinimumSize = new Vector2(480f, 420f) };
-            panel.SetAnchorsPreset(LayoutPreset.Center);
+            EditorLayout.CenterInParent(panel);
             AddChild(panel);
 
             VBoxContainer root = new VBoxContainer();

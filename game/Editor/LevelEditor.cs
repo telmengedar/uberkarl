@@ -121,7 +121,7 @@ namespace Uberkarl {
 
         public override void _Ready() {
             Theme = EditorTheme.Build();
-            SetAnchorsPreset(LayoutPreset.FullRect);
+            EditorLayout.FillParent(this);
 
             tilesTrigger = new HoldWatch(HoldThreshold);
             layersTrigger = new HoldWatch(HoldThreshold);
@@ -223,7 +223,16 @@ namespace Uberkarl {
             bool resolving = cancelRequested || resolveRequested;
 
             if (menuSession.State == MenuSessionState.Transient) {
-                popIn.SetAim(CurrentAim());
+                Vector2 aim = CurrentAim();
+                bool directionalAimPresent = MenuAimArbitration.DirectionalAimPresent(aim.X, aim.Y);
+                switch (MenuAimArbitration.Resolve(menuSession.State, directionalAimPresent, popIn.HasPointerHighlight)) {
+                    case MenuAimArbitration.AimAction.ApplyDirectional:
+                        popIn.SetAim(aim);
+                        break;
+                    case MenuAimArbitration.AimAction.ClearHighlight:
+                        popIn.ClearHighlight();
+                        break;
+                }
             } else if (!resolving) {
                 StepLatchedHighlight();
             }
@@ -514,20 +523,20 @@ namespace Uberkarl {
 
         void BuildUi() {
             shellBackground = new ColorRect { Color = EditorTheme.Shell };
-            shellBackground.SetAnchorsPreset(LayoutPreset.FullRect);
+            EditorLayout.FillParent(shellBackground);
             shellBackground.MouseFilter = MouseFilterEnum.Ignore;
             AddChild(shellBackground);
 
             // The canvas fills the whole area — maximum edit surface; the toolbar overlays it and auto-hides.
             canvas = new EditorCanvas();
-            canvas.SetAnchorsPreset(LayoutPreset.FullRect);
+            EditorLayout.FillParent(canvas);
             canvas.CellPressed += OnCellPressed;
             canvas.CellErased += OnCellErased;
+            canvas.MutationLocked = AnyModalOpen;
             AddChild(canvas);
 
             topBar = BuildToolbar();
-            topBar.SetAnchorsPreset(LayoutPreset.TopWide);
-            topBar.OffsetBottom = TopBarHeight;
+            EditorLayout.PinTop(topBar, TopBarHeight);
             AddChild(topBar);
 
             popIn = new PopInMenu();

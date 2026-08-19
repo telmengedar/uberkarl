@@ -24,10 +24,13 @@ namespace Uberkarl {
         const float HitInnerRadius = ChipRadius;
         const float HitOuterRadius = WedgeRadius + ChipRadius;
 
+        enum AimSource { None, Pointer, Directional }
+
         MenuModel model;
         Func<int, Texture2D> iconProvider;
         Vector2 centerGlobal;
         int highlighted = -1;
+        AimSource highlightSource = AimSource.None;
         bool resolveRequested;
         bool cancelRequested;
 
@@ -37,8 +40,13 @@ namespace Uberkarl {
         /// <summary>The outcome the currently highlighted wedge would commit, or null with nothing highlighted.</summary>
         public MenuOutcome? CurrentOutcome => model?.OutcomeAt(highlighted);
 
+        /// <summary>True while the current highlight was set by the pointer (mouse hover) rather than by a
+        /// directional (stick/D-pad/arrows) reading — what <see cref="MenuAimArbitration.Resolve"/> needs to
+        /// decide whether a neutral directional reading may clear the highlight.</summary>
+        public bool HasPointerHighlight => highlighted >= 0 && highlightSource == AimSource.Pointer;
+
         public override void _Ready() {
-            SetAnchorsPreset(LayoutPreset.FullRect);
+            EditorLayout.FillParent(this);
             MouseFilter = MouseFilterEnum.Stop; // eat input under the wheel while it is open
             FocusMode = FocusModeEnum.All;
             // Pin every focus neighbour to self so a held stick / D-pad aim (which also fires Godot's
@@ -74,22 +82,26 @@ namespace Uberkarl {
         public void SetAim(Vector2 direction) {
             if (model == null)
                 return;
-            ApplyHighlight(model.IndexAt(direction.X, direction.Y));
+            ApplyHighlight(model.IndexAt(direction.X, direction.Y), AimSource.Directional);
         }
 
         /// <summary>Feed the current mouse offset from the menu centre, using the positional (pixel-radius) hit test.</summary>
         public void SetPositionalAim(Vector2 offset) {
             if (model == null)
                 return;
-            ApplyHighlight(RadialGeometry.PositionalIndexAt(offset.X, offset.Y, model.Count, HitInnerRadius, HitOuterRadius));
+            ApplyHighlight(RadialGeometry.PositionalIndexAt(offset.X, offset.Y, model.Count, HitInnerRadius, HitOuterRadius), AimSource.Pointer);
         }
 
         /// <summary>Steps the highlighted wedge by one position, wrapping — the latched menu's discrete directional stepping.</summary>
         public void StepHighlight(int direction) {
             if (model == null || model.Count == 0)
                 return;
-            ApplyHighlight(RadialHighlight.Step(highlighted, model.Count, direction));
+            ApplyHighlight(RadialHighlight.Step(highlighted, model.Count, direction), AimSource.Directional);
         }
+
+        /// <summary>Clears the highlight outright — the Transient-phase "neutral directional reading with no
+        /// pointer highlight to protect" case (<see cref="MenuAimArbitration.AimAction.ClearHighlight"/>).</summary>
+        public void ClearHighlight() => ApplyHighlight(-1, AimSource.None);
 
         /// <summary>Reads and clears whether a commit-style interaction (left-click, gamepad A, Enter/Space) happened since the last poll.</summary>
         public bool ConsumeResolveRequest() {
@@ -111,11 +123,13 @@ namespace Uberkarl {
             model = null;
             iconProvider = null;
             highlighted = -1;
+            highlightSource = AimSource.None;
             resolveRequested = false;
             cancelRequested = false;
         }
 
-        void ApplyHighlight(int next) {
+        void ApplyHighlight(int next, AimSource source) {
+            highlightSource = next >= 0 ? source : AimSource.None;
             if (next != highlighted) {
                 highlighted = next;
                 QueueRedraw();
@@ -145,6 +159,16 @@ namespace Uberkarl {
             } else if (@event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Erase)) || @event.IsActionPressed("ui_cancel")) {
                 cancelRequested = true;
                 AcceptEvent();
+            }
+        }
+
+        public override void _UnhandledInput(InputEvent @event) {
+            if (!Visible || @event.IsEcho())
+                return;
+
+            if (@event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Erase)) || @event.IsActionPressed("ui_cancel")) {
+                cancelRequested = true;
+                GetViewport().SetInputAsHandled();
             }
         }
 
