@@ -82,6 +82,7 @@ namespace Uberkarl {
         Control topBar;
         ColorRect shellBackground;
         PopInMenu popIn;
+        ChoiceList choiceList;
         PackageBrowser packageBrowser;
         LayerManagerPanel layerManager;
         LevelResizePanel resizePanel;
@@ -511,10 +512,14 @@ namespace Uberkarl {
             popIn.Cancelled += OnMenuCancelled;
             AddChild(popIn);
 
+            choiceList = new ChoiceList();
+            AddChild(choiceList);
+
             packageBrowser = new PackageBrowser();
             packageBrowser.ResourceChosen += OnBrowserResourceChosen;
             packageBrowser.SaveRequested += OnBrowserSaveRequested;
             packageBrowser.Cancelled += OnBrowserCancelled;
+            packageBrowser.AttachChoiceList(choiceList);
             AddChild(packageBrowser);
 
             textKeyboard = new OnScreenKeyboard();

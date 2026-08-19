@@ -63,7 +63,7 @@ namespace Uberkarl {
             MouseFilter = MouseFilterEnum.Stop;
             FocusMode = FocusModeEnum.All;
             Visible = false;
-            ZIndex = 150; // above LayerManagerPanel/PackageBrowser (100) — a keyboard can be summoned on top of either.
+            ZIndex = 150;
             BuildLayout();
         }
 

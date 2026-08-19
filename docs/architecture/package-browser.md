@@ -557,6 +557,39 @@ with 2+ multi-level packages:
 
 ---
 
+## 17. Part 3 — The list surface extracted into `ChoiceList` (DiVoid #8581, U2, 2026-08-19)
+
+Milestone U2 of the editor menu-surfaces design (**#8525 §7, §11**). Pure refactor, no behaviour change:
+every flow described in §16 above is unchanged from the author's point of view.
+
+`PackageBrowser`'s generic list rendering — backdrop, centered panel, header with title and back/close,
+scroll container, row construction, focus containment, empty state, and `ui_cancel` handling — moved
+into a new summoned `Control`, `ChoiceList` (`game/Editor/ChoiceList.cs`). `LevelEditor` owns the one
+instance and hands it to `PackageBrowser` via `AttachChoiceList`, the same pattern `OnScreenKeyboard`
+already uses. `PackageBrowser` keeps every byte of its flow: the `Mode`/`Step`/`ConfirmKind` state
+machine, `HandleCancel`'s step-back-vs-close branching, and all four events. Each step now calls
+`choiceList.Open(title, closeText, count, rowAt, emptyMessage, onChosen, onDismissRequested)` instead of
+populating its own list; `onDismissRequested` is `HandleCancel` at every step, exactly as the header
+button and `ui_cancel` both called it before.
+
+The one behaviour the extraction had to preserve exactly: while the attached `OnScreenKeyboard` is open
+on top of the list, `ui_cancel` must dismiss the keyboard only, not also step the browser back.
+`ChoiceList` exposes this as a generic `DismissSuppressed` predicate rather than knowing about
+`OnScreenKeyboard` directly — `PackageBrowser` wires it to `() => keyboard != null && keyboard.IsOpen` in
+`AttachChoiceList`, reproducing the guard `PackageBrowser`'s own `_GuiInput`/`_UnhandledInput` used to
+carry.
+
+No pure/engine-free logic fell out of this extraction: list population is Godot `Control`/`Button`
+construction throughout, with no selection state machine to pin (the chosen index is a closure argument,
+not persisted state). Verified live via Godot MCP against the same flows §16.6 exercises; `dotnet test`
+across all four projects unchanged at 692.
+
+`ChoiceList` is the surface U3 (Tiles) and U4 (Layers) attach to next, per **#8525 §7**'s "one list widget,
+several callers."
+
+---
+
 *Design authored by Sarah (software architect). Implementation to follow per §15. Part 2 of the Editor
 UI v2 arc; additive over the merged part-1 foundation (#7466). §16 (save flow + file-browser UI, #7552)
-implemented by John (backend dev), 2026-08-03.*
+implemented by John (backend dev), 2026-08-03. §17 (choice-list extraction, #8581) implemented by John
+(backend dev), 2026-08-19.*
