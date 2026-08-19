@@ -30,14 +30,31 @@ public static class RadialGeometry
         if (magnitude <= deadzone)
             return -1;
 
-        // atan2(dx, -dy): 0 at "up" (−Y), increasing clockwise (rightward dx is positive).
+        return IndexForAngle(dx, dy, count);
+    }
+
+    /// <summary>The wedge index a mouse pointer sits over, for a menu of <paramref name="count"/> wedges, using an inner/outer pixel radius band instead of <see cref="IndexAt"/>'s fractional dead-zone. Returns <c>-1</c> inside <paramref name="innerRadius"/> (the hub) or beyond <paramref name="outerRadius"/> (off the wheel, including a click there).</summary>
+    public static int PositionalIndexAt(double dx, double dy, int count, double innerRadius, double outerRadius)
+    {
+        if (count <= 0)
+            return -1;
+
+        double magnitude = System.Math.Sqrt((dx * dx) + (dy * dy));
+        if (magnitude < innerRadius || magnitude > outerRadius)
+            return -1;
+
+        return IndexForAngle(dx, dy, count);
+    }
+
+    /// <summary>The wedge index for a direction's angle alone (0 at "up", clockwise).</summary>
+    private static int IndexForAngle(double dx, double dy, int count)
+    {
         double angle = System.Math.Atan2(dx, -dy);
         if (angle < 0)
             angle += Tau;
 
         double step = Tau / count;
-        int index = (int)System.Math.Round(angle / step) % count;
-        return index;
+        return (int)System.Math.Round(angle / step) % count;
     }
 
     /// <summary>

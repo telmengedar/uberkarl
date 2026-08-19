@@ -8,6 +8,13 @@
 Companion docs: input architecture (`editor-input.md`, #7440 — especially §13, the ratified mapping) ·
 level editor MVP (`level-editor.md`, #7433). Source task: DiVoid #7441.
 
+> **Amended by `editor-menu-surfaces.md` (DiVoid #8525, U1, and its 2026-08-19 addendum):** a menu can now
+> also open **latched** — reached by a quick *tap* of its trigger rather than a hold — so a mouse and
+> discrete keyboard/gamepad stepping can operate it without the trigger held. Release semantics are
+> otherwise unchanged: a held trigger's release commits over an aimed wedge and cancels on the neutral
+> centre, exactly as shipped; a latched menu is dismissed only by committing or by explicit cancel. See
+> `editor-menu-surfaces.md` §6 (and its addendum) for the mechanism.
+
 ---
 
 ## 1. Problem Statement

@@ -110,6 +110,9 @@ namespace Uberkarl {
         Vector2 menuCenterGlobal;
         FocusZone focusZone = FocusZone.Canvas;
 
+        readonly MenuSession menuSession = new MenuSession();
+        readonly AnalogStepGate latchStepGate = new AnalogStepGate();
+
         // True while a playtest run is live. Gates _Process/_UnhandledInput so none of the editor's own
         // hotkeys, radials, or auto-hide logic react to input meant for the player (e.g. Space is bound to
         // both editor_paint and jump) — the overlay owns input exclusively for the run's duration and is
@@ -161,16 +164,11 @@ namespace Uberkarl {
             contextTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenContextMenu)), d);
 
             if (activeTrigger != Trigger.None) {
-                popIn.SetAim(CurrentAim());
-                if (WatchFor(activeTrigger).JustReleased)
-                    popIn.Commit();
+                StepOpenMenu();
                 return;
             }
 
-            if (tilesTrigger.JustCrossedHold) OpenMenu(Trigger.Tiles);
-            else if (layersTrigger.JustCrossedHold) OpenMenu(Trigger.Layers);
-            else if (actionsTrigger.JustCrossedHold) OpenMenu(Trigger.Actions);
-            else if (contextTrigger.JustCrossedHold) OpenMenu(Trigger.Context);
+            TryOpenFromTriggers();
 
             // Mouse right-click TAP erases the cell under the pointer (right-click HOLD opened the context
             // radial above instead) — the press-vs-hold split that lets erase and the context menu coexist.
@@ -178,15 +176,79 @@ namespace Uberkarl {
                 canvas.EraseAtGlobal(GetViewport().GetMousePosition());
         }
 
-        Vector2 CurrentAim() {
-            if (activeTrigger == Trigger.Context)
-                return GetViewport().GetMousePosition() - menuCenterGlobal;
+        static readonly Trigger[] TriggerOrder = { Trigger.Tiles, Trigger.Layers, Trigger.Actions, Trigger.Context };
+        const int ContextTriggerIndex = 3;
 
-            // Gamepad stick + D-pad + keyboard arrows all resolve through the cursor-move actions.
-            return Godot.Input.GetVector(
+        /// <summary>Opens a menu from a long hold, or immediately latches it from a quick tap of Tiles/Layers/Actions.</summary>
+        void TryOpenFromTriggers() {
+            MenuTriggerArbitration.Reading[] readings = {
+                new(tilesTrigger.JustCrossedHold, tilesTrigger.ReleasedAsTap),
+                new(layersTrigger.JustCrossedHold, layersTrigger.ReleasedAsTap),
+                new(actionsTrigger.JustCrossedHold, actionsTrigger.ReleasedAsTap),
+                new(contextTrigger.JustCrossedHold, contextTrigger.ReleasedAsTap),
+            };
+            MenuTriggerArbitration.Attempt attempt =
+                MenuTriggerArbitration.TryOpen(CanOpenTrigger, readings, ContextTriggerIndex, session != null, menuSession);
+            if (!attempt.Opened)
+                return;
+
+            OpenMenu(TriggerOrder[attempt.TriggerIndex]);
+            if (attempt.LatchedImmediately)
+                PrimeLatchStepping();
+        }
+
+        bool CanOpenTrigger(int index) => TriggerOrder[index] switch {
+            Trigger.Layers => true,
+            Trigger.Actions => true,
+            _ => paletteTileIds.Count > 0 || paletteTerrainIds.Count > 0 || objectTypes.Count > 0,
+        };
+
+        /// <summary>Advances the open menu by one frame: continuous aim while Transient, discrete stepping once Latched.</summary>
+        void StepOpenMenu() {
+            if (menuSession.State == MenuSessionState.Transient) {
+                if (activeTrigger == Trigger.Context)
+                    popIn.SetPositionalAim(GetViewport().GetMousePosition() - menuCenterGlobal);
+                else
+                    popIn.SetAim(CurrentAim());
+            } else {
+                StepLatchedHighlight();
+            }
+
+            HoldWatch trigger = WatchFor(activeTrigger);
+            MenuSessionTransition transition = menuSession.Step(
+                openRequested: false,
+                triggerReleased: trigger.JustReleased,
+                releasedAsTap: trigger.ReleasedAsTap);
+
+            if (transition.Effect == MenuSessionEffect.Commit)
+                popIn.Commit();
+            else if (transition.Effect == MenuSessionEffect.Latch)
+                PrimeLatchStepping();
+        }
+
+        void StepLatchedHighlight() {
+            (bool negative, bool positive) = LatchDirectionPressed();
+            int step = latchStepGate.Poll(negative, positive);
+            if (step != 0)
+                popIn.StepHighlight(step);
+        }
+
+        void PrimeLatchStepping() {
+            (bool negative, bool positive) = LatchDirectionPressed();
+            latchStepGate.Prime(negative, positive);
+        }
+
+        static (bool Negative, bool Positive) LatchDirectionPressed() =>
+            LatchDirection.Reduce(
+                left: Godot.Input.IsActionPressed(ActionName(EditorAction.MoveCursorLeft)),
+                right: Godot.Input.IsActionPressed(ActionName(EditorAction.MoveCursorRight)),
+                up: Godot.Input.IsActionPressed(ActionName(EditorAction.MoveCursorUp)),
+                down: Godot.Input.IsActionPressed(ActionName(EditorAction.MoveCursorDown)));
+
+        Vector2 CurrentAim() =>
+            Godot.Input.GetVector(
                 ActionName(EditorAction.MoveCursorLeft), ActionName(EditorAction.MoveCursorRight),
                 ActionName(EditorAction.MoveCursorUp), ActionName(EditorAction.MoveCursorDown));
-        }
 
         // Every summoned full-rect modal, in one place — the guard every input path (canvas cursor
         // capture, toolbar auto-hide, global hotkeys) needs so a modal always fully owns input while open.
@@ -371,6 +433,7 @@ namespace Uberkarl {
         void EndMenu() {
             activeTrigger = Trigger.None;
             focusZone = FocusZone.Canvas;
+            menuSession.Reset();
             canvas?.GrabFocus();
         }
 

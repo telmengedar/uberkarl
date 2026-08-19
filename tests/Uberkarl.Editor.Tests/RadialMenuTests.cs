@@ -177,4 +177,83 @@ public sealed class RadialMenuTests
     {
         Assert.That(RadialGeometry.WedgeCenterAngle(0, 0), Is.EqualTo(0.0));
     }
+
+    private const double InnerRadius = 30.0;
+    private const double OuterRadius = 126.0;
+
+    [Test]
+    public void PositionalIndexAt_CardinalDirections_MapToTheSameClockwiseWedges_AsIndexAt()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(RadialGeometry.PositionalIndexAt(0, -80, 4, InnerRadius, OuterRadius), Is.EqualTo(0), "up");
+            Assert.That(RadialGeometry.PositionalIndexAt(80, 0, 4, InnerRadius, OuterRadius), Is.EqualTo(1), "right");
+            Assert.That(RadialGeometry.PositionalIndexAt(0, 80, 4, InnerRadius, OuterRadius), Is.EqualTo(2), "down");
+            Assert.That(RadialGeometry.PositionalIndexAt(-80, 0, 4, InnerRadius, OuterRadius), Is.EqualTo(3), "left");
+        });
+    }
+
+    [Test]
+    public void PositionalIndexAt_InsideInnerRadius_SelectsNothing()
+    {
+        Assert.That(RadialGeometry.PositionalIndexAt(0, -10, 4, InnerRadius, OuterRadius), Is.EqualTo(-1));
+        Assert.That(RadialGeometry.PositionalIndexAt(0, 0, 4, InnerRadius, OuterRadius), Is.EqualTo(-1));
+    }
+
+    [Test]
+    public void PositionalIndexAt_OutsideOuterRadius_SelectsNothing_SoAClickThereCancels()
+    {
+        Assert.That(RadialGeometry.PositionalIndexAt(0, -500, 4, InnerRadius, OuterRadius), Is.EqualTo(-1));
+    }
+
+    [Test]
+    public void PositionalIndexAt_ExactlyOnTheBoundaries_IsInclusive()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(RadialGeometry.PositionalIndexAt(0, -InnerRadius, 4, InnerRadius, OuterRadius),
+                Is.EqualTo(0), "exactly at the inner radius counts as inside.");
+            Assert.That(RadialGeometry.PositionalIndexAt(0, -OuterRadius, 4, InnerRadius, OuterRadius),
+                Is.EqualTo(0), "exactly at the outer radius counts as inside.");
+        });
+    }
+
+    [Test]
+    public void PositionalIndexAt_EmptyMenu_SelectsNothing()
+    {
+        Assert.That(RadialGeometry.PositionalIndexAt(0, -80, 0, InnerRadius, OuterRadius), Is.EqualTo(-1));
+    }
+
+    [Test]
+    public void RadialHighlight_FromUnhighlighted_Forward_LandsOnTheFirstWedge()
+    {
+        Assert.That(RadialHighlight.Step(highlighted: -1, count: 8, direction: +1), Is.EqualTo(0));
+    }
+
+    [Test]
+    [Description("Plain CyclicSelection.Prev(-1, 8) computes 6, treating -1 as a valid index one short of 0 rather than as \"nothing highlighted\", silently skipping the last wedge.")]
+    public void RadialHighlight_FromUnhighlighted_Backward_LandsOnTheLastWedge()
+    {
+        Assert.That(RadialHighlight.Step(highlighted: -1, count: 8, direction: -1), Is.EqualTo(7));
+    }
+
+    [Test]
+    public void RadialHighlight_FromAHighlightedWedge_DelegatesToCyclicSelection()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(RadialHighlight.Step(highlighted: 2, count: 8, direction: +1), Is.EqualTo(3));
+            Assert.That(RadialHighlight.Step(highlighted: 0, count: 8, direction: -1), Is.EqualTo(7));
+        });
+    }
+
+    [Test]
+    public void RadialHighlight_EmptyMenu_SelectsNothing()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(RadialHighlight.Step(highlighted: -1, count: 0, direction: +1), Is.EqualTo(-1));
+            Assert.That(RadialHighlight.Step(highlighted: -1, count: 0, direction: -1), Is.EqualTo(-1));
+        });
+    }
 }
