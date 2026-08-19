@@ -6,17 +6,14 @@ using Uberkarl.Packages;
 namespace Uberkarl {
 
     /// <summary>
-    /// The summoned, gamepad-first browser that replaces the file-system <c>FileDialog</c> for both
-    /// loading and saving a level (DiVoid #7470 for load, #7552 for the file-browser look + save flow). It
-    /// holds only the source abstraction and the opaque summaries/handles it hands back — no file, ZIP, or
-    /// path knowledge, and no edit logic. Every step is a vertical, scrollable list of focus-chained
-    /// <see cref="Button"/>s (mirroring <see cref="LevelEditor"/>'s toolbar focus-containment): a focused
-    /// button activates on <c>ui_accept</c> on gamepad, keyboard, or a mouse click; <c>ui_cancel</c> (or the
-    /// header's Back/Close button, for mouse users) steps back a level of the flow or closes it entirely.
+    /// The summoned, gamepad-first in-game file browser for loading and saving a level (DiVoid #7470 for
+    /// load, #7552 for the file-browser look + save flow). It holds only the source abstraction and the
+    /// opaque summaries/handles it hands back — no file, ZIP, or path knowledge, and no edit logic. Every
+    /// step is rendered by the shared <see cref="ChoiceList"/>; this class owns the flow — which step
+    /// comes next, what a chosen row means, and what cancel does at each step.
     ///
     /// <b>Load mode</b> (<see cref="SummonLoad"/>): packages → select → that package's levels → select →
-    /// <see cref="ResourceChosen"/>. Unchanged in shape from v1, upgraded to the shared list styling +
-    /// back-nav below.
+    /// <see cref="ResourceChosen"/>.
     ///
     /// <b>Save mode</b> (<see cref="SummonSave"/>): packages (plus a leading "+ New package…" entry) →
     /// pick an existing package, or type a new one's name via the attached <see cref="OnScreenKeyboard"/>
@@ -52,13 +49,8 @@ namespace Uberkarl {
         // attaches to this exact path rather than deriving a fresh one (DiVoid #7571/#7572).
         ResourcePath? pendingOverwriteResource;
 
+        ChoiceList choiceList;
         OnScreenKeyboard keyboard;
-
-        Label titleLabel;
-        Button closeButton;
-        ScrollContainer scroll;
-        VBoxContainer listBox;
-        Label emptyLabel;
 
         /// <summary>Raised in load mode when a resource is chosen: the package it lives in and its in-package path.</summary>
         public event Action<PackageHandle, ResourcePath> ResourceChosen;
@@ -70,59 +62,12 @@ namespace Uberkarl {
         public event Action Cancelled;
 
         /// <summary>True while the browser is summoned.</summary>
-        public bool IsOpen => Visible;
+        public bool IsOpen => choiceList.IsOpen;
 
-        public override void _Ready() {
-            SetAnchorsPreset(LayoutPreset.FullRect);
-            MouseFilter = MouseFilterEnum.Stop;
-            FocusMode = FocusModeEnum.All;
-            Visible = false;
-            ZIndex = 100;
-            BuildLayout();
-        }
-
-        void BuildLayout() {
-            ColorRect backdrop = new ColorRect { Color = new Color(0.05f, 0.06f, 0.08f, 0.75f) };
-            backdrop.SetAnchorsPreset(LayoutPreset.FullRect);
-            backdrop.MouseFilter = MouseFilterEnum.Stop;
-            AddChild(backdrop);
-
-            PanelContainer panel = new PanelContainer { CustomMinimumSize = new Vector2(480f, 420f) };
-            panel.SetAnchorsPreset(LayoutPreset.Center);
-            AddChild(panel);
-
-            VBoxContainer root = new VBoxContainer();
-            panel.AddChild(root);
-
-            HBoxContainer header = new HBoxContainer();
-            root.AddChild(header);
-
-            titleLabel = new Label { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-            titleLabel.AddThemeColorOverride("font_color", EditorTheme.Accent);
-            header.AddChild(titleLabel);
-
-            // A mouse-clickable mirror of ui_cancel's back/close semantics — gamepad/keyboard already have
-            // B/Esc, but a file-browser needs an on-screen affordance for a mouse-only user too.
-            closeButton = new Button { Text = "✕ Close" };
-            closeButton.Pressed += HandleCancel;
-            NodePath self = new NodePath(".");
-            closeButton.FocusNeighborLeft = self;
-            closeButton.FocusNeighborRight = self;
-            closeButton.FocusNeighborTop = self;
-            closeButton.FocusNeighborBottom = self;
-            header.AddChild(closeButton);
-
-            root.AddChild(new HSeparator());
-
-            scroll = new ScrollContainer { CustomMinimumSize = new Vector2(460f, 340f) };
-            root.AddChild(scroll);
-
-            listBox = new VBoxContainer();
-            scroll.AddChild(listBox);
-
-            emptyLabel = new Label { Visible = false };
-            emptyLabel.AddThemeColorOverride("font_color", EditorTheme.TextDim);
-            root.AddChild(emptyLabel);
+        /// <summary>Attaches the shared <see cref="ChoiceList"/> every step of this browser renders through.</summary>
+        public void AttachChoiceList(ChoiceList list) {
+            choiceList = list;
+            choiceList.DismissSuppressed = () => keyboard != null && keyboard.IsOpen;
         }
 
         /// <summary>
@@ -136,7 +81,6 @@ namespace Uberkarl {
         public void SummonLoad(IPackageSource packageSource) {
             source = packageSource;
             mode = Mode.Load;
-            Visible = true;
             packages = source.ListPackages();
             ShowPackages();
         }
@@ -150,7 +94,6 @@ namespace Uberkarl {
             source = packageSource;
             mode = Mode.Save;
             currentLevelName = currentName ?? string.Empty;
-            Visible = true;
             packages = source.ListPackages();
             ShowPackages();
         }
@@ -159,24 +102,23 @@ namespace Uberkarl {
 
         void ShowPackages() {
             step = Step.Packages;
-            closeButton.Text = "✕ Close";
-            titleLabel.Text = mode == Mode.Load ? "Open Package" : "Save To Package";
             pendingOverwriteResource = null;
 
             int newRowCount = mode == Mode.Save ? 1 : 0;
+            string title = mode == Mode.Load ? "Open Package" : "Save To Package";
             string empty = mode == Mode.Load
                 ? "No packages in the content folder."
                 : "No packages yet — choose “+ New package…” to create one.";
-            PopulateList(packages.Count + newRowCount, PackageRow, empty, OnPackageRowChosen);
+            choiceList.Open(title, "✕ Close", packages.Count + newRowCount, PackageRow, empty, OnPackageRowChosen, HandleCancel);
         }
 
-        RowText PackageRow(int index) {
+        ChoiceListRow PackageRow(int index) {
             if (mode == Mode.Save && index == 0)
-                return new RowText("+ New package…", string.Empty);
+                return new ChoiceListRow("+ New package…", string.Empty);
 
             PackageSummary summary = packages[mode == Mode.Save ? index - 1 : index];
             string itemWord = summary.ResourceCount == 1 ? "item" : "items";
-            return new RowText(summary.Name, $"v{summary.Version} · {summary.ResourceCount} {itemWord}");
+            return new ChoiceListRow(summary.Name, $"v{summary.Version} · {summary.ResourceCount} {itemWord}");
         }
 
         void OnPackageRowChosen(int index) {
@@ -224,14 +166,12 @@ namespace Uberkarl {
             resources = levels;
 
             step = Step.Resources;
-            closeButton.Text = "← Back";
-            titleLabel.Text = $"{selectedPackageName} — Select Level";
-            PopulateList(resources.Count, ResourceRow, "No loadable resources in this package.", OnResourceChosen);
+            choiceList.Open($"{selectedPackageName} — Select Level", "← Back", resources.Count, ResourceRow, "No loadable resources in this package.", OnResourceChosen, HandleCancel);
         }
 
-        RowText ResourceRow(int index) {
+        ChoiceListRow ResourceRow(int index) {
             ResourceSummary summary = resources[index];
-            return new RowText(summary.DisplayName, FormatBytes(summary.ByteLength));
+            return new ChoiceListRow(summary.DisplayName, FormatBytes(summary.ByteLength));
         }
 
         void OnResourceChosen(int index) {
@@ -271,19 +211,17 @@ namespace Uberkarl {
             resources = levels;
 
             step = Step.SaveResources;
-            closeButton.Text = "← Back";
-            titleLabel.Text = $"{selectedPackageName} — Save Level";
             // Unlike the load-mode resources step, "+ New level…" is always offered — an empty package is
             // a perfectly normal save target, never a dead end.
-            PopulateList(resources.Count + 1, SaveResourceRow, string.Empty, OnSaveResourceChosen);
+            choiceList.Open($"{selectedPackageName} — Save Level", "← Back", resources.Count + 1, SaveResourceRow, string.Empty, OnSaveResourceChosen, HandleCancel);
         }
 
-        RowText SaveResourceRow(int index) {
+        ChoiceListRow SaveResourceRow(int index) {
             if (index == 0)
-                return new RowText("+ New level…", string.Empty);
+                return new ChoiceListRow("+ New level…", string.Empty);
 
             ResourceSummary summary = resources[index - 1];
-            return new RowText(summary.DisplayName, FormatBytes(summary.ByteLength));
+            return new ChoiceListRow(summary.DisplayName, FormatBytes(summary.ByteLength));
         }
 
         void OnSaveResourceChosen(int index) {
@@ -335,16 +273,15 @@ namespace Uberkarl {
 
         void ShowConfirmOverwrite() {
             step = Step.ConfirmOverwrite;
-            closeButton.Text = "← Back";
-            titleLabel.Text = confirmKind == ConfirmKind.NewPackageNameCollision
+            string title = confirmKind == ConfirmKind.NewPackageNameCollision
                 ? $"A package named “{collisionName}” already exists."
                 : $"Overwrite the level “{collisionName}”?";
-            PopulateList(2, ConfirmOverwriteRow, string.Empty, OnConfirmOverwriteChosen);
+            choiceList.Open(title, "← Back", 2, ConfirmOverwriteRow, string.Empty, OnConfirmOverwriteChosen, HandleCancel);
         }
 
-        static RowText ConfirmOverwriteRow(int index) => index == 0
-            ? new RowText("Overwrite it", string.Empty)
-            : new RowText("Choose a different name", string.Empty);
+        static ChoiceListRow ConfirmOverwriteRow(int index) => index == 0
+            ? new ChoiceListRow("Overwrite it", string.Empty)
+            : new ChoiceListRow("Choose a different name", string.Empty);
 
         void OnConfirmOverwriteChosen(int index) {
             if (index == 0) {
@@ -386,74 +323,12 @@ namespace Uberkarl {
             SaveRequested?.Invoke(target);
         }
 
-        // ----- shared list rendering -----
-
-        readonly record struct RowText(string Primary, string Secondary);
-
-        void PopulateList(int count, Func<int, RowText> rowAt, string emptyMessage, Action<int> onChosen) {
-            foreach (Node child in listBox.GetChildren())
-                child.QueueFree();
-
-            emptyLabel.Visible = count == 0;
-            emptyLabel.Text = emptyMessage;
-            scroll.Visible = count > 0;
-
-            List<Button> buttons = new List<Button>(count);
-            for (int i = 0; i < count; i++) {
-                int index = i;
-                RowText text = rowAt(i);
-
-                HBoxContainer row = new HBoxContainer();
-                listBox.AddChild(row);
-
-                Button button = new Button {
-                    Text = text.Primary,
-                    SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                    Alignment = HorizontalAlignment.Left,
-                };
-                button.Pressed += () => onChosen(index);
-                row.AddChild(button);
-                buttons.Add(button);
-
-                if (!string.IsNullOrEmpty(text.Secondary)) {
-                    Label meta = new Label { Text = text.Secondary, VerticalAlignment = VerticalAlignment.Center };
-                    meta.AddThemeColorOverride("font_color", EditorTheme.TextDim);
-                    row.AddChild(meta);
-                }
-            }
-            ContainListFocus(buttons);
-
-            if (buttons.Count > 0)
-                buttons[0].CallDeferred(Control.MethodName.GrabFocus);
-            else
-                CallDeferred(Control.MethodName.GrabFocus);
-        }
-
-        // Vertical focus chain, ends and every horizontal side pinned to self — the same technique
-        // LevelEditor.ContainToolbarFocus uses to stop a stick/D-pad aim from bouncing focus off the
-        // list onto whatever sits underneath the browser.
-        static void ContainListFocus(List<Button> buttons) {
-            NodePath self = new NodePath(".");
-            for (int i = 0; i < buttons.Count; i++) {
-                Button button = buttons[i];
-                button.FocusNeighborLeft = self;
-                button.FocusNeighborRight = self;
-                button.FocusNeighborTop = i > 0 ? button.GetPathTo(buttons[i - 1]) : self;
-                button.FocusNeighborBottom = i < buttons.Count - 1 ? button.GetPathTo(buttons[i + 1]) : self;
-                button.FocusNext = self;
-                button.FocusPrevious = self;
-            }
-        }
-
         // ----- back-navigation / close -----
 
-        // The step this browser is on decides what "cancel" (ui_cancel, or the header's Back/Close button)
-        // means: one level back out of Resources/SaveResources/ConfirmOverwrite into Packages (a resource-
-        // overwrite confirm steps back to the save-resources list instead, mirroring its "no" branch
-        // above), or a full close from Packages itself. The level-name/new-package-name keyboard prompts
-        // are a separate overlay (OnScreenKeyboard) that owns its own cancel — this browser's step never
-        // changes while the keyboard is open, so its own cancel handling below is guarded on the keyboard
-        // being closed.
+        // The step this browser is on decides what "cancel" (ui_cancel or the header's Back/Close button,
+        // both routed here by ChoiceList) means: one level back out of Resources/SaveResources/
+        // ConfirmOverwrite into Packages (a resource-overwrite confirm steps back to the save-resources
+        // list instead, mirroring its "no" branch above), or a full close from Packages itself.
         void HandleCancel() {
             switch (step) {
                 case Step.Resources:
@@ -474,32 +349,9 @@ namespace Uberkarl {
         }
 
         void Close() {
-            Visible = false;
+            choiceList.Hide();
             pendingNewPackageName = null;
             pendingOverwriteResource = null;
-        }
-
-        public override void _GuiInput(InputEvent @event) {
-            if (!Visible || (keyboard != null && keyboard.IsOpen))
-                return;
-
-            if (@event.IsActionPressed("ui_cancel")) {
-                AcceptEvent();
-                HandleCancel();
-            }
-        }
-
-        // Belt-and-suspenders close path, exactly as LayerManagerPanel/OnScreenKeyboard: a row Button (not
-        // the browser) almost always holds focus, so ui_cancel pressed there never reaches _GuiInput above
-        // — it falls through to unhandled input, where this catches it instead.
-        public override void _UnhandledInput(InputEvent @event) {
-            if (!Visible || @event.IsEcho() || (keyboard != null && keyboard.IsOpen))
-                return;
-
-            if (@event.IsActionPressed("ui_cancel")) {
-                HandleCancel();
-                GetViewport().SetInputAsHandled();
-            }
         }
     }
 }
