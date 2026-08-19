@@ -19,6 +19,8 @@ namespace Uberkarl {
         const float WedgeRadius = 96f;   // distance from centre to each wedge chip
         const float ChipRadius = 30f;    // radius of a wedge chip
         const float IconSize = 34f;
+        const float HitInnerRadius = ChipRadius;
+        const float HitOuterRadius = WedgeRadius + ChipRadius;
 
         RadialMenuModel model;
         Func<int, Texture2D> iconProvider;
@@ -28,7 +30,7 @@ namespace Uberkarl {
         /// <summary>Raised when a wedge is committed (aim released/confirmed over a wedge).</summary>
         public event Action<MenuOutcome> Chosen;
 
-        /// <summary>Raised when the menu is dismissed without a selection (released on the neutral centre, or cancelled).</summary>
+        /// <summary>Raised when the menu is dismissed without a selection (an explicit cancel, or a commit with nothing highlighted).</summary>
         public event Action Cancelled;
 
         /// <summary>True while the menu is popped in.</summary>
@@ -66,16 +68,25 @@ namespace Uberkarl {
             QueueRedraw();
         }
 
-        /// <summary>Feed the current aim direction (screen convention: +X right, +Y down). Updates the
-        /// highlighted wedge; a direction inside the neutral centre highlights nothing.</summary>
+        /// <summary>Feed the current directional aim (stick/D-pad/arrows; screen convention +X right, +Y down). A direction inside the neutral centre highlights nothing.</summary>
         public void SetAim(Vector2 direction) {
             if (model == null)
                 return;
-            int next = model.IndexAt(direction.X, direction.Y);
-            if (next != highlighted) {
-                highlighted = next;
-                QueueRedraw();
-            }
+            ApplyHighlight(model.IndexAt(direction.X, direction.Y));
+        }
+
+        /// <summary>Feed the current mouse offset from the menu centre, using the positional (pixel-radius) hit test.</summary>
+        public void SetPositionalAim(Vector2 offset) {
+            if (model == null)
+                return;
+            ApplyHighlight(RadialGeometry.PositionalIndexAt(offset.X, offset.Y, model.Count, HitInnerRadius, HitOuterRadius));
+        }
+
+        /// <summary>Steps the highlighted wedge by one position, wrapping — the latched menu's discrete directional stepping.</summary>
+        public void StepHighlight(int direction) {
+            if (model == null || model.Count == 0)
+                return;
+            ApplyHighlight(RadialHighlight.Step(highlighted, model.Count, direction));
         }
 
         /// <summary>Commit the currently highlighted wedge (or dismiss if the aim is on the neutral centre).</summary>
@@ -105,9 +116,28 @@ namespace Uberkarl {
             highlighted = -1;
         }
 
+        void ApplyHighlight(int next) {
+            if (next != highlighted) {
+                highlighted = next;
+                QueueRedraw();
+            }
+        }
+
         public override void _GuiInput(InputEvent @event) {
             if (!Visible)
                 return;
+
+            if (@event is InputEventMouseMotion motion) {
+                HoverAt(motion.Position);
+                return;
+            }
+
+            if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } click) {
+                HoverAt(click.Position);
+                Commit();
+                AcceptEvent();
+                return;
+            }
 
             // Explicit confirm (gamepad A / Enter-Space via the paint action) and cancel (Esc / erase action).
             if (@event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Paint)) || @event.IsActionPressed("ui_accept")) {
@@ -117,6 +147,14 @@ namespace Uberkarl {
                 Cancel();
                 AcceptEvent();
             }
+        }
+
+        /// <summary>Updates the highlighted wedge from a mouse position local to this control, using the positional (pixel-radius) hit test — the latched menu's mouse hover.</summary>
+        void HoverAt(Vector2 localPosition) {
+            if (model == null)
+                return;
+            Vector2 offset = localPosition - (centerGlobal - GlobalPosition);
+            SetPositionalAim(offset);
         }
 
         public override void _Draw() {
@@ -133,7 +171,6 @@ namespace Uberkarl {
             Font font = GetThemeDefaultFont();
             int fontSize = GetThemeDefaultFontSize();
 
-            // Centre hub: the menu title, and the current pick (or a cancel hint on the neutral centre).
             DrawString(font, center + new Vector2(-WedgeRadius, -ChipRadius - 14f), model.Title,
                 HorizontalAlignment.Center, WedgeRadius * 2f, fontSize, new Color(1f, 0.85f, 0.2f));
             string hub = highlighted >= 0 && highlighted < count ? model.Items[highlighted].Label : "release to cancel";

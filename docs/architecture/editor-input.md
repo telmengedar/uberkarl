@@ -249,6 +249,12 @@ The chosen pop-in paradigm (§13.1) is the **next** increment and is intentional
 
 ## 13. The Menu-Paradigm Decision (for Toni to ratify) — analysis, mockups, recommendation
 
+> **Amended by `editor-menu-surfaces.md` (DiVoid #8525, U1, and its 2026-08-19 addendum):** a menu can now
+> also open **latched** — reached by a quick *tap* of its trigger rather than a hold, so mouse hover/click
+> and keyboard/gamepad discrete stepping can operate it without the trigger held. A held trigger's release
+> keeps commit/cancel exactly as below — that part is unchanged. See `editor-menu-surfaces.md` §6 (and its
+> addendum) for the mechanism.
+
 Toni named two shapes and one open question. Here they are analysed, with mockups, a recommendation, and
 the answer to *how the pop-in paradigm maps to mouse + keyboard*.
 
@@ -271,9 +277,15 @@ maximising edit area. On a gamepad this is the console-native idiom (a radial/qu
 
 | | Open the menu | Move within it | Commit | Dismiss |
 |---|---|---|---|---|
-| **Gamepad** | hold LB (tiles) / RB (layers) / Start (file) | right stick / D-pad to a wedge | release the hold, or A | release / B |
-| **Keyboard** | hold Tab (tiles), Shift+Tab (layers) — or a key per menu | arrow keys / number keys | release, or Enter | release / Esc |
-| **Mouse** | **right-click** (radial context menu at the pointer), or press-and-hold left | move the pointer to a wedge | release / left-click | release outside / Esc |
+| **Gamepad** | hold LB (tiles) / RB (layers) / Start (file), or a quick tap to open **latched** | right stick / D-pad to a wedge (held), or D-pad/arrows to step (latched) | release with a wedge aimed, or A | B — release on the neutral centre, exactly as shipped |
+| **Keyboard** | hold Tab (tiles), Shift+Tab (layers) — or a key per menu, or a quick tap to open **latched** | arrow keys / number keys (held), or arrows to step (latched) | release with a wedge aimed, or Enter | Esc — release on the neutral centre, exactly as shipped |
+| **Mouse** | **right-click** (radial context menu at the pointer); reaches a latched wheel via a keyboard tap | move the pointer to a wedge (held or latched — one positional hit test in both phases) | release with a wedge aimed / left-click | release on the neutral centre, restored / left-click outside the wheel / Esc |
+
+**Superseded by `editor-menu-surfaces.md` §6 (as corrected by its addendum):** a trigger tapped rather than
+held opens its menu already **latched** — no longer tied to the trigger, operable by mouse hover/click or
+discrete keyboard/gamepad stepping. A held trigger's release is unchanged: commits over an aimed wedge,
+cancels on the neutral centre. Dismissal of a latched menu is always an explicit cancel (Esc / pad B /
+click outside the wheel).
 
 Plus an **auto-hide toolbar** that **edge-reveals** on mouse (push the pointer to the top edge → the
 toolbar slides in) and toggles on a button for gamepad/keyboard — so "whole area is canvas" holds for all
