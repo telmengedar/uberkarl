@@ -46,23 +46,43 @@ public static class MenuCatalog
         return new MenuModel("Layers", items);
     }
 
-    /// <summary>The Actions menu: file ops, undo/redo, tool toggle, and the panel-opening commands. Takes no content — fixed in code.</summary>
+    /// <summary>The Actions menu: file ops, undo/redo, tool toggle, and a trailing "More…" that opens <see cref="BuildActionsOverflowMenu"/>. Takes no content — fixed in code, and fits <see cref="RadialCap"/>.</summary>
     public static MenuModel BuildActionsMenu()
     {
         MenuItem[] items =
         {
-            new MenuItem("New", MenuOutcome.FileOp(EditorFileCommand.New)),
             new MenuItem("Open", MenuOutcome.FileOp(EditorFileCommand.Open)),
             new MenuItem("Save", MenuOutcome.FileOp(EditorFileCommand.Save)),
-            new MenuItem("Save As", MenuOutcome.FileOp(EditorFileCommand.SaveAs)),
             new MenuItem("Undo", MenuOutcome.Invoke(EditorAction.Undo)),
             new MenuItem("Redo", MenuOutcome.Invoke(EditorAction.Redo)),
             new MenuItem("Tool", MenuOutcome.Invoke(EditorAction.ToggleTool)),
             new MenuItem("Play", MenuOutcome.Invoke(EditorAction.Playtest)),
+            new MenuItem("More…", MenuOutcome.OpenActionsOverflow()),
+        };
+        return new MenuModel("Actions", items);
+    }
+
+    /// <summary>The Actions overflow list: New, Save As, Resize…, Edit Tileset…, Bind Tileset… — reached through <see cref="BuildActionsMenu"/>'s "More…" entry and rendered on the list surface.</summary>
+    public static MenuModel BuildActionsOverflowMenu()
+    {
+        MenuItem[] items =
+        {
+            new MenuItem("New", MenuOutcome.FileOp(EditorFileCommand.New)),
+            new MenuItem("Save As", MenuOutcome.FileOp(EditorFileCommand.SaveAs)),
             new MenuItem("Resize…", MenuOutcome.OpenResizePanel()),
             new MenuItem("Edit Tileset…", MenuOutcome.OpenTileSetEditor()),
             new MenuItem("Bind Tileset…", MenuOutcome.OpenTileSetBindPanel()),
         };
-        return new MenuModel("Actions", items);
+        return new MenuModel("More", items);
+    }
+
+    /// <summary>The radial surface's entry-point guard: throws rather than rendering or truncating <paramref name="menu"/> if it carries more than <see cref="RadialCap"/> entries.</summary>
+    /// <exception cref="System.ArgumentException"><paramref name="menu"/> has more than <see cref="RadialCap"/> entries.</exception>
+    public static void EnforceRadialCap(MenuModel menu)
+    {
+        if (menu.Count > RadialCap)
+            throw new System.ArgumentException(
+                $"'{menu.Title}' has {menu.Count} entries, exceeding MenuCatalog.RadialCap ({RadialCap}). The radial surface refuses to render it.",
+                nameof(menu));
     }
 }

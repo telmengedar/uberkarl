@@ -172,26 +172,57 @@ public sealed class MenuCatalogTests
     }
 
     [Test]
-    [Description("QA #8616 W8: two calls to a pure parameterless builder agreeing with each other cannot fail for any deterministic implementation -- it survived M11 (Undo/Redo outcome transposition) at 462/462 green. Pins each of the eleven (Label, Outcome) pairs against its real intent, in order, so a rebind, drop, or reorder goes red.")]
+    [Description("QA #8616 W8: pins each surviving (Label, Outcome) pair in order, so a rebind, drop or reorder goes red -- a builder compared against itself cannot.")]
     public void BuildActionsMenu_LabelsAndOutcomes_MatchThePinnedMapping_InOrder()
     {
         (string Label, MenuOutcome Outcome)[] expected =
         {
-            ("New", MenuOutcome.FileOp(EditorFileCommand.New)),
             ("Open", MenuOutcome.FileOp(EditorFileCommand.Open)),
             ("Save", MenuOutcome.FileOp(EditorFileCommand.Save)),
-            ("Save As", MenuOutcome.FileOp(EditorFileCommand.SaveAs)),
             ("Undo", MenuOutcome.Invoke(EditorAction.Undo)),
             ("Redo", MenuOutcome.Invoke(EditorAction.Redo)),
             ("Tool", MenuOutcome.Invoke(EditorAction.ToggleTool)),
             ("Play", MenuOutcome.Invoke(EditorAction.Playtest)),
+            ("More…", MenuOutcome.OpenActionsOverflow()),
+        };
+
+        MenuModel menu = MenuCatalog.BuildActionsMenu();
+
+        Assert.That(menu.Title, Is.EqualTo("Actions"), "title is displayed data, not derivable from the entry count");
+        Assert.That(menu.Count, Is.EqualTo(expected.Length), "entry count");
+
+        // QA #8635 CF-1: the outcome-equality loop below derives its expected value from the same factory
+        // the production code calls, so a mutation inside MenuOutcome.OpenActionsOverflow() moves both sides
+        // together and cannot fail it. Pin the kind literally, independent of that factory.
+        Assert.That(menu.Items[6].Outcome.Kind, Is.EqualTo(MenuOutcomeKind.OpenActionsOverflow),
+            "the More... wedge must route to the overflow, not merely be data-equal to whatever the factory returns");
+
+        Assert.Multiple(() =>
+        {
+            for (int i = 0; i < expected.Length; i++)
+            {
+                Assert.That(menu.Items[i].Label, Is.EqualTo(expected[i].Label), $"entry {i} label");
+                Assert.That(menu.Items[i].Outcome, Is.EqualTo(expected[i].Outcome), $"entry {i} outcome");
+            }
+        });
+    }
+
+    [Test]
+    [Description("DiVoid #8525 §11 U5 / #8628: the entries the radial trim moved off the wheel, reached through Actions' \"More...\" entry and rendered on the list surface so none of them becomes unreachable on a gamepad with no keyboard and no mouse -- only the gesture count changes. Pins each (Label, Outcome) pair against the pre-trim BuildActionsMenu entries they were moved from, in order, so a rebind, drop, or reorder goes red.")]
+    public void BuildActionsOverflowMenu_LabelsAndOutcomes_MatchThePinnedMapping_InOrder()
+    {
+        (string Label, MenuOutcome Outcome)[] expected =
+        {
+            ("New", MenuOutcome.FileOp(EditorFileCommand.New)),
+            ("Save As", MenuOutcome.FileOp(EditorFileCommand.SaveAs)),
             ("Resize…", MenuOutcome.OpenResizePanel()),
             ("Edit Tileset…", MenuOutcome.OpenTileSetEditor()),
             ("Bind Tileset…", MenuOutcome.OpenTileSetBindPanel()),
         };
 
-        MenuModel menu = MenuCatalog.BuildActionsMenu();
+        MenuModel menu = MenuCatalog.BuildActionsOverflowMenu();
 
+        Assert.That(menu.Title, Is.EqualTo("More"), "title is displayed data, not derivable from the entry count");
         Assert.That(menu.Count, Is.EqualTo(expected.Length), "entry count");
 
         Assert.Multiple(() =>
@@ -205,13 +236,57 @@ public sealed class MenuCatalogTests
     }
 
     [Test]
-    [Description("DiVoid #8525 §8/§11: U5 must trim Actions to fit MenuCatalog.RadialCap (7 entries -- Open, Save, Undo, Redo, Tool, Play, More...). This is a tripwire, not the cap check itself: it pins today's known-over-cap count (11) so U5 cannot land without touching this test. The moment BuildActionsMenu's entry count changes, the pin below goes red -- its author must then flip this test to assert Is.LessThanOrEqualTo(MenuCatalog.RadialCap) and rename it off '_StillExceeds'.")]
-    public void BuildActionsMenu_StillExceedsTheRadialCap_UntilU5Trims()
+    [Description("DiVoid #8628: Actions must fit MenuCatalog.RadialCap -- a regrowth past 8 is caught here as well as by EnforceRadialCap.")]
+    public void BuildActionsMenu_FitsTheRadialCap_AfterU5Trim()
     {
         MenuModel menu = MenuCatalog.BuildActionsMenu();
 
-        Assert.That(menu.Count, Is.EqualTo(11), "pinned pre-U5 entry count -- if this just went red, read this test's [Description]");
-        Assert.That(menu.Count, Is.GreaterThan(MenuCatalog.RadialCap),
-            $"Actions ({menu.Count} entries) no longer exceeds the radial cap ({MenuCatalog.RadialCap}) -- U5's trim has landed.");
+        Assert.That(menu.Count, Is.EqualTo(7), "pinned post-U5 entry count -- if this just went red, read this test's [Description]");
+        Assert.That(menu.Count, Is.LessThanOrEqualTo(MenuCatalog.RadialCap),
+            $"Actions ({menu.Count} entries) must fit the radial cap ({MenuCatalog.RadialCap}).");
+    }
+
+    [Test]
+    [Description("DiVoid #8628: the cap refusal itself needs a guard, pinned at its boundary. Eight entries -- exactly MenuCatalog.RadialCap -- is the largest menu the radial accepts, and must not be refused.")]
+    public void EnforceRadialCap_EightEntries_DoesNotThrow()
+    {
+        MenuItem[] eightItems =
+        {
+            new MenuItem("1", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("2", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("3", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("4", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("5", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("6", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("7", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("8", MenuOutcome.Invoke(EditorAction.Undo)),
+        };
+        MenuModel menu = new MenuModel("Eight", eightItems);
+
+        Assert.That(menu.Count, Is.EqualTo(MenuCatalog.RadialCap), "test fixture sanity: exactly at the cap");
+        Assert.DoesNotThrow(() => MenuCatalog.EnforceRadialCap(menu));
+    }
+
+    [Test]
+    [Description("DiVoid #8628: nine entries -- one past MenuCatalog.RadialCap -- is the smallest menu the radial must refuse, and must be refused loudly (a thrown exception) rather than silently truncated or rendered.")]
+    public void EnforceRadialCap_NineEntries_ThrowsRatherThanSilentlyTruncating()
+    {
+        MenuItem[] nineItems =
+        {
+            new MenuItem("1", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("2", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("3", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("4", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("5", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("6", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("7", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("8", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("9", MenuOutcome.Invoke(EditorAction.Undo)),
+        };
+        MenuModel menu = new MenuModel("Nine", nineItems);
+
+        var exception = Assert.Throws<System.ArgumentException>(() => MenuCatalog.EnforceRadialCap(menu));
+        Assert.That(exception!.Message, Does.Contain("9"));
+        Assert.That(exception.Message, Does.Contain("Nine"));
     }
 }
