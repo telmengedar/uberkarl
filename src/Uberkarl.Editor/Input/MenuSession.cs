@@ -25,8 +25,8 @@ public enum MenuSessionEffect
     /// <summary>Leave the menu open and stop watching its opening trigger.</summary>
     Latch,
 
-    /// <summary>Resolve the current highlight — commit if a wedge is highlighted, cancel otherwise — and close the menu.</summary>
-    Commit,
+    /// <summary>The session has closed; resolve the surface's current intent (commit or cancel) and tear it down.</summary>
+    Close,
 }
 
 /// <summary>The state and effect returned by one <see cref="MenuSession.Step"/> call.</summary>
@@ -66,12 +66,18 @@ public sealed class MenuSession
                     return Transition(MenuSessionState.Transient, MenuSessionEffect.None);
                 return releasedAsTap
                     ? Transition(MenuSessionState.Latched, MenuSessionEffect.Latch)
-                    : Transition(MenuSessionState.Closed, MenuSessionEffect.Commit);
+                    : Transition(MenuSessionState.Closed, MenuSessionEffect.Close);
 
             default:
                 return Transition(MenuSessionState.Latched, MenuSessionEffect.None);
         }
     }
+
+    /// <summary>Closes the session from a surface-driven interaction rather than a trigger release; a no-op once already closed.</summary>
+    public MenuSessionTransition Resolve() =>
+        State == MenuSessionState.Closed
+            ? Transition(MenuSessionState.Closed, MenuSessionEffect.None)
+            : Transition(MenuSessionState.Closed, MenuSessionEffect.Close);
 
     /// <summary>Forces the session back to <see cref="MenuSessionState.Closed"/>.</summary>
     public void Reset() => State = MenuSessionState.Closed;

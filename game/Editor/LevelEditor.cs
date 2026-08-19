@@ -206,12 +206,18 @@ namespace Uberkarl {
 
         /// <summary>Advances the open menu by one frame: continuous aim while Transient, discrete stepping once Latched.</summary>
         void StepOpenMenu() {
+            bool cancelRequested = popIn.ConsumeCancelRequest();
+            bool resolveRequested = popIn.ConsumeResolveRequest();
+            bool resolving = cancelRequested || resolveRequested;
+
             if (menuSession.State == MenuSessionState.Transient) {
                 if (activeTrigger == Trigger.Context)
                     popIn.SetPositionalAim(GetViewport().GetMousePosition() - menuCenterGlobal);
                 else
                     popIn.SetAim(CurrentAim());
-            } else {
+            } else if (!resolving) {
+                // Skip this frame's discrete step when a resolve/cancel already landed: stepping first would
+                // move the highlight between the click and the read, committing a wedge the user never aimed at.
                 StepLatchedHighlight();
             }
 
@@ -221,10 +227,26 @@ namespace Uberkarl {
                 triggerReleased: trigger.JustReleased,
                 releasedAsTap: trigger.ReleasedAsTap);
 
-            if (transition.Effect == MenuSessionEffect.Commit)
-                popIn.Commit();
+            MenuCloseArbitration.Resolution resolution =
+                MenuCloseArbitration.Resolve(menuSession, transition, cancelRequested, resolveRequested);
+            transition = resolution.Transition;
+
+            if (transition.Effect == MenuSessionEffect.Close)
+                CloseMenu(resolution.ForceCancel);
             else if (transition.Effect == MenuSessionEffect.Latch)
                 PrimeLatchStepping();
+        }
+
+        /// <summary>Reads the highlighted outcome (unless forced to cancel), tears the popped-in menu down, dispatches the outcome if there is one, and resets menu-open state for the next trigger.</summary>
+        void CloseMenu(bool forceCancel) {
+            MenuOutcome? outcome = forceCancel ? null : popIn.CurrentOutcome;
+            popIn.Close();
+            if (outcome is { } chosen)
+                Dispatch(chosen);
+            activeTrigger = Trigger.None;
+            focusZone = FocusZone.Canvas;
+            menuSession.Reset();
+            canvas?.GrabFocus();
         }
 
         void StepLatchedHighlight() {
@@ -380,7 +402,6 @@ namespace Uberkarl {
                     SummonTileSetBindPanel();
                     break;
             }
-            EndMenu();
         }
 
         void SummonLayerManager() {
@@ -427,15 +448,6 @@ namespace Uberkarl {
                 case EditorFileCommand.Save: Save(); break;
                 case EditorFileCommand.SaveAs: SummonSaveBrowser(); break;
             }
-        }
-
-        void OnMenuCancelled() => EndMenu();
-
-        void EndMenu() {
-            activeTrigger = Trigger.None;
-            focusZone = FocusZone.Canvas;
-            menuSession.Reset();
-            canvas?.GrabFocus();
         }
 
         // ----- auto-hide / edge-reveal -----
@@ -508,8 +520,6 @@ namespace Uberkarl {
             AddChild(topBar);
 
             popIn = new PopInMenu();
-            popIn.Chosen += Dispatch;
-            popIn.Cancelled += OnMenuCancelled;
             AddChild(popIn);
 
             choiceList = new ChoiceList();

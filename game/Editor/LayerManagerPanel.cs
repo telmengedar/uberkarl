@@ -10,7 +10,7 @@ namespace Uberkarl {
     /// The summoned, gamepad-first layer-management surface: create, delete, reorder layers and edit
     /// each layer's <c>collision</c>/<c>scrollSpeed</c>/<c>repeat</c> properties. Reuses the
     /// <see cref="PackageBrowser"/> scaffolding verbatim — full-rect dim backdrop, centered panel,
-    /// grab-focus-on-summon (deferred, so it wins the race against <c>LevelEditor.EndMenu</c>'s
+    /// grab-focus-on-summon (deferred, so it wins the race against <c>LevelEditor.CloseMenu</c>'s
     /// synchronous canvas focus grab), <c>ui_cancel</c> closes. It holds no edit logic: every button
     /// calls the <see cref="LevelEditSession"/> directly (it holds the session reference, exactly as the
     /// browser holds its source), then rebuilds its own rows from the model's current truth and raises

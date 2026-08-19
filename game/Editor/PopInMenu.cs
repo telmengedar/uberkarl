@@ -5,14 +5,16 @@ using Uberkarl.Editor.Input;
 namespace Uberkarl {
 
     /// <summary>
-    /// The pop-in / hold-to-reveal radial menu overlay. It is a thin front-end: it takes a device-neutral
-    /// <see cref="RadialMenuModel"/> (built by the controller from current editor state), draws its wedges
-    /// around a centre point, tracks the live aim direction the controller feeds it (stick / arrows / mouse
-    /// offset), and on commit raises the highlighted wedge's <see cref="MenuOutcome"/> — which the
-    /// controller dispatches onto the editor's existing operations. It owns no edit logic and no selection
-    /// state; the geometry and the aim→outcome routing live in the engine-agnostic core it delegates to.
-    /// While open it holds focus so the canvas grid cursor stands still and the directional inputs steer the
-    /// wheel instead of the cursor.
+    /// The pop-in / hold-to-reveal radial menu overlay. It is a passive front-end: it takes a
+    /// device-neutral <see cref="RadialMenuModel"/> (built by the controller from current editor state),
+    /// draws its wedges around a centre point, and tracks the live aim direction the controller feeds it
+    /// (stick / arrows / mouse offset). A click, a confirm, or a cancel only records intent —
+    /// <see cref="ConsumeResolveRequest"/> / <see cref="ConsumeCancelRequest"/> / <see cref="CurrentOutcome"/>
+    /// — polled once a frame by the controller, which owns the session that decides whether that intent
+    /// actually closes the menu; only the controller ever calls <see cref="Close"/>. It owns no edit logic
+    /// and no selection state; the geometry and the aim→outcome routing live in the engine-agnostic core it
+    /// delegates to. While open it holds focus so the canvas grid cursor stands still and the directional
+    /// inputs steer the wheel instead of the cursor.
     /// </summary>
     public partial class PopInMenu : Control {
 
@@ -26,15 +28,14 @@ namespace Uberkarl {
         Func<int, Texture2D> iconProvider;
         Vector2 centerGlobal;
         int highlighted = -1;
-
-        /// <summary>Raised when a wedge is committed (aim released/confirmed over a wedge).</summary>
-        public event Action<MenuOutcome> Chosen;
-
-        /// <summary>Raised when the menu is dismissed without a selection (an explicit cancel, or a commit with nothing highlighted).</summary>
-        public event Action Cancelled;
+        bool resolveRequested;
+        bool cancelRequested;
 
         /// <summary>True while the menu is popped in.</summary>
         public bool IsOpen => Visible;
+
+        /// <summary>The outcome the currently highlighted wedge would commit, or null with nothing highlighted.</summary>
+        public MenuOutcome? CurrentOutcome => model?.OutcomeAt(highlighted);
 
         public override void _Ready() {
             SetAnchorsPreset(LayoutPreset.FullRect);
@@ -89,31 +90,28 @@ namespace Uberkarl {
             ApplyHighlight(RadialHighlight.Step(highlighted, model.Count, direction));
         }
 
-        /// <summary>Commit the currently highlighted wedge (or dismiss if the aim is on the neutral centre).</summary>
-        public void Commit() {
-            if (!Visible)
-                return;
-            MenuOutcome? outcome = model?.OutcomeAt(highlighted);
-            Close();
-            if (outcome is { } chosen)
-                Chosen?.Invoke(chosen);
-            else
-                Cancelled?.Invoke();
+        /// <summary>Reads and clears whether a commit-style interaction (left-click, gamepad A, Enter/Space) happened since the last poll.</summary>
+        public bool ConsumeResolveRequest() {
+            bool requested = resolveRequested;
+            resolveRequested = false;
+            return requested;
         }
 
-        /// <summary>Dismiss without committing.</summary>
-        public void Cancel() {
-            if (!Visible)
-                return;
-            Close();
-            Cancelled?.Invoke();
+        /// <summary>Reads and clears whether an explicit cancel (gamepad B, Esc, the erase action) happened since the last poll.</summary>
+        public bool ConsumeCancelRequest() {
+            bool requested = cancelRequested;
+            cancelRequested = false;
+            return requested;
         }
 
-        void Close() {
+        /// <summary>Tears the popped-in menu down; called only by the controller, once its session has decided to close.</summary>
+        internal void Close() {
             Visible = false;
             model = null;
             iconProvider = null;
             highlighted = -1;
+            resolveRequested = false;
+            cancelRequested = false;
         }
 
         void ApplyHighlight(int next) {
@@ -134,17 +132,17 @@ namespace Uberkarl {
 
             if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } click) {
                 HoverAt(click.Position);
-                Commit();
+                resolveRequested = true;
                 AcceptEvent();
                 return;
             }
 
             // Explicit confirm (gamepad A / Enter-Space via the paint action) and cancel (Esc / erase action).
             if (@event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Paint)) || @event.IsActionPressed("ui_accept")) {
-                Commit();
+                resolveRequested = true;
                 AcceptEvent();
             } else if (@event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Erase)) || @event.IsActionPressed("ui_cancel")) {
-                Cancel();
+                cancelRequested = true;
                 AcceptEvent();
             }
         }
