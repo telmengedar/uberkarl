@@ -166,7 +166,7 @@ namespace Uberkarl {
             contextTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenContextMenu)), d);
 
             if (activeTrigger != Trigger.None) {
-                if (activeTrigger != Trigger.Tiles)
+                if (activeTrigger != Trigger.Tiles && activeTrigger != Trigger.Layers)
                     StepOpenMenu();
                 return;
             }
@@ -200,7 +200,7 @@ namespace Uberkarl {
 
             Trigger trigger = TriggerOrder[attempt.TriggerIndex];
             OpenMenu(trigger);
-            if (attempt.LatchedImmediately && trigger != Trigger.Tiles)
+            if (attempt.LatchedImmediately && trigger != Trigger.Tiles && trigger != Trigger.Layers)
                 PrimeLatchStepping();
         }
 
@@ -210,7 +210,7 @@ namespace Uberkarl {
             _ => paletteTileIds.Count > 0 || paletteTerrainIds.Count > 0 || objectTypes.Count > 0,
         };
 
-        static bool TargetsListSurface(int triggerIndex) => TriggerOrder[triggerIndex] == Trigger.Tiles;
+        static bool TargetsListSurface(int triggerIndex) => TriggerOrder[triggerIndex] is Trigger.Tiles or Trigger.Layers;
 
         /// <summary>Advances the open menu by one frame: continuous aim while Transient, discrete stepping once Latched.</summary>
         void StepOpenMenu() {
@@ -226,11 +226,10 @@ namespace Uberkarl {
                 StepLatchedHighlight();
             }
 
-            HoldWatch trigger = WatchFor(activeTrigger);
             MenuSessionTransition transition = menuSession.Step(
                 openRequested: false,
-                triggerReleased: trigger.JustReleased,
-                releasedAsTap: trigger.ReleasedAsTap);
+                triggerReleased: actionsTrigger.JustReleased,
+                releasedAsTap: actionsTrigger.ReleasedAsTap);
 
             MenuCloseArbitration.Resolution resolution =
                 MenuCloseArbitration.Resolve(menuSession, transition, cancelRequested, resolveRequested);
@@ -298,12 +297,6 @@ namespace Uberkarl {
             (tileSetEditor != null && tileSetEditor.IsOpen) || (tileSetBindPanel != null && tileSetBindPanel.IsOpen) ||
             (textKeyboard != null && textKeyboard.IsOpen);
 
-        HoldWatch WatchFor(Trigger trigger) => trigger switch {
-            Trigger.Layers => layersTrigger,
-            Trigger.Actions => actionsTrigger,
-            _ => tilesTrigger,
-        };
-
         static string ActionName(EditorAction action) => EditorActionMap.NameOf(action);
 
         // ----- pop-in menus -----
@@ -318,8 +311,7 @@ namespace Uberkarl {
                     OpenTilesList();
                     break;
                 case Trigger.Layers:
-                    menuCenterGlobal = canvas.CursorGlobalCenter();
-                    popIn.Open(MenuCatalog.BuildLayersMenu(LayerNames()), menuCenterGlobal);
+                    OpenLayersList();
                     break;
                 case Trigger.Actions:
                     menuCenterGlobal = canvas.CursorGlobalCenter();
@@ -339,7 +331,7 @@ namespace Uberkarl {
             MenuModel menu = MenuCatalog.BuildTilesMenu(paletteTileIds, paletteTerrainLabels, objectTypeLabels);
             openListMenu = menu;
             choiceList.Open(menu.Title, "✕ Close", menu.Count, index => TilesListRow(menu, index),
-                "No tiles, terrains, or object types in this palette.", OnTilesListChosen, OnTilesListDismissed);
+                "No tiles, terrains, or object types in this palette.", OnListChosen, OnListDismissed);
         }
 
         ChoiceListRow TilesListRow(MenuModel menu, int index) {
@@ -348,9 +340,18 @@ namespace Uberkarl {
             return new ChoiceListRow(item.Label, string.Empty, icon);
         }
 
-        void OnTilesListChosen(int index) => CloseListMenu(openListMenu?.OutcomeAt(index));
+        void OpenLayersList() {
+            MenuModel menu = MenuCatalog.BuildLayersMenu(LayerNames());
+            openListMenu = menu;
+            choiceList.Open(menu.Title, "✕ Close", menu.Count, index => LayersListRow(menu, index),
+                string.Empty, OnListChosen, OnListDismissed);
+        }
 
-        void OnTilesListDismissed() => CloseListMenu(null);
+        ChoiceListRow LayersListRow(MenuModel menu, int index) => new ChoiceListRow(menu.Items[index].Label, string.Empty);
+
+        void OnListChosen(int index) => CloseListMenu(openListMenu?.OutcomeAt(index));
+
+        void OnListDismissed() => CloseListMenu(null);
 
         Texture2D TileIcon(int paletteIndex) =>
             paletteIndex >= 0 && paletteIndex < paletteTextures.Count ? paletteTextures[paletteIndex] : null;
