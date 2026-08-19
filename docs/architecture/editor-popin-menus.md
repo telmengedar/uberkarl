@@ -15,6 +15,15 @@ level editor MVP (`level-editor.md`, #7433). Source task: DiVoid #7441.
 > centre, exactly as shipped; a latched menu is dismissed only by committing or by explicit cancel. See
 > `editor-menu-surfaces.md` §6 (and its addendum) for the mechanism.
 
+> **Further amended by `editor-menu-surfaces.md` U3 (DiVoid #8525 §11):** the **Tiles radial** this
+> document describes throughout (§2, §5–8, the wedge count/index-arithmetic passages) is **removed**. Tile,
+> terrain, and object-type selection is now the scrollable **choice list** (extracted from `PackageBrowser`
+> in U2), fed by the same `MenuOutcome` routing this document specifies. The mouse **context** radial is
+> gone too — its right-mouse-hold trigger now opens the same Tiles list. `RadialMenuModel`/`RadialMenuItem`
+> are renamed `MenuModel`/`MenuItem` (still device-neutral pure data; still no Godot type). The **Layers**
+> and **Actions** radials, and everything else this document specifies, are unchanged as of U3. See
+> `editor-menu-surfaces.md` §4 (the surface rule), §8 (the menu catalog), and §11 U3.
+
 ---
 
 ## 1. Problem Statement

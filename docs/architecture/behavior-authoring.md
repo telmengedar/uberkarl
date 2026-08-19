@@ -4,6 +4,8 @@
 *Source task **DiVoid #8048** · master behavior design **#7704** (`docs/architecture/behavior-system.md`) · phase parent **#7703** · P2 **#7863** (shipped, PR #33/#34).*
 *Load-bearing standards: **Design Contracts #1136** (§1 KISS/DRY/YAGNI, §5 Pre-Design Checklist walked as §16 of this doc) and **Code Contracts #114 §0** (implementer-side principles; §4 comments — default NONE).*
 
+> **Amended by `editor-menu-surfaces.md` U3 (DiVoid #8525 §11, QA #8605 W5):** §7.1 below builds M4's context-menu entry point on `EditorAction.OpenContextMenu` and `Trigger.Context` "already exist[ing] in `LevelEditor`." U3 **deleted `Trigger.Context`** — the right-mouse-hold trigger now opens the Tiles list directly (`TriggerOrder` maps it to `Trigger.Tiles`), and there is no longer a context radial. `editor-menu-surfaces.md` §11 U3/§12 re-homes M4's entry surface to the list, not the radial. See §7.1's inline correction below.
+
 ---
 
 ## The ask, verbatim
@@ -225,7 +227,7 @@ Gamepad-first is not optional (#7440, #7466). Every element below reuses an exis
 
 Assigning behavior to a placed object requires selecting it. There is no selection concept on the canvas today — only `GridCursor`.
 
-**Decision: the cursor's cell is the selection.** `EditorAction.OpenContextMenu` and `Trigger.Context` already exist in `LevelEditor` (`LevelEditor.cs:29`, `EditorAction.cs:15`). The context radial, opened at the cursor, offers "Behavior…" when an object or trigger occupies that cell, and "Tile behavior…" for the tile beneath. **No selection model, no hit-testing layer, no new state.** This is the can-it-be-deleted check applied to a whole subsystem: the simple version covers the requirement.
+**Decision: the cursor's cell is the selection.** `EditorAction.OpenContextMenu` exists in `LevelEditor` (`EditorAction.cs:15`). **Correction (`editor-menu-surfaces.md` U3, see the amendment banner above): `Trigger.Context` and its radial no longer exist** — the right-mouse-hold trigger (the physical gesture this decision hangs off) now maps to `Trigger.Tiles` and opens the same Tiles **list** the Tiles trigger does. M4's entry point is therefore a "Behavior…" / "Tile behavior…" row offered by that list at the cursor's cell, not a wedge on a context radial; the surface differs, the decision itself — cursor cell as selection, no selection model, no hit-testing layer, no new state — is unaffected. This is the can-it-be-deleted check applied to a whole subsystem: the simple version covers the requirement.
 
 ### 7.2 Placement: a third paint mode
 

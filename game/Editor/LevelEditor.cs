@@ -14,8 +14,9 @@ namespace Uberkarl {
     /// <see cref="LevelEditSession"/> and translates UI intent into session calls — then reflects the
     /// returned <see cref="CellChange"/> on the canvas. The interaction paradigm is <b>pop-in / hold-to-
     /// reveal</b>: the whole area is the edit canvas, and the palette/layer/action surfaces appear only
-    /// while a trigger is held (a radial menu on gamepad/keyboard/mouse), while the toolbar and the
-    /// layer/tile panel auto-hide and edge-reveal for the mouse and reveal on focus for gamepad/keyboard.
+    /// while a trigger is held — a radial for the fixed-size Actions/Layers menus, a scrollable list for
+    /// the content-derived Tiles menu — while the toolbar and the layer/tile panel auto-hide and
+    /// edge-reveal for the mouse and reveal on focus for gamepad/keyboard.
     /// Every menu choice is routed as a device-neutral <see cref="MenuOutcome"/> onto the editor's existing
     /// operations — the pop-in is a new front-end, not new edit logic. All edit logic and the load/save
     /// round-trip live in the session and the <c>Uberkarl.Editor</c> library; this class is glue: input,
@@ -28,11 +29,10 @@ namespace Uberkarl {
         enum PaintMode { Tile, Terrain, Object }
 
         // Which pop-in menu, if any, is currently open. One at a time; the owning trigger commits on release.
-        enum Trigger { None, Tiles, Layers, Actions, Context }
+        enum Trigger { None, Tiles, Layers, Actions }
 
         // Where gamepad/keyboard focus rests, so the focus action can cycle canvas ⇄ toolbar and reveal the
-        // toolbar it lands on (the mouse reveals by edge-hover instead). The tile/layer side panel is gone —
-        // it duplicated the Tiles (LB) / Layers (RB) radials, which own tile/layer selection now.
+        // toolbar it lands on (the mouse reveals by edge-hover instead).
         enum FocusZone { Canvas, Toolbar }
 
         const string SamplePackagePath = "res://content/sample.pkg";
@@ -113,6 +113,7 @@ namespace Uberkarl {
 
         readonly MenuSession menuSession = new MenuSession();
         readonly AnalogStepGate latchStepGate = new AnalogStepGate();
+        MenuModel openListMenu;
 
         // True while a playtest run is live. Gates _Process/_UnhandledInput so none of the editor's own
         // hotkeys, radials, or auto-hide logic react to input meant for the player (e.g. Space is bound to
@@ -165,7 +166,8 @@ namespace Uberkarl {
             contextTrigger.Update(Godot.Input.IsActionPressed(ActionName(EditorAction.OpenContextMenu)), d);
 
             if (activeTrigger != Trigger.None) {
-                StepOpenMenu();
+                if (activeTrigger != Trigger.Tiles)
+                    StepOpenMenu();
                 return;
             }
 
@@ -177,11 +179,14 @@ namespace Uberkarl {
                 canvas.EraseAtGlobal(GetViewport().GetMousePosition());
         }
 
-        static readonly Trigger[] TriggerOrder = { Trigger.Tiles, Trigger.Layers, Trigger.Actions, Trigger.Context };
+        static readonly Trigger[] TriggerOrder = { Trigger.Tiles, Trigger.Layers, Trigger.Actions, Trigger.Tiles };
         const int ContextTriggerIndex = 3;
 
         /// <summary>Opens a menu from a long hold, or immediately latches it from a quick tap of Tiles/Layers/Actions.</summary>
         void TryOpenFromTriggers() {
+            if (AnyModalOpen())
+                return;
+
             MenuTriggerArbitration.Reading[] readings = {
                 new(tilesTrigger.JustCrossedHold, tilesTrigger.ReleasedAsTap),
                 new(layersTrigger.JustCrossedHold, layersTrigger.ReleasedAsTap),
@@ -189,12 +194,13 @@ namespace Uberkarl {
                 new(contextTrigger.JustCrossedHold, contextTrigger.ReleasedAsTap),
             };
             MenuTriggerArbitration.Attempt attempt =
-                MenuTriggerArbitration.TryOpen(CanOpenTrigger, readings, ContextTriggerIndex, session != null, menuSession);
+                MenuTriggerArbitration.TryOpen(CanOpenTrigger, readings, ContextTriggerIndex, TargetsListSurface, session != null, menuSession);
             if (!attempt.Opened)
                 return;
 
-            OpenMenu(TriggerOrder[attempt.TriggerIndex]);
-            if (attempt.LatchedImmediately)
+            Trigger trigger = TriggerOrder[attempt.TriggerIndex];
+            OpenMenu(trigger);
+            if (attempt.LatchedImmediately && trigger != Trigger.Tiles)
                 PrimeLatchStepping();
         }
 
@@ -204,6 +210,8 @@ namespace Uberkarl {
             _ => paletteTileIds.Count > 0 || paletteTerrainIds.Count > 0 || objectTypes.Count > 0,
         };
 
+        static bool TargetsListSurface(int triggerIndex) => TriggerOrder[triggerIndex] == Trigger.Tiles;
+
         /// <summary>Advances the open menu by one frame: continuous aim while Transient, discrete stepping once Latched.</summary>
         void StepOpenMenu() {
             bool cancelRequested = popIn.ConsumeCancelRequest();
@@ -211,10 +219,7 @@ namespace Uberkarl {
             bool resolving = cancelRequested || resolveRequested;
 
             if (menuSession.State == MenuSessionState.Transient) {
-                if (activeTrigger == Trigger.Context)
-                    popIn.SetPositionalAim(GetViewport().GetMousePosition() - menuCenterGlobal);
-                else
-                    popIn.SetAim(CurrentAim());
+                popIn.SetAim(CurrentAim());
             } else if (!resolving) {
                 // Skip this frame's discrete step when a resolve/cancel already landed: stepping first would
                 // move the highlight between the click and the read, committing a wedge the user never aimed at.
@@ -249,6 +254,18 @@ namespace Uberkarl {
             canvas?.GrabFocus();
         }
 
+        /// <summary>The choice list's counterpart to <see cref="CloseMenu"/>: resolves the session, tears the list down, dispatches the outcome if one was chosen, and resets menu-open state.</summary>
+        void CloseListMenu(MenuOutcome? outcome) {
+            menuSession.Resolve();
+            choiceList.Hide();
+            openListMenu = null;
+            if (outcome is { } chosen)
+                Dispatch(chosen);
+            activeTrigger = Trigger.None;
+            focusZone = FocusZone.Canvas;
+            canvas?.GrabFocus();
+        }
+
         void StepLatchedHighlight() {
             (bool negative, bool positive) = LatchDirectionPressed();
             int step = latchStepGate.Poll(negative, positive);
@@ -276,16 +293,14 @@ namespace Uberkarl {
         // Every summoned full-rect modal, in one place — the guard every input path (canvas cursor
         // capture, toolbar auto-hide, global hotkeys) needs so a modal always fully owns input while open.
         bool AnyModalOpen() =>
-            (popIn != null && popIn.IsOpen) || (packageBrowser != null && packageBrowser.IsOpen) ||
+            (popIn != null && popIn.IsOpen) || (choiceList != null && choiceList.IsOpen) ||
             (layerManager != null && layerManager.IsOpen) || (resizePanel != null && resizePanel.IsOpen) ||
             (tileSetEditor != null && tileSetEditor.IsOpen) || (tileSetBindPanel != null && tileSetBindPanel.IsOpen) ||
             (textKeyboard != null && textKeyboard.IsOpen);
 
         HoldWatch WatchFor(Trigger trigger) => trigger switch {
-            Trigger.Tiles => tilesTrigger,
             Trigger.Layers => layersTrigger,
             Trigger.Actions => actionsTrigger,
-            Trigger.Context => contextTrigger,
             _ => tilesTrigger,
         };
 
@@ -300,65 +315,42 @@ namespace Uberkarl {
             activeTrigger = trigger;
             switch (trigger) {
                 case Trigger.Tiles:
-                    menuCenterGlobal = canvas.CursorGlobalCenter();
-                    popIn.Open(BuildTilesMenu(), menuCenterGlobal, TileIcon);
+                    OpenTilesList();
                     break;
                 case Trigger.Layers:
                     menuCenterGlobal = canvas.CursorGlobalCenter();
-                    popIn.Open(BuildLayersMenu(), menuCenterGlobal);
+                    popIn.Open(MenuCatalog.BuildLayersMenu(LayerNames()), menuCenterGlobal);
                     break;
                 case Trigger.Actions:
                     menuCenterGlobal = canvas.CursorGlobalCenter();
-                    popIn.Open(BuildActionsMenu(), menuCenterGlobal);
-                    break;
-                case Trigger.Context:
-                    menuCenterGlobal = GetViewport().GetMousePosition();
-                    popIn.Open(BuildTilesMenu(), menuCenterGlobal, TileIcon);
+                    popIn.Open(MenuCatalog.BuildActionsMenu(), menuCenterGlobal);
                     break;
             }
         }
 
-        // DiVoid #7551 Phase 3, design #7580 §6.4: terrains ride the SAME "Tiles" radial as concrete tiles —
-        // no separate trigger. A terrain wedge has no single-graphic icon (PopInMenu only draws an icon for
-        // MenuOutcomeKind.SelectTile), so it renders as a text label; "Terrain: <name>" makes the mode switch
-        // legible at a glance in a wheel that otherwise shows bare tile ids.
-        RadialMenuModel BuildTilesMenu() {
-            List<RadialMenuItem> items = new List<RadialMenuItem>(paletteTileIds.Count + paletteTerrainIds.Count + objectTypes.Count);
-            for (int i = 0; i < paletteTileIds.Count; i++)
-                items.Add(new RadialMenuItem($"#{paletteTileIds[i]}", MenuOutcome.SelectTile(i)));
-            for (int i = 0; i < paletteTerrainIds.Count; i++)
-                items.Add(new RadialMenuItem($"Terrain: {paletteTerrainLabels[i]}", MenuOutcome.SelectTerrain(i)));
-            for (int i = 0; i < objectTypes.Count; i++)
-                items.Add(new RadialMenuItem($"Object: {objectTypeLabels[i]}", MenuOutcome.SelectObjectType(i)));
-            return new RadialMenuModel("Tiles", items);
+        List<string> LayerNames() {
+            List<string> names = new List<string>(session.Level.Layers.Count);
+            foreach (EditableLayer layer in session.Level.Layers)
+                names.Add(layer.Name);
+            return names;
         }
 
-        RadialMenuModel BuildLayersMenu() {
-            List<RadialMenuItem> items = new List<RadialMenuItem>();
-            if (session != null) {
-                for (int i = 0; i < session.Level.Layers.Count; i++)
-                    items.Add(new RadialMenuItem(session.Level.Layers[i].Name, MenuOutcome.SelectLayer(i)));
-            }
-            items.Add(new RadialMenuItem("Manage…", MenuOutcome.OpenLayerManager()));
-            return new RadialMenuModel("Layers", items);
+        void OpenTilesList() {
+            MenuModel menu = MenuCatalog.BuildTilesMenu(paletteTileIds, paletteTerrainLabels, objectTypeLabels);
+            openListMenu = menu;
+            choiceList.Open(menu.Title, "✕ Close", menu.Count, index => TilesListRow(menu, index),
+                "No tiles, terrains, or object types in this palette.", OnTilesListChosen, OnTilesListDismissed);
         }
 
-        RadialMenuModel BuildActionsMenu() {
-            RadialMenuItem[] items = {
-                new RadialMenuItem("New", MenuOutcome.FileOp(EditorFileCommand.New)),
-                new RadialMenuItem("Open", MenuOutcome.FileOp(EditorFileCommand.Open)),
-                new RadialMenuItem("Save", MenuOutcome.FileOp(EditorFileCommand.Save)),
-                new RadialMenuItem("Save As", MenuOutcome.FileOp(EditorFileCommand.SaveAs)),
-                new RadialMenuItem("Undo", MenuOutcome.Invoke(EditorAction.Undo)),
-                new RadialMenuItem("Redo", MenuOutcome.Invoke(EditorAction.Redo)),
-                new RadialMenuItem("Tool", MenuOutcome.Invoke(EditorAction.ToggleTool)),
-                new RadialMenuItem("Play", MenuOutcome.Invoke(EditorAction.Playtest)),
-                new RadialMenuItem("Resize…", MenuOutcome.OpenResizePanel()),
-                new RadialMenuItem("Edit Tileset…", MenuOutcome.OpenTileSetEditor()),
-                new RadialMenuItem("Bind Tileset…", MenuOutcome.OpenTileSetBindPanel()),
-            };
-            return new RadialMenuModel("Actions", items);
+        ChoiceListRow TilesListRow(MenuModel menu, int index) {
+            MenuItem item = menu.Items[index];
+            Texture2D icon = item.Outcome.Kind == MenuOutcomeKind.SelectTile ? TileIcon(item.Outcome.Index) : null;
+            return new ChoiceListRow(item.Label, string.Empty, icon);
         }
+
+        void OnTilesListChosen(int index) => CloseListMenu(openListMenu?.OutcomeAt(index));
+
+        void OnTilesListDismissed() => CloseListMenu(null);
 
         Texture2D TileIcon(int paletteIndex) =>
             paletteIndex >= 0 && paletteIndex < paletteTextures.Count ? paletteTextures[paletteIndex] : null;

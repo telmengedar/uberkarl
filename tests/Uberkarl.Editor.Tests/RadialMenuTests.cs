@@ -76,12 +76,12 @@ public sealed class RadialMenuTests
     [Test]
     public void Model_ResolvesAimToTheCorrectTileOutcome()
     {
-        var tiles = new RadialMenuModel("Tiles", new[]
+        var tiles = new MenuModel("Tiles", new[]
         {
-            new RadialMenuItem("a", MenuOutcome.SelectTile(0)),
-            new RadialMenuItem("b", MenuOutcome.SelectTile(1)),
-            new RadialMenuItem("c", MenuOutcome.SelectTile(2)),
-            new RadialMenuItem("d", MenuOutcome.SelectTile(3)),
+            new MenuItem("a", MenuOutcome.SelectTile(0)),
+            new MenuItem("b", MenuOutcome.SelectTile(1)),
+            new MenuItem("c", MenuOutcome.SelectTile(2)),
+            new MenuItem("d", MenuOutcome.SelectTile(3)),
         });
 
         MenuOutcome? up = tiles.Resolve(0, -1);
@@ -96,10 +96,10 @@ public sealed class RadialMenuTests
     [Test]
     public void Model_NeutralCentre_ResolvesToNoOutcome()
     {
-        var tiles = new RadialMenuModel("Tiles", new[]
+        var tiles = new MenuModel("Tiles", new[]
         {
-            new RadialMenuItem("a", MenuOutcome.SelectTile(0)),
-            new RadialMenuItem("b", MenuOutcome.SelectTile(1)),
+            new MenuItem("a", MenuOutcome.SelectTile(0)),
+            new MenuItem("b", MenuOutcome.SelectTile(1)),
         });
 
         Assert.That(tiles.Resolve(0, 0), Is.Null);
@@ -109,14 +109,14 @@ public sealed class RadialMenuTests
     public void Model_RoutesEveryWedgeToItsOwnOutcome()
     {
         // The "Actions" menu mixes file commands and named actions; every wedge must route to its own intent.
-        var actions = new RadialMenuModel("Actions", new[]
+        var actions = new MenuModel("Actions", new[]
         {
-            new RadialMenuItem("New", MenuOutcome.FileOp(EditorFileCommand.New)),
-            new RadialMenuItem("Open", MenuOutcome.FileOp(EditorFileCommand.Open)),
-            new RadialMenuItem("Save", MenuOutcome.FileOp(EditorFileCommand.Save)),
-            new RadialMenuItem("Save As", MenuOutcome.FileOp(EditorFileCommand.SaveAs)),
-            new RadialMenuItem("Undo", MenuOutcome.Invoke(EditorAction.Undo)),
-            new RadialMenuItem("Redo", MenuOutcome.Invoke(EditorAction.Redo)),
+            new MenuItem("New", MenuOutcome.FileOp(EditorFileCommand.New)),
+            new MenuItem("Open", MenuOutcome.FileOp(EditorFileCommand.Open)),
+            new MenuItem("Save", MenuOutcome.FileOp(EditorFileCommand.Save)),
+            new MenuItem("Save As", MenuOutcome.FileOp(EditorFileCommand.SaveAs)),
+            new MenuItem("Undo", MenuOutcome.Invoke(EditorAction.Undo)),
+            new MenuItem("Redo", MenuOutcome.Invoke(EditorAction.Redo)),
         });
 
         for (int i = 0; i < actions.Count; i++)
@@ -148,7 +148,7 @@ public sealed class RadialMenuTests
     [Test]
     public void Model_OutcomeAt_IsBoundsChecked()
     {
-        var menu = new RadialMenuModel("Tiles", new[] { new RadialMenuItem("a", MenuOutcome.SelectTile(0)) });
+        var menu = new MenuModel("Tiles", new[] { new MenuItem("a", MenuOutcome.SelectTile(0)) });
         Assert.That(menu.OutcomeAt(0).HasValue, Is.True);
         Assert.That(menu.OutcomeAt(-1), Is.Null);
         Assert.That(menu.OutcomeAt(5), Is.Null);
@@ -157,7 +157,7 @@ public sealed class RadialMenuTests
     [Test]
     public void Model_NullItems_IsAnEmptyMenu_ThatKeepsItsTitle()
     {
-        var menu = new RadialMenuModel("Empty", null!);
+        var menu = new MenuModel("Empty", null!);
         Assert.That(menu.Title, Is.EqualTo("Empty"));
         Assert.That(menu.Count, Is.EqualTo(0));
         Assert.That(menu.Resolve(0, -1), Is.Null);
@@ -167,7 +167,7 @@ public sealed class RadialMenuTests
     [Test]
     public void Item_ExposesItsLabelAndOutcome()
     {
-        var item = new RadialMenuItem("grass", MenuOutcome.SelectTile(4));
+        var item = new MenuItem("grass", MenuOutcome.SelectTile(4));
         Assert.That(item.Label, Is.EqualTo("grass"));
         Assert.That(item.Outcome.Index, Is.EqualTo(4));
     }

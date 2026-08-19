@@ -61,14 +61,12 @@ namespace Uberkarl {
         /// <summary>Raised when the browser is dismissed without completing either flow.</summary>
         public event Action Cancelled;
 
-        /// <summary>True while the browser is summoned.</summary>
-        public bool IsOpen => choiceList.IsOpen;
-
         /// <summary>Attaches the shared <see cref="ChoiceList"/> every step of this browser renders through.</summary>
         public void AttachChoiceList(ChoiceList list) {
             choiceList = list;
-            choiceList.DismissSuppressed = () => keyboard != null && keyboard.IsOpen;
         }
+
+        bool KeyboardOpenSuppressesDismiss() => keyboard != null && keyboard.IsOpen;
 
         /// <summary>
         /// Attaches the shared <see cref="OnScreenKeyboard"/> the save flow's naming steps summon (DiVoid
@@ -109,7 +107,7 @@ namespace Uberkarl {
             string empty = mode == Mode.Load
                 ? "No packages in the content folder."
                 : "No packages yet — choose “+ New package…” to create one.";
-            choiceList.Open(title, "✕ Close", packages.Count + newRowCount, PackageRow, empty, OnPackageRowChosen, HandleCancel);
+            choiceList.Open(title, "✕ Close", packages.Count + newRowCount, PackageRow, empty, OnPackageRowChosen, HandleCancel, KeyboardOpenSuppressesDismiss);
         }
 
         ChoiceListRow PackageRow(int index) {
@@ -166,7 +164,7 @@ namespace Uberkarl {
             resources = levels;
 
             step = Step.Resources;
-            choiceList.Open($"{selectedPackageName} — Select Level", "← Back", resources.Count, ResourceRow, "No loadable resources in this package.", OnResourceChosen, HandleCancel);
+            choiceList.Open($"{selectedPackageName} — Select Level", "← Back", resources.Count, ResourceRow, "No loadable resources in this package.", OnResourceChosen, HandleCancel, KeyboardOpenSuppressesDismiss);
         }
 
         ChoiceListRow ResourceRow(int index) {
@@ -213,7 +211,7 @@ namespace Uberkarl {
             step = Step.SaveResources;
             // Unlike the load-mode resources step, "+ New level…" is always offered — an empty package is
             // a perfectly normal save target, never a dead end.
-            choiceList.Open($"{selectedPackageName} — Save Level", "← Back", resources.Count + 1, SaveResourceRow, string.Empty, OnSaveResourceChosen, HandleCancel);
+            choiceList.Open($"{selectedPackageName} — Save Level", "← Back", resources.Count + 1, SaveResourceRow, string.Empty, OnSaveResourceChosen, HandleCancel, KeyboardOpenSuppressesDismiss);
         }
 
         ChoiceListRow SaveResourceRow(int index) {
@@ -276,7 +274,7 @@ namespace Uberkarl {
             string title = confirmKind == ConfirmKind.NewPackageNameCollision
                 ? $"A package named “{collisionName}” already exists."
                 : $"Overwrite the level “{collisionName}”?";
-            choiceList.Open(title, "← Back", 2, ConfirmOverwriteRow, string.Empty, OnConfirmOverwriteChosen, HandleCancel);
+            choiceList.Open(title, "← Back", 2, ConfirmOverwriteRow, string.Empty, OnConfirmOverwriteChosen, HandleCancel, KeyboardOpenSuppressesDismiss);
         }
 
         static ChoiceListRow ConfirmOverwriteRow(int index) => index == 0

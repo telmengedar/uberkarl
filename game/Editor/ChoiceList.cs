@@ -19,8 +19,13 @@ namespace Uberkarl {
         Action<int> onChosen;
         Action onDismissRequested;
 
-        /// <summary>Polled before acting on a dismissal request; while it returns true, dismissal is ignored.</summary>
-        public Func<bool> DismissSuppressed { get; set; }
+        /// <summary>
+        /// Polled before acting on a dismissal request; while it returns true, dismissal is ignored. Scoped
+        /// per <see cref="Open"/> call (set from its <c>dismissSuppressed</c> parameter, defaulting to none)
+        /// rather than attached once — the list has more than one driver, and a predicate set by one must
+        /// not leak into a summon owned by another.
+        /// </summary>
+        public Func<bool> DismissSuppressed { get; private set; }
 
         /// <summary>True while the list is summoned.</summary>
         public bool IsOpen => Visible;
@@ -84,12 +89,14 @@ namespace Uberkarl {
         /// <param name="emptyMessage">shown in place of the list when <paramref name="count"/> is zero</param>
         /// <param name="onChosen">fires with the picked row's index</param>
         /// <param name="onDismissRequested">fires on <c>ui_cancel</c> or the header button</param>
-        public void Open(string title, string closeText, int count, Func<int, ChoiceListRow> rowAt, string emptyMessage, Action<int> onChosen, Action onDismissRequested) {
+        /// <param name="dismissSuppressed">polled before acting on a dismissal request for this summon only; defaults to none</param>
+        public void Open(string title, string closeText, int count, Func<int, ChoiceListRow> rowAt, string emptyMessage, Action<int> onChosen, Action onDismissRequested, Func<bool> dismissSuppressed = null) {
             Visible = true;
             titleLabel.Text = title;
             closeButton.Text = closeText;
             this.onChosen = onChosen;
             this.onDismissRequested = onDismissRequested;
+            DismissSuppressed = dismissSuppressed;
             PopulateList(count, rowAt, emptyMessage);
         }
 
@@ -112,6 +119,7 @@ namespace Uberkarl {
 
                 Button button = new Button {
                     Text = text.Primary,
+                    Icon = text.Icon,
                     SizeFlagsHorizontal = SizeFlags.ExpandFill,
                     Alignment = HorizontalAlignment.Left,
                 };
