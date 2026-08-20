@@ -9,10 +9,10 @@ namespace Uberkarl {
     /// The reusable gamepad/keyboard/mouse text-entry primitive (DiVoid #7513): a summoned <see cref="Control"/>
     /// showing a grid of character keys (<see cref="OnScreenKeyboardLayout"/>) navigated by D-pad/stick via
     /// <see cref="FocusGrid"/>, with a live buffer preview at the top. <see cref="RequestText"/> is the whole
-    /// public surface — <c>RequestText(prompt, initial, onCommit)</c> — so any future caller (Save-As naming
-    /// #7552, tile naming #7551 — NOT wired here, per task scope) can summon it without knowing anything
-    /// about layers. <see cref="LayerManagerPanel"/>'s rename affordance is the first (and, per task scope,
-    /// only) caller.
+    /// public surface — <c>RequestText(prompt, initial, onCommit, onCancel)</c> — so any future caller
+    /// (Save-As naming #7552, tile naming #7551 — NOT wired here, per task scope) can summon it without
+    /// knowing anything about layers. <see cref="LayerManagerPanel"/>'s rename affordance and
+    /// <see cref="BehaviorAssignmentPanel"/>'s new-script naming step are its callers.
     ///
     /// Reuses the summoned-panel scaffolding verbatim — full-rect dim backdrop, centered panel, grab-focus-
     /// on-summon, <c>ui_cancel</c> discards — exactly as <see cref="PackageBrowser"/>/<see cref="LayerManagerPanel"/>
@@ -50,6 +50,7 @@ namespace Uberkarl {
 
         TextEntryEditor editor;
         Action<string> pendingCommit;
+        Action pendingCancel;
         Control focusToRestore;
 
         int lastFocusedRow;
@@ -93,14 +94,16 @@ namespace Uberkarl {
 
         /// <summary>
         /// Summon the keyboard seeded with <paramref name="initialText"/>, showing <paramref name="prompt"/>
-        /// above the buffer. <paramref name="onCommit"/> fires with the final text on Done; Cancel (or
-        /// <c>ui_cancel</c>) closes without calling it at all — the reusable text-input primitive the task
-        /// asks for. Remembers whatever control currently holds focus so it can be restored once the
-        /// keyboard closes, regardless of who summoned it.
+        /// above the buffer. <paramref name="onCommit"/> fires with the final text on Done. Cancel (or
+        /// <c>ui_cancel</c>) never calls <paramref name="onCommit"/>; it instead fires the optional
+        /// <paramref name="onCancel"/> so a caller mid-flow — e.g. the still-open behavior assignment list —
+        /// can react instead of being silently left stuck. Remembers whatever control currently holds focus
+        /// so it can be restored once the keyboard closes, regardless of who summoned it.
         /// </summary>
-        public void RequestText(string prompt, string initialText, Action<string> onCommit) {
+        public void RequestText(string prompt, string initialText, Action<string> onCommit, Action onCancel = null) {
             editor = new TextEntryEditor(initialText);
             pendingCommit = onCommit;
+            pendingCancel = onCancel;
             promptLabel.Text = prompt;
             focusToRestore = GetViewport()?.GuiGetFocusOwner();
             lastFocusedRow = 0;
@@ -193,11 +196,16 @@ namespace Uberkarl {
             commit?.Invoke(result);
         }
 
-        void CancelEntry() => Close();
+        void CancelEntry() {
+            Action cancel = pendingCancel;
+            Close();
+            cancel?.Invoke();
+        }
 
         void Close() {
             Visible = false;
             pendingCommit = null;
+            pendingCancel = null;
             focusToRestore?.CallDeferred(Control.MethodName.GrabFocus);
             focusToRestore = null;
         }

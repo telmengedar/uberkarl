@@ -166,6 +166,30 @@ public sealed class LevelEditSession
         IsDirty = true;
     }
 
+    /// <summary>Upserts a script's source text into the level's script table. Not on the undo stack.</summary>
+    public void UpsertScriptSource(ResourcePath path, string source)
+    {
+        Level.UpsertScript(path, source);
+        IsDirty = true;
+    }
+
+    /// <summary>
+    /// The "is this slug taken" predicate a new-script name is checked against: this level's own script
+    /// table, plus <paramref name="packageResources"/> when supplied. Case-insensitive: a slug that only
+    /// differs in case from an existing script still collides on extraction to a
+    /// case-insensitive filesystem, so <c>doorway</c> must not be mintable alongside a sibling
+    /// <c>Doorway.poo</c> even though <see cref="ResourcePath"/> equality itself stays ordinal for every
+    /// other purpose (in-archive routing, where case sensitivity is correct).
+    /// </summary>
+    public Func<string, bool> NewScriptSlugTaken(IReadOnlyList<ResourceEntry>? packageResources = null) => slug =>
+    {
+        var path = ScriptResourcePaths.ScriptPath(slug);
+        if (ContainsCaseInsensitive(Level.Scripts.Keys, path))
+            return true;
+
+        return packageResources is not null && ContainsCaseInsensitive(packageResources, path);
+    };
+
     /// <summary>Undoes the last edit and returns the cell to refresh, or <c>null</c> when nothing to undo.</summary>
     public CellChange? Undo()
     {
@@ -271,6 +295,28 @@ public sealed class LevelEditSession
         foreach (var entry in resources)
         {
             if (entry.Path == path)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsCaseInsensitive(IEnumerable<ResourcePath> paths, ResourcePath path)
+    {
+        foreach (var candidate in paths)
+        {
+            if (string.Equals(candidate.Value, path.Value, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsCaseInsensitive(IReadOnlyList<ResourceEntry> resources, ResourcePath path)
+    {
+        foreach (var entry in resources)
+        {
+            if (string.Equals(entry.Path.Value, path.Value, StringComparison.OrdinalIgnoreCase))
                 return true;
         }
 
