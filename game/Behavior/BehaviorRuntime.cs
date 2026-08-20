@@ -38,12 +38,16 @@ namespace Uberkarl {
         readonly HashSet<string> insideTriggerIds = new HashSet<string>();
         readonly HashSet<string> contactedObjectIds = new HashSet<string>();
         readonly HashSet<string> quarantinedSubjectIds = new HashSet<string>();
+        readonly Dictionary<string, int> contactDispatchCounts = new Dictionary<string, int>();
 
         /// <summary>Subject ids quarantined so far.</summary>
         public IReadOnlyCollection<string> QuarantinedSubjectIds => quarantinedSubjectIds;
 
-        /// <summary>Object subject ids the player is currently in contact with.</summary>
+        /// <summary>Object subject ids the player is currently in contact with. Upstream bookkeeping written before dispatch — do not use this to witness that an event was actually delivered; see <see cref="ContactDispatchCounts"/>.</summary>
         public IReadOnlyCollection<string> ContactedObjectIds => contactedObjectIds;
+
+        /// <summary>Per-subject count of successful object <c>OnContact</c> dispatches — advances only when the dispatch reached the subject's handler, unlike <see cref="ContactedObjectIds"/>.</summary>
+        public IReadOnlyDictionary<string, int> ContactDispatchCounts => contactDispatchCounts;
 
         /// <summary>Names a script can resolve through <c>level.object(...)</c>.</summary>
         public IReadOnlyCollection<string> ScriptVisibleObjectNames => levelFacade.Objects.Keys;
@@ -229,7 +233,7 @@ namespace Uberkarl {
 
             DispatchTileContacts(playerAabb);
             DispatchTriggerOverlaps(playerAabb, playerCell);
-            DispatchObjectContacts();
+            DispatchObjectContacts(playerAabb);
 
             if (hasLevelScript)
                 scheduler.DispatchUpdate(LevelScriptSubjectId, delta);
@@ -250,7 +254,7 @@ namespace Uberkarl {
                     if (DiagnosticsEnabled)
                         GD.Print($"[behavior] CONTACT tile cell {tile.Cell} binding {tile.SubjectId}");
                     contactedTileIds.Add(tile.SubjectId);
-                    scheduler.DispatchContact(tile.SubjectId, other);
+                    scheduler.DispatchContact(tile.SubjectId, other, ContactDirection.Classify(ToBehaviorRect(tile.WorldRect), ToBehaviorRect(playerAabb)));
                 } else {
                     contactedTileIds.Remove(tile.SubjectId);
                     scheduler.DispatchContactLeave(tile.SubjectId, other);
@@ -276,7 +280,7 @@ namespace Uberkarl {
             }
         }
 
-        void DispatchObjectContacts() {
+        void DispatchObjectContacts(Rect2 playerAabb) {
             foreach (ScriptedObject obj in scriptedObjects) {
                 if (obj.Sensor is null)
                     continue;
@@ -290,13 +294,18 @@ namespace Uberkarl {
                 var other = new EventParty("player", string.Empty, cell);
                 if (touching) {
                     contactedObjectIds.Add(obj.SubjectId);
-                    scheduler.DispatchContact(obj.SubjectId, other);
+                    Vector2 objectSize = ObjectBodyBuilder.CollisionSize(tileSize);
+                    Rect2 objectRect = new Rect2(obj.Body.Position - objectSize / 2f, objectSize);
+                    if (scheduler.DispatchContact(obj.SubjectId, other, ContactDirection.Classify(ToBehaviorRect(objectRect), ToBehaviorRect(playerAabb))))
+                        contactDispatchCounts[obj.SubjectId] = contactDispatchCounts.GetValueOrDefault(obj.SubjectId) + 1;
                 } else {
                     contactedObjectIds.Remove(obj.SubjectId);
                     scheduler.DispatchContactLeave(obj.SubjectId, other);
                 }
             }
         }
+
+        static BehaviorRect2 ToBehaviorRect(Rect2 rect) => new BehaviorRect2(rect.Position.X, rect.Position.Y, rect.Size.X, rect.Size.Y);
 
         void DispatchObjectUpdates(double delta) {
             foreach (ScriptedObject obj in scriptedObjects) {

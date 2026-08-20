@@ -74,7 +74,7 @@ public sealed class ObjectPredefinedBehaviorsTests
     }
 
     [Test]
-    public void BumpOnHitFromBelow_OnContact_StartsBump_WhenPlayerMovingUpward()
+    public void BumpOnHitFromBelow_OnContact_StartsBump_WhenPlayerMovingUpward_FromBelow()
     {
         var ctx = new BehaviorTestContext();
         var subject = ctx.CreateSubject("object:1", "object", "jump-block");
@@ -82,7 +82,7 @@ public sealed class ObjectPredefinedBehaviorsTests
         var binding = ResolvedBehaviorBinding.FromPredefined(PredefinedBehaviors.BumpOnHitFromBelow);
         ctx.CompileResolved(subject, binding);
 
-        Assert.That(ctx.Scheduler.DispatchContact("object:1", new EventParty("player", string.Empty, new GridCell(0, 0))), Is.True);
+        Assert.That(ctx.Scheduler.DispatchContact("object:1", new EventParty("player", string.Empty, new GridCell(0, 0)), ContactDirection.Below), Is.True);
 
         Assert.That(ctx.Intents.Drain(), Is.EqualTo(new BehaviorIntent[]
         {
@@ -100,7 +100,22 @@ public sealed class ObjectPredefinedBehaviorsTests
         var binding = ResolvedBehaviorBinding.FromPredefined(PredefinedBehaviors.BumpOnHitFromBelow);
         ctx.CompileResolved(subject, binding);
 
-        Assert.That(ctx.Scheduler.DispatchContact("object:1", new EventParty("player", string.Empty, new GridCell(0, 0))), Is.True);
+        Assert.That(ctx.Scheduler.DispatchContact("object:1", new EventParty("player", string.Empty, new GridCell(0, 0)), ContactDirection.Below), Is.True);
+
+        Assert.That(ctx.Intents.Drain(), Is.Empty);
+    }
+
+    [Test]
+    [Description("DiVoid #8047 / #8735")]
+    public void BumpOnHitFromBelow_OnContact_DoesNothing_WhenSideApproach_WhilePlayerRising()
+    {
+        var ctx = new BehaviorTestContext();
+        var subject = ctx.CreateSubject("object:1", "object", "jump-block");
+        ctx.Player.Velocity = new BehaviorVector2(0, -50);
+        var binding = ResolvedBehaviorBinding.FromPredefined(PredefinedBehaviors.BumpOnHitFromBelow);
+        ctx.CompileResolved(subject, binding);
+
+        Assert.That(ctx.Scheduler.DispatchContact("object:1", new EventParty("player", string.Empty, new GridCell(0, 0)), ContactDirection.Right), Is.True);
 
         Assert.That(ctx.Intents.Drain(), Is.Empty);
     }
@@ -116,7 +131,7 @@ public sealed class ObjectPredefinedBehaviorsTests
         subject.SeedState("bumping", true);
         subject.SeedState("bumpFrames", 8);
 
-        Assert.That(ctx.Scheduler.DispatchContact("object:1", new EventParty("player", string.Empty, new GridCell(0, 0))), Is.True);
+        Assert.That(ctx.Scheduler.DispatchContact("object:1", new EventParty("player", string.Empty, new GridCell(0, 0)), ContactDirection.Below), Is.True);
 
         Assert.That(ctx.Intents.Drain(), Is.Empty);
     }

@@ -26,6 +26,9 @@ public sealed class BehaviorEvent
     /// <summary>Contact / enter / leave: who the subject touched or who entered/left. Null otherwise.</summary>
     public EventParty? Other { get; internal set; }
 
+    /// <summary><see cref="BehaviorEventKind.OnContact"/>: which side of the subject was touched. Null otherwise.</summary>
+    public string? Direction { get; internal set; }
+
     /// <summary><see cref="BehaviorEventKind.OnUpdate"/>: elapsed seconds since the last frame.</summary>
     public double Delta { get; internal set; }
 
@@ -33,6 +36,7 @@ public sealed class BehaviorEvent
     {
         Kind = BehaviorEventNames.ToVariableName(kind);
         Other = null;
+        Direction = null;
         Delta = 0;
     }
 }

@@ -54,10 +54,11 @@ public sealed class BehaviorScheduler
         return Dispatch(subjectId, BehaviorEventKind.OnSpawn);
     }
 
-    public bool DispatchContact(string subjectId, EventParty other)
+    public bool DispatchContact(string subjectId, EventParty other, string? direction = null)
     {
         CurrentEvent.Reset(BehaviorEventKind.OnContact);
         CurrentEvent.Other = other;
+        CurrentEvent.Direction = direction;
         return Dispatch(subjectId, BehaviorEventKind.OnContact, other);
     }
 
