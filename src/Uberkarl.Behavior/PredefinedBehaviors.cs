@@ -15,16 +15,16 @@ using System.Globalization;
 /// </summary>
 public static class PredefinedBehaviors
 {
-    /// <summary>Tile predefined (design task #7738 — "a hurt-on-contact spike tile"): on contact, damages the player by <c>amount</c> (default 10).</summary>
+    /// <summary>Tile predefined (design task #7738 — "a hurt-on-contact spike tile"): on contact, damages the player by <c>amount</c> (see <see cref="Descriptors"/> for the default).</summary>
     public const string HurtOnContact = "hurtOnContact";
 
-    /// <summary>Area-trigger predefined (design task #7738 — "an on-enter trigger"): on enter, heals the player by <c>amount</c> (default 20) — a distinct intent (heal vs. hurt) proving the same binding/dispatch path serves more than one demo.</summary>
+    /// <summary>Area-trigger predefined (design task #7738 — "an on-enter trigger"): on enter, heals the player by <c>amount</c> — a distinct intent (heal vs. hurt) proving the same binding/dispatch path serves more than one demo.</summary>
     public const string HealOnEnter = "healOnEnter";
 
     /// <summary>
     /// Object predefined (DiVoid #7863, design #7704 §9.4 — "patrol predefined"): a <c>solid</c> object
-    /// oscillates horizontally by <c>range</c> pixels (default 48) at <c>speed</c> px/s (default 24) — a
-    /// moving platform. Bounded by construction (a ping-pong around its spawn position, no unbounded loop).
+    /// oscillates horizontally by <c>range</c> pixels at <c>speed</c> px/s — a moving platform. Bounded by
+    /// construction (a ping-pong around its spawn position, no unbounded loop).
     /// </summary>
     public const string Patrol = "patrol";
 
@@ -40,11 +40,46 @@ public static class PredefinedBehaviors
     private const string SpeedParameter = "speed";
     private const string RangeParameter = "range";
     private const string RiseParameter = "rise";
-    private const double HurtOnContactDefaultAmount = 10;
-    private const double HealOnEnterDefaultAmount = 20;
-    private const double PatrolDefaultSpeed = 24;
-    private const double PatrolDefaultRange = 48;
-    private const double BumpDefaultRise = 6;
+
+    /// <summary>
+    /// The predefined behavior library as authoring metadata (design #8049 §6.2): id, label, applicable
+    /// subject kinds, and tunable parameters, per predefined — the single source of truth for every default
+    /// value <see cref="TryGetSource"/> substitutes and for the applicability <see cref="ApplicableTo"/> filters on.
+    /// </summary>
+    public static readonly IReadOnlyList<PredefinedBehaviorDescriptor> Descriptors = new[]
+    {
+        new PredefinedBehaviorDescriptor(
+            HurtOnContact,
+            "Hurt on Contact",
+            new[] { BehaviorSubjectKind.Tile, BehaviorSubjectKind.Object },
+            new[] { new PredefinedParameterDescriptor(AmountParameter, 10, 1, 100, 5) }),
+
+        new PredefinedBehaviorDescriptor(
+            HealOnEnter,
+            "Heal on Enter",
+            new[] { BehaviorSubjectKind.Trigger },
+            new[] { new PredefinedParameterDescriptor(AmountParameter, 20, 1, 100, 5) }),
+
+        new PredefinedBehaviorDescriptor(
+            Patrol,
+            "Patrol",
+            new[] { BehaviorSubjectKind.Object },
+            new[]
+            {
+                new PredefinedParameterDescriptor(SpeedParameter, 24, 4, 200, 4),
+                new PredefinedParameterDescriptor(RangeParameter, 48, 8, 400, 8),
+            }),
+
+        new PredefinedBehaviorDescriptor(
+            BumpOnHitFromBelow,
+            "Bump on Hit From Below",
+            new[] { BehaviorSubjectKind.Object },
+            new[] { new PredefinedParameterDescriptor(RiseParameter, 6, 1, 40, 1) }),
+    };
+
+    /// <summary>The descriptors applicable to <paramref name="kind"/> (design #8049 §7 / #8525 §12 — the assignment picker's filter), in <see cref="Descriptors"/> order.</summary>
+    public static IEnumerable<PredefinedBehaviorDescriptor> ApplicableTo(BehaviorSubjectKind kind) =>
+        Descriptors.Where(descriptor => descriptor.AppliesTo(kind));
 
     /// <summary>
     /// Resolves a predefined id + parameters into ready-to-compile Pooscript source. False for an unknown id
@@ -57,14 +92,14 @@ public static class PredefinedBehaviors
         {
             case HurtOnContact:
                 source = $$"""
-                    $onContact = $other => { player.hurt({{FormatAmount(parameters, HurtOnContactDefaultAmount)}}); }
+                    $onContact = $other => { player.hurt({{FormatParameter(parameters, AmountParameter, DefaultOf(HurtOnContact, AmountParameter))}}); }
                     { "onContact": onContact }
                     """;
                 return true;
 
             case HealOnEnter:
                 source = $$"""
-                    $onEnter = $who => { player.heal({{FormatAmount(parameters, HealOnEnterDefaultAmount)}}); }
+                    $onEnter = $who => { player.heal({{FormatParameter(parameters, AmountParameter, DefaultOf(HealOnEnter, AmountParameter))}}); }
                     { "onEnter": onEnter }
                     """;
                 return true;
@@ -77,9 +112,9 @@ public static class PredefinedBehaviors
                     }
                     $onUpdate = $delta => {
                         $dir = self.getState("dir");
-                        self.moveBy({{FormatParameter(parameters, SpeedParameter, PatrolDefaultSpeed)}} * delta * dir, 0);
+                        self.moveBy({{FormatParameter(parameters, SpeedParameter, DefaultOf(Patrol, SpeedParameter))}} * delta * dir, 0);
                         $traveled = self.position.x - self.getState("origin");
-                        if (traveled > {{FormatParameter(parameters, RangeParameter, PatrolDefaultRange)}}) { self.setState("dir", -1); }
+                        if (traveled > {{FormatParameter(parameters, RangeParameter, DefaultOf(Patrol, RangeParameter))}}) { self.setState("dir", -1); }
                         if (traveled < 0) { self.setState("dir", 1); }
                     }
                     { "onSpawn": onSpawn, "onUpdate": onUpdate }
@@ -99,8 +134,8 @@ public static class PredefinedBehaviors
                     $onUpdate = $delta => {
                         if (self.getState("bumping") == true) {
                             $frames = self.getState("bumpFrames");
-                            if (frames > 6) { self.moveBy(0, -{{FormatParameter(parameters, RiseParameter, BumpDefaultRise)}}); }
-                            if (frames <= 6) { self.moveBy(0, {{FormatParameter(parameters, RiseParameter, BumpDefaultRise)}}); }
+                            if (frames > 6) { self.moveBy(0, -{{FormatParameter(parameters, RiseParameter, DefaultOf(BumpOnHitFromBelow, RiseParameter))}}); }
+                            if (frames <= 6) { self.moveBy(0, {{FormatParameter(parameters, RiseParameter, DefaultOf(BumpOnHitFromBelow, RiseParameter))}}); }
                             self.setState("bumpFrames", frames - 1);
                             if (frames <= 1) { self.setState("bumping", false); }
                         }
@@ -115,8 +150,8 @@ public static class PredefinedBehaviors
         }
     }
 
-    private static string FormatAmount(IReadOnlyDictionary<string, object?> parameters, double fallback)
-        => FormatParameter(parameters, AmountParameter, fallback);
+    private static double DefaultOf(string predefinedId, string parameterName) =>
+        Descriptors.First(descriptor => descriptor.Id == predefinedId).Parameter(parameterName).Default;
 
     /// <summary>Renders one numeric template parameter, throwing a <see cref="FormatException"/> naming the key when the value is not a number.</summary>
     private static string FormatParameter(IReadOnlyDictionary<string, object?> parameters, string key, double fallback)

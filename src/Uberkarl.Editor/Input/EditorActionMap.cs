@@ -35,6 +35,7 @@ public static class EditorActionMap
         [EditorAction.Playtest] = "editor_playtest",
         [EditorAction.ZoomIn] = "editor_zoom_in",
         [EditorAction.ZoomOut] = "editor_zoom_out",
+        [EditorAction.AssignBehavior] = "editor_assign_behavior",
     };
 
     private static readonly IReadOnlyDictionary<string, EditorAction> ByName =

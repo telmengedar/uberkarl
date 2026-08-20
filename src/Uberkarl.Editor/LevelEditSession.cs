@@ -1,3 +1,4 @@
+using Uberkarl.Behavior;
 using Uberkarl.Content;
 using Uberkarl.Packages;
 
@@ -135,6 +136,34 @@ public sealed class LevelEditSession
         history.Execute(new RemoveObjectCommand(index), Level);
         IsDirty = true;
         return true;
+    }
+
+    /// <summary>Assigns <paramref name="binding"/> as the placed object at <paramref name="index"/>'s own behavior override. Undoable.</summary>
+    public void AssignObjectBehavior(int index, BehaviorBinding binding)
+    {
+        history.Execute(new SetObjectBehaviorCommand(index, binding), Level);
+        IsDirty = true;
+    }
+
+    /// <summary>Assigns <paramref name="binding"/> as the trigger at <paramref name="index"/>'s binding. Undoable.</summary>
+    public void AssignTriggerBehavior(int index, BehaviorBinding binding)
+    {
+        history.Execute(new SetTriggerBehaviorCommand(index, binding), Level);
+        IsDirty = true;
+    }
+
+    /// <summary>Assigns <paramref name="binding"/> as the per-instance behavior override for the tile at (layerIndex,x,y). Undoable.</summary>
+    public void AssignTileBehaviorOverride(int layerIndex, int x, int y, BehaviorBinding binding)
+    {
+        history.Execute(new SetTileBehaviorOverrideCommand(layerIndex, x, y, binding), Level);
+        IsDirty = true;
+    }
+
+    /// <summary>Assigns <paramref name="binding"/> as the level's global lifecycle/<c>onUpdate</c> script binding. Undoable.</summary>
+    public void AssignLevelScript(BehaviorBinding binding)
+    {
+        history.Execute(new SetLevelScriptCommand(binding), Level);
+        IsDirty = true;
     }
 
     /// <summary>Undoes the last edit and returns the cell to refresh, or <c>null</c> when nothing to undo.</summary>

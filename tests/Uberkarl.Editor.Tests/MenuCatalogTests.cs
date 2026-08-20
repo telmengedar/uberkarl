@@ -215,6 +215,7 @@ public sealed class MenuCatalogTests
             ("Resize…", MenuOutcome.OpenResizePanel()),
             ("Edit Tileset…", MenuOutcome.OpenTileSetEditor()),
             ("Bind Tileset…", MenuOutcome.OpenTileSetBindPanel()),
+            ("Level Script…", MenuOutcome.AssignLevelScriptBehavior()),
         };
 
         MenuModel menu = MenuCatalog.BuildActionsOverflowMenu();

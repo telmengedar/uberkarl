@@ -73,6 +73,9 @@ namespace Uberkarl {
         /// this surface received.</summary>
         public Vector2 PointerGlobalPosition => GlobalPosition + lastPointerLocal;
 
+        /// <summary>The grid cursor's current cell.</summary>
+        public (int X, int Y) CursorCell => cursor is null ? (-1, -1) : (cursor.X, cursor.Y);
+
         /// <summary>Set once by the controller in <c>BuildUi</c> to <c>AnyModalOpen</c> — a live predicate,
         /// not a per-frame snapshot, so a modal opened or closed mid-frame is still seen correctly. Checked
         /// at every site that mutates the level document or drives a mouse action: <see cref="EmitCellAt"/>,
