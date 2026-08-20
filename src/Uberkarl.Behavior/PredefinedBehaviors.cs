@@ -90,7 +90,7 @@ public static class PredefinedBehaviors
                 source = $$"""
                     $onContact = $other => {
                         if (self.getState("bumping") != true) {
-                            if (player.velocity.y < 0) {
+                            if (player.velocity.y < 0 && event.direction == "{{ContactDirection.Below}}") {
                                 self.setState("bumping", true);
                                 self.setState("bumpFrames", 12);
                             }

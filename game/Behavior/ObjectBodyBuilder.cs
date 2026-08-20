@@ -17,13 +17,16 @@ namespace Uberkarl {
         /// <summary>Pixels the solid body's sensor extends past its collision shape.</summary>
         const float SensorMargin = 1f;
 
+        /// <summary>The collision footprint a built body occupies, centered on its position.</summary>
+        public static Vector2 CollisionSize(int tileSize) => new Vector2(tileSize, tileSize);
+
         public static Node2D Build(ResolvedObjectPlacement placement, int tileSize) {
             bool solid = placement.CollisionRole == ObjectCollisionRole.Solid;
             CollisionObject2D body = solid
                 ? new AnimatableBody2D { Name = NodeName(placement.Name) }
                 : new Area2D { Name = NodeName(placement.Name) };
 
-            body.AddChild(new CollisionShape2D { Shape = new RectangleShape2D { Size = new Vector2(tileSize, tileSize) } });
+            body.AddChild(new CollisionShape2D { Shape = new RectangleShape2D { Size = CollisionSize(tileSize) } });
             body.AddChild(new Sprite2D { Texture = LoadTexture(placement) });
 
             if (solid)
@@ -41,7 +44,7 @@ namespace Uberkarl {
 
         static Area2D BuildContactSensor(int tileSize) {
             var sensor = new Area2D { Name = ContactSensorName };
-            float size = tileSize + SensorMargin * 2;
+            float size = CollisionSize(tileSize).X + SensorMargin * 2;
             sensor.AddChild(new CollisionShape2D { Shape = new RectangleShape2D { Size = new Vector2(size, size) } });
             return sensor;
         }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -36,6 +37,7 @@ namespace Uberkarl.Diagnostics {
         const int JumpBlockCycleCount = 67;
         const float JumpBlockBumpThreshold = 2f;
         const float JumpBlockSettledTolerance = 1f;
+        const float JumpBlockSideApproachOverlap = 2f;
 
         public override async void _Ready() {
             GD.Print("[probe] BehaviorHeadlessProbe._Ready starting");
@@ -261,9 +263,57 @@ namespace Uberkarl.Diagnostics {
             GD.Print($"[probe] VERDICT {Label}: allCyclesBumped={allCyclesBumped} allCyclesSettled={allCyclesSettled} " +
                 $"noQuarantine={noQuarantine} over {totalFrames} total physics frames (quarantined=[{string.Join(",", runtime.QuarantinedSubjectIds)}])");
 
+            bool sideApproachDidNotBump = await RunJumpBlockSideApproachCheck(level, player, runtime, jumpBlock, restY);
+
             root.QueueFree();
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-            return allCyclesBumped && allCyclesSettled && noQuarantine;
+            return allCyclesBumped && allCyclesSettled && noQuarantine && sideApproachDidNotBump;
+        }
+
+        /// <summary>Holds the player at a shallow overlap against the jump-block's side edge while rising, and asserts the block does not bump.</summary>
+        async Task<bool> RunJumpBlockSideApproachCheck(ResolvedLevel level, Player player, BehaviorRuntime runtime, Node2D jumpBlock, float restY) {
+            const string Label = "ObjectCheck-JumpBlock-SideApproach(side contact while rising must NOT bump)";
+            GD.Print($"[probe] ==== {Label} ====");
+
+            string jumpBlockSubjectId = null;
+            for (int i = 0; i < level.Objects.Count; i++) {
+                if (level.Objects[i].Name != JumpBlockBodyName)
+                    continue;
+                jumpBlockSubjectId = $"object:{i}";
+                break;
+            }
+            if (jumpBlockSubjectId is null) {
+                GD.PrintErr($"[probe] {Label}: FAILED to resolve a subject id for placement '{JumpBlockBodyName}'.");
+                return false;
+            }
+
+            float sideX = jumpBlock.Position.X + level.TileSize / 2f + Player.CollisionHalfExtents.X - JumpBlockSideApproachOverlap;
+            float sideY = jumpBlock.Position.Y;
+            var sidePosition = new Vector2(sideX, sideY);
+            var risingVelocity = new Vector2(0, -player.JumpSpeed);
+
+            player.Position = sidePosition;
+            player.Velocity = risingVelocity;
+
+            int dispatchCountBefore = runtime.ContactDispatchCounts.GetValueOrDefault(jumpBlockSubjectId);
+
+            float minY = jumpBlock.Position.Y;
+            for (int frame = 0; frame < JumpBlockCycleFrames; frame++) {
+                await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+                player.Position = sidePosition;
+                player.Velocity = risingVelocity;
+                minY = Mathf.Min(minY, jumpBlock.Position.Y);
+            }
+
+            int dispatchCountAfter = runtime.ContactDispatchCounts.GetValueOrDefault(jumpBlockSubjectId);
+            bool sawContact = dispatchCountAfter > dispatchCountBefore;
+
+            bool didNotBump = minY == restY;
+            bool noQuarantine = runtime.QuarantinedSubjectIds.Count == 0;
+            GD.Print($"[probe] {Label}: player held at {sidePosition} (rising), restY={restY:0.00} minY={minY:0.00} sawContact={sawContact}");
+            GD.Print($"[probe] VERDICT {Label}: didNotBump={didNotBump} sawContact={sawContact} noQuarantine={noQuarantine}");
+
+            return didNotBump && sawContact && noQuarantine;
         }
 
         static ResolvedLevel BuildPathA(byte[] bytes) {

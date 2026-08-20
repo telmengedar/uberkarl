@@ -171,6 +171,12 @@ The editor already solves this exact problem for tile graphics. `EditableTile` c
 
 This is the mechanism that makes #8047 fixable properly; the fix itself stays #8047's own task.
 
+> **Amended 2026-08-20 (M3 implementation, QA #8741 W-1): the exact-penetration tie resolves toward the horizontal axis.** §6.1's classification rule above is silent on what happens when the two axes' penetrations are exactly equal — a perfect corner hit. The as-implemented `Classify` originally fell through to the vertical branch on a tie, which for a rising player yields `"below"` — the one answer this milestone exists to suppress. QA flagged that as an implementation accident (whatever the `else` branch happens to do), not a decision, and ruled it should resolve the other way: **ties resolve to the horizontal axis** (`"left"`/`"right"`), which is fail-safe for the bump-suppression case and costs nothing on any other direction-sensitive predefined. `ContactDirection.Classify` (`src/Uberkarl.Behavior/ContactDirection.cs`) now treats the comparison as `penetrationX <= penetrationY` rather than `<`; this note is the record of why, per #114 §4 (the code carries no rationale comments).
+
+> **Amended 2026-08-20 (M3 implementation, QA #8741 W-2): `Classify`'s overlap precondition, and why it holds today.** "Minimum penetration" is undefined without penetration — for non-overlapping rects `Classify` returns a plausible-looking answer from negative inputs rather than failing loudly. Callers must gate on overlap first. Tiles do: `DispatchTileContacts` gates on `Rect2.Intersects` against the identical pair of rects it then passes to `Classify`. Triggers never reach `Classify` at all — `DispatchTriggerOverlaps` (`BehaviorRuntime.cs`) dispatches `OnEnter`/`OnLeave` with no direction argument, so the overlap precondition is moot for them; an earlier draft of this note claimed triggers gated the same way tiles do, which was wrong. For solid objects the coupling is less direct: the sensor's overlap gate is `tileSize + 2×SensorMargin` (`ObjectBodyBuilder.cs`) against the player's 12×24 physics shape, while `Classify` receives a synthesised `tileSize`-sized object rect against the 14×26 `playerAabb` (`BehaviorRuntime.cs`). These two boundaries coincide only because `SensorMargin == ContactMargin == 1` today (`9+6 = 15 = 8+7`, `9+12 = 21 = 8+13`) — changing either margin constant alone would silently start feeding `Classify` non-overlapping input. Not reachable today; named so a future change to either constant is made with the coupling in view.
+>
+> **Amended 2026-08-20 (M3 implementation, QA #8741 W-3): the object contact rect now reads its size from `ObjectBodyBuilder`, not a second hard-coded `tileSize`.** `BehaviorRuntime.DispatchObjectContacts` synthesises the object's classify-rect from `obj.Body.Position` and `tileSize`, which was previously a second, independent place assuming object size == tile size, with nothing tying it to `ObjectBodyBuilder.Build` (which sizes the actual collision shape). `ObjectBodyBuilder.CollisionSize(tileSize)` is now the single source of truth both call sites read, so the assumption can only drift by changing one function.
+
 ### 6.2 Predefined descriptors — the metadata the menu needs
 
 An assignment menu must know: which predefineds exist, which subject kinds each is legal for, which parameters each takes, their defaults, and their step/range for `SteppedValueEditor`. None of that is queryable today — `PredefinedBehaviors.TryGetSource` is a `switch` over four ids, and the parameter names and defaults are bare private consts (`PredefinedBehaviors.cs:39-47`).
@@ -446,7 +452,7 @@ Raised from M2 implementation (#8463). John implemented the trigger rect tool an
 
 **Keep `AreaTriggerDefinition.Binding` required. Remove the trigger *creation* path from M2 and land it in a new milestone M4b, immediately after M4, where placement and binding assignment ship as one act. The read-only trigger overlay stays in M2.**
 
-The claim in §"Status" above — *"Design complete, no open forks"* — was wrong. This was the fork it missed.
+§16's audit above closed with **"Open forks: none. Every decision this design was asked to make is made in-document."** That was wrong. This was the fork it missed.
 
 ### What decides it: a trigger has no identity apart from its binding
 
