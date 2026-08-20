@@ -613,3 +613,29 @@ The grid cursor now follows the pointer: `EditorCanvas` moves it to whatever cel
 ### What this addendum does not reopen
 
 Placement is now decided for every device; §14's "mouse-only operation… out of scope" and the Actions radial's single shared trigger are unchanged. `MenuSession`, `MenuAimArbitration`, `MenuCloseArbitration`, and the `MutationLocked` chokepoint above are untouched — the anchor is resolved once, at `OpenMenu` time, and has no per-frame interaction with the latch/aim/close state machine those own.
+
+## ADDENDUM 2026-08-20 — behavior assignment gets a menu entry, on the Actions radial (DiVoid #8802)
+
+`editor_assign_behavior` (key `4` / pad button 4) reached `LevelEditor.OnAssignBehaviorPressed` with no menu entry anywhere — the only discoverable route to M3/M4/M5a was an unlabelled key. This addendum records where the entry landed and why, so the next surface change finds the reasoning instead of a diff.
+
+### Surface: the Actions radial's eighth wedge, not the overflow list
+
+Two surfaces were live candidates. The Actions overflow list (reached through the radial's "More…") already holds an analogous entry, "Level Script…" — the same operation on a fixed, non-cell-addressed subject. But that list is the file-ops neighbourhood (New/Save As/Resize…/Edit Tileset…/Bind Tileset…), and reaching it costs two gestures (open Actions, then More…) versus one for a radial wedge. Assignment is subject-*sensitive* — it acts on whatever the grid cursor is over at the moment of commit — which argues for the surface a user already has open while positioned on a cell, not the file-management list one hop further away. No dedicated per-cell "context" surface exists to prefer instead: §14's mouse-context trigger (`editor_menu_context`, RMB-hold) was repointed to the Tiles list in U3 (DiVoid #8654 §3), and reopening that assignment is out of scope here.
+
+The Actions radial had exactly one open wedge (`MenuCatalog.RadialCap` is 8; the pre-existing menu used 7). `MenuCatalog.BuildActionsMenu` gained one `MenuOutcome.AssignBehaviorAtCursor` wedge, labelled `"Assign…"`, immediately before the trailing `"More…"` — Actions now sits exactly at the cap. `MenuCatalogTests` was updated entry-by-entry against this shape (not regenerated from the new builder), so the pinned `(Label, Outcome)` table and the radial-cap-fit test both went red first, for the reason each was written to catch, before being brought current.
+
+### Empty cell: an honest state, not a silent no-op
+
+Choosing "Assign…" over a cell with no object, trigger, or tile calls `LevelEditor.OpenNoSubjectNotice`, which opens the shared `ChoiceList` with the title "Assign Behavior" and a body naming the active layer, e.g. "Nothing on layer 'backdrop' under the cursor to assign a behavior to." (DiVoid #8805 CF-1 — the first cut said "Nothing under the cursor…" with no layer named, which read as false whenever the active layer was mostly empty, as `backdrop` is in the sample level) — the same honest-empty-state shape `ChoiceList`'s `emptyMessage` parameter already gives the picker itself when a subject has no applicable predefined behaviors. `LevelEditor.AssignBehaviorAtCursor` is the single lookup both the wedge and the pre-existing `4` key now route through, so the keybinding gained the same honest state as a side effect of not duplicating the found/not-found branch — it no longer no-ops silently either.
+
+### Naming the subject: in the picker's title, not on the wedge
+
+The wedge label stays static (`"Assign…"`), matching every sibling wedge's fixed, short caption; `PopInMenu`'s wedge-chip text has no wrapping or truncation, so a variable-length object/trigger name drawn into a 60px chip risked clipping or overlap on a surface no radial wedge has carried before. Instead, `BehaviorAssignmentPanel.Summon` takes an optional `subjectName`, and the picker's title becomes `"Assign Behavior — Object 'jump-block-1'"` (or `Trigger '…'`) when one is available — a wide label with room for it, shown at the point the user is about to commit rather than flashed on a wedge in passing. `LevelEditor.SubjectDisplayName` resolves it from the placement/trigger name already carried by `EditableLevel`; a tile subject has no per-instance name and the level script has exactly one instance, so both fall back to the bare kind, unchanged from before this addendum.
+
+### Left for a separate task: signalling which cells resolve on the active layer
+
+`EditorCanvas` already draws every object and trigger with its `Placement.Name`/`Name` label, so a cell holding one is visibly distinguishable from open sky before any menu opens. What is missing is narrower: nothing on the canvas shows whether the *hovered* cell would actually resolve through `FindBehaviorSubjectAt` on the *active* layer — objects and triggers resolve regardless of the active layer, but a tile only resolves when it sits on the layer currently selected in the layer list, and the grid cursor's appearance does not change to reflect that. Building that affordance (a cursor-state highlight, an icon, a status-bar hint) is a bigger change than this fix carries: it needs a per-frame "does the hovered cell resolve on this layer" query wired into `EditorCanvas`'s draw path, not just the on-commit lookup `AssignBehaviorAtCursor` already does. The empty-cell notice now names the active layer (`OpenNoSubjectNotice`, DiVoid #8805 CF-1) so a user who hits it is told why, but that is a one-shot message on commit, not a hover-time affordance. Left for Toni to decide whether to file.
+
+### What this addendum does not reopen
+
+The `editor_assign_behavior` binding, `FindBehaviorSubjectAt`, and the picker's own stage machine (`BehaviorAssignmentPicker`, `BehaviorAssignmentPanel`'s parameter-tuning step) are unchanged — this addendum is entry-point plumbing onto an existing, already-verified assignment path (DiVoid #8760 §A), not a rework of it.

@@ -428,6 +428,9 @@ namespace Uberkarl {
                 case MenuOutcomeKind.AssignLevelScriptBehavior:
                     SummonBehaviorAssignment(BehaviorSubjectTarget.ForLevelScript());
                     break;
+                case MenuOutcomeKind.AssignBehaviorAtCursor:
+                    AssignBehaviorAtCursor();
+                    break;
             }
         }
 
@@ -443,19 +446,44 @@ namespace Uberkarl {
         void OnAssignBehaviorPressed() {
             if (session == null || AnyModalOpen())
                 return;
+            AssignBehaviorAtCursor();
+        }
+
+        void AssignBehaviorAtCursor() {
+            if (session == null)
+                return;
 
             (int x, int y) = canvas.CursorCell;
             BehaviorSubjectTarget target = session.Level.FindBehaviorSubjectAt(activeLayerIndex, x, y);
             if (target.Found)
                 SummonBehaviorAssignment(target);
+            else
+                OpenNoSubjectNotice();
         }
+
+        void OpenNoSubjectNotice() {
+            string layer = ActiveLayerName();
+            choiceList.Open("Assign Behavior", "✕ Close", 0, _ => default,
+                $"Nothing on layer '{layer}' under the cursor to assign a behavior to.", _ => choiceList.Hide(), choiceList.Hide);
+        }
+
+        /// <summary>The active layer's name, or "-" when <see cref="activeLayerIndex"/> is out of range.</summary>
+        string ActiveLayerName() => activeLayerIndex >= 0 && activeLayerIndex < session.Level.Layers.Count
+            ? session.Level.Layers[activeLayerIndex].Name
+            : "-";
 
         void SummonBehaviorAssignment(BehaviorSubjectTarget target) {
             if (session == null)
                 return;
             pendingBehaviorTarget = target;
-            behaviorAssignmentPanel.Summon(target.Kind, session.Level.Scripts.Keys.ToList(), NewScriptSlugTakenPredicate());
+            behaviorAssignmentPanel.Summon(target.Kind, SubjectDisplayName(target), session.Level.Scripts.Keys.ToList(), NewScriptSlugTakenPredicate());
         }
+
+        string SubjectDisplayName(BehaviorSubjectTarget target) => target.Kind switch {
+            BehaviorSubjectKind.Object => session.Level.Objects[target.Index].Placement.Name,
+            BehaviorSubjectKind.Trigger => session.Level.Triggers[target.Index].Name,
+            _ => null,
+        };
 
         /// <summary>The new-script naming step's collision predicate.</summary>
         Func<string, bool> NewScriptSlugTakenPredicate() {

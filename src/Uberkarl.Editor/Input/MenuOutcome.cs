@@ -38,6 +38,9 @@ public enum MenuOutcomeKind
 
     /// <summary>Open the behavior assignment picker for the level script (design #8049 M4).</summary>
     AssignLevelScriptBehavior,
+
+    /// <summary>Open the behavior assignment picker for whatever subject the grid cursor is over.</summary>
+    AssignBehaviorAtCursor,
 }
 
 /// <summary>The file-lifecycle commands a menu can request; the controller maps these to its file IO.</summary>
@@ -128,4 +131,8 @@ public readonly struct MenuOutcome
     /// <summary>An outcome that opens the behavior assignment picker for the level script. Rides the Actions overflow list.</summary>
     public static MenuOutcome AssignLevelScriptBehavior() =>
         new(MenuOutcomeKind.AssignLevelScriptBehavior, -1, default, default);
+
+    /// <summary>An outcome that opens the behavior assignment picker for whatever subject the grid cursor is over. Rides the Actions radial.</summary>
+    public static MenuOutcome AssignBehaviorAtCursor() =>
+        new(MenuOutcomeKind.AssignBehaviorAtCursor, -1, default, default);
 }

@@ -55,7 +55,10 @@ namespace Uberkarl {
             HBoxContainer header = new HBoxContainer();
             root.AddChild(header);
 
-            titleLabel = new Label { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            titleLabel = new Label {
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            };
             titleLabel.AddThemeColorOverride("font_color", EditorTheme.Accent);
             header.AddChild(titleLabel);
 
