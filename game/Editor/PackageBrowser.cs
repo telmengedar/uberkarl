@@ -6,11 +6,11 @@ using Uberkarl.Packages;
 namespace Uberkarl {
 
     /// <summary>
-    /// The summoned, gamepad-first in-game file browser for loading and saving a level (DiVoid #7470 for
-    /// load, #7552 for the file-browser look + save flow). It holds only the source abstraction and the
-    /// opaque summaries/handles it hands back — no file, ZIP, or path knowledge, and no edit logic. Every
-    /// step is rendered by the shared <see cref="ChoiceList"/>; this class owns the flow — which step
-    /// comes next, what a chosen row means, and what cancel does at each step.
+    /// The summoned, gamepad-first in-game file browser for loading and saving a level. It holds only the
+    /// source abstraction and the opaque summaries/handles it hands back — no file, ZIP, or path
+    /// knowledge, and no edit logic. Every step is rendered by the shared <see cref="ChoiceList"/>; this
+    /// class owns the flow — which step comes next, what a chosen row means, and what cancel does at each
+    /// step.
     ///
     /// <b>Load mode</b> (<see cref="SummonLoad"/>): packages → select → that package's levels → select →
     /// <see cref="ResourceChosen"/>.
@@ -323,10 +323,6 @@ namespace Uberkarl {
 
         // ----- back-navigation / close -----
 
-        // The step this browser is on decides what "cancel" (ui_cancel or the header's Back/Close button,
-        // both routed here by ChoiceList) means: one level back out of Resources/SaveResources/
-        // ConfirmOverwrite into Packages (a resource-overwrite confirm steps back to the save-resources
-        // list instead, mirroring its "no" branch above), or a full close from Packages itself.
         void HandleCancel() {
             switch (step) {
                 case Step.Resources:

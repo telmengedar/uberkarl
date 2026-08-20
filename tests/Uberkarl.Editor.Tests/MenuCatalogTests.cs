@@ -191,9 +191,6 @@ public sealed class MenuCatalogTests
         Assert.That(menu.Title, Is.EqualTo("Actions"), "title is displayed data, not derivable from the entry count");
         Assert.That(menu.Count, Is.EqualTo(expected.Length), "entry count");
 
-        // QA #8635 CF-1: the outcome-equality loop below derives its expected value from the same factory
-        // the production code calls, so a mutation inside MenuOutcome.OpenActionsOverflow() moves both sides
-        // together and cannot fail it. Pin the kind literally, independent of that factory.
         Assert.That(menu.Items[6].Outcome.Kind, Is.EqualTo(MenuOutcomeKind.OpenActionsOverflow),
             "the More... wedge must route to the overflow, not merely be data-equal to whatever the factory returns");
 
