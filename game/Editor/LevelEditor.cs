@@ -329,10 +329,19 @@ namespace Uberkarl {
                     MenuModel actions = MenuCatalog.BuildActionsMenu();
                     MenuCatalog.EnforceRadialCap(actions);
                     activeTrigger = trigger;
-                    menuCenterGlobal = canvas.CursorGlobalCenter();
+                    menuCenterGlobal = ResolveMenuCenter();
                     popIn.Open(actions, menuCenterGlobal);
                     break;
             }
+        }
+
+        Vector2 ResolveMenuCenter() {
+            Vector2 cursorCenter = canvas.CursorGlobalCenter();
+            Vector2 pointer = canvas.PointerGlobalPosition;
+            (double X, double Y) anchor = MenuAnchor.Resolve(canvas.PointerDrivesCursor, pointer.X, pointer.Y, cursorCenter.X, cursorCenter.Y);
+            (double X, double Y) clamped = MenuAnchor.Clamp(anchor.X, anchor.Y,
+                canvas.GlobalPosition.X, canvas.GlobalPosition.Y, canvas.Size.X, canvas.Size.Y, PopInMenu.OuterMargin);
+            return new Vector2((float)clamped.X, (float)clamped.Y);
         }
 
         List<string> LayerNames() {

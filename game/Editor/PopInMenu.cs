@@ -24,6 +24,9 @@ namespace Uberkarl {
         const float HitInnerRadius = ChipRadius;
         const float HitOuterRadius = WedgeRadius + ChipRadius;
 
+        /// <summary>Radius from the menu centre a placement clamp must keep clear of the viewport edge.</summary>
+        public const float OuterMargin = WedgeRadius + ChipRadius + 8f;
+
         enum AimSource { None, Pointer, Directional }
 
         MenuModel model;
@@ -189,7 +192,7 @@ namespace Uberkarl {
 
             // Soft focus disc behind the wheel — keeps the canvas readable underneath (the whole area stays
             // the edit canvas) while giving the wedges a backdrop to read against.
-            DrawCircle(center, WedgeRadius + ChipRadius + 8f, new Color(0.05f, 0.06f, 0.08f, 0.55f));
+            DrawCircle(center, OuterMargin, new Color(0.05f, 0.06f, 0.08f, 0.55f));
 
             Font font = GetThemeDefaultFont();
             int fontSize = GetThemeDefaultFontSize();
