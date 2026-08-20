@@ -256,4 +256,86 @@ public sealed class RadialMenuTests
             Assert.That(RadialHighlight.Step(highlighted: -1, count: 0, direction: -1), Is.EqualTo(-1));
         });
     }
+
+    [Test]
+    [Description("DiVoid #8654/#8656: LevelEditor polled popIn.SetAim(CurrentAim()) unconditionally every Transient frame, so a neutral (0,0) reading — the steady state whenever no stick/key is held — cleared any highlight the mouse had just set via SetPositionalAim. This is the guard that must stay red without the fix.")]
+    public void AimArbitration_NeutralDirection_ReportsNoDirectionalAim()
+    {
+        Assert.That(MenuAimArbitration.DirectionalAimPresent(0, 0, Deadzone), Is.False);
+    }
+
+    [Test]
+    public void AimArbitration_WithinDeadzone_ReportsNoDirectionalAim()
+    {
+        Assert.That(MenuAimArbitration.DirectionalAimPresent(0.1, -0.1, Deadzone), Is.False);
+    }
+
+    [Test]
+    public void AimArbitration_ExactlyAtDeadzone_ReportsNoDirectionalAim()
+    {
+        Assert.That(MenuAimArbitration.DirectionalAimPresent(0, Deadzone, Deadzone), Is.False);
+    }
+
+    [Test]
+    public void AimArbitration_PastDeadzone_ReportsDirectionalAimPresent()
+    {
+        Assert.That(MenuAimArbitration.DirectionalAimPresent(0, -1, Deadzone), Is.True);
+    }
+
+    [Test]
+    [Description("QA #8669 W-1: the previous version of this test ((0,-1)->true, (0,0)->false) holds for " +
+        "ANY deadzone in (0,1), so mutating the default parameter from MenuModel.DefaultDeadzone (0.35) to " +
+        "0.05 left it green. Bracket tightly around 0.35 itself so a drift in the default is caught.")]
+    public void AimArbitration_DefaultDeadzone_MatchesMenuModelsDeadzone()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(MenuAimArbitration.DirectionalAimPresent(0, 0.3), Is.False, "0.3 must fall inside a 0.35 deadzone");
+            Assert.That(MenuAimArbitration.DirectionalAimPresent(0, 0.4), Is.True, "0.4 must fall outside a 0.35 deadzone");
+        });
+    }
+
+    [Test]
+    public void AimArbitration_Resolve_OutsideTransient_AlwaysIgnores()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(MenuAimArbitration.Resolve(MenuSessionState.Closed, directionalAimPresent: true, hasPointerHighlight: false),
+                Is.EqualTo(MenuAimArbitration.AimAction.Ignore));
+            Assert.That(MenuAimArbitration.Resolve(MenuSessionState.Latched, directionalAimPresent: false, hasPointerHighlight: true),
+                Is.EqualTo(MenuAimArbitration.AimAction.Ignore));
+        });
+    }
+
+    [Test]
+    public void AimArbitration_Resolve_DirectionalAimPresent_AppliesRegardlessOfPointerHighlight()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(MenuAimArbitration.Resolve(MenuSessionState.Transient, directionalAimPresent: true, hasPointerHighlight: false),
+                Is.EqualTo(MenuAimArbitration.AimAction.ApplyDirectional));
+            Assert.That(MenuAimArbitration.Resolve(MenuSessionState.Transient, directionalAimPresent: true, hasPointerHighlight: true),
+                Is.EqualTo(MenuAimArbitration.AimAction.ApplyDirectional));
+        });
+    }
+
+    [Test]
+    [Description("DiVoid #8669 CF-1: with the old magnitude-only gate, a neutral reading after a wedge had " +
+        "been aimed by the stick/keys committed that wedge instead of cancelling — the fix this test pins is " +
+        "that a NEUTRAL directional reading must clear a highlight the directional source itself set.")]
+    public void AimArbitration_Resolve_NeutralWithNoPointerHighlight_Clears()
+    {
+        Assert.That(MenuAimArbitration.Resolve(MenuSessionState.Transient, directionalAimPresent: false, hasPointerHighlight: false),
+            Is.EqualTo(MenuAimArbitration.AimAction.ClearHighlight));
+    }
+
+    [Test]
+    [Description("The other half of CF-1: a highlight the POINTER set must survive a merely-neutral " +
+        "directional reading — editor-menu-surfaces.md's device-not-phase axis, and the addendum ruling " +
+        "that the mouse resolves through its own positional hit test independent of stick/key polling.")]
+    public void AimArbitration_Resolve_NeutralWithPointerHighlight_Ignores()
+    {
+        Assert.That(MenuAimArbitration.Resolve(MenuSessionState.Transient, directionalAimPresent: false, hasPointerHighlight: true),
+            Is.EqualTo(MenuAimArbitration.AimAction.Ignore));
+    }
 }

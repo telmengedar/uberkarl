@@ -29,7 +29,7 @@ namespace Uberkarl {
         public bool IsPlaying => playWorld != null;
 
         public override void _Ready() {
-            SetAnchorsPreset(LayoutPreset.FullRect);
+            EditorLayout.FillParent(this);
             MouseFilter = MouseFilterEnum.Ignore;
             Visible = false;
         }

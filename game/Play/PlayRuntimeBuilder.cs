@@ -66,7 +66,7 @@ namespace Uberkarl {
                 Name = "Fill",
                 Color = new Color(fill.R / 255f, fill.G / 255f, fill.B / 255f, fill.A / 255f),
             };
-            rect.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            EditorLayout.FillParent(rect);
             backdrop.AddChild(rect);
             root.AddChild(backdrop);
         }

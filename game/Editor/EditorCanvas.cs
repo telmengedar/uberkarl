@@ -65,6 +65,12 @@ namespace Uberkarl {
         /// off the radial onto this full-rect canvas while a stick/D-pad aim is held.</summary>
         public bool DirectionalInputCaptured { get; set; }
 
+        /// <summary>Set once by the controller in <c>BuildUi</c> to <c>AnyModalOpen</c> — a live predicate,
+        /// not a per-frame snapshot, so a modal opened or closed mid-frame is still seen correctly. Checked
+        /// at every site that mutates the level document or drives a mouse action: <see cref="EmitCellAt"/>,
+        /// <see cref="EraseAtGlobal"/>, and the mouse handling in <see cref="_GuiInput"/>.</summary>
+        public Func<bool> MutationLocked { get; set; } = () => false;
+
         /// <summary>Raised when a cell is activated with the primary action — a mouse click/drag, or the
         /// paint action at the grid cursor. The controller applies the active tool to this cell.</summary>
         public event Action<int, int> CellPressed;
@@ -239,13 +245,13 @@ namespace Uberkarl {
             // here — we do NOT AcceptEvent, letting the confirm reach the focused Button/ItemList. Mirrors the
             // cursor-movement gate; both read the controller-set DirectionalInputCaptured flag.
             bool canvasOwnsInput = CursorInputGate.AllowsPrimaryAction(HasFocus(), DirectionalInputCaptured);
-            if (canvasOwnsInput && @event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Paint))) {
+            if (canvasOwnsInput && !MutationLocked() && @event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Paint))) {
                 if (cursor != null)
                     CellPressed?.Invoke(cursor.X, cursor.Y);
                 AcceptEvent();
                 return;
             }
-            if (canvasOwnsInput && @event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Erase))) {
+            if (canvasOwnsInput && !MutationLocked() && @event.IsActionPressed(EditorActionMap.NameOf(EditorAction.Erase))) {
                 if (cursor != null)
                     CellErased?.Invoke(cursor.X, cursor.Y);
                 AcceptEvent();
@@ -255,6 +261,8 @@ namespace Uberkarl {
             // Mouse: hover + click/drag paints via the active tool, and snaps the shared cursor to the cell.
             if (@event is InputEventMouseButton button && button.ButtonIndex == MouseButton.Left) {
                 if (button.Pressed) {
+                    if (MutationLocked())
+                        return;
                     GrabFocus();
                     pointerDown = true;
                     lastCellX = int.MinValue;
@@ -267,9 +275,17 @@ namespace Uberkarl {
                     EmitCellAt(button.Position);
                 } else {
                     pointerDown = false;
+                    lastCellX = int.MinValue;
+                    lastCellY = int.MinValue;
                 }
                 AcceptEvent();
-            } else if (@event is InputEventMouseButton wheel && wheel.Pressed &&
+                return;
+            }
+
+            if (MutationLocked())
+                return;
+
+            if (@event is InputEventMouseButton wheel && wheel.Pressed &&
                 (wheel.ButtonIndex == MouseButton.WheelUp || wheel.ButtonIndex == MouseButton.WheelDown)) {
                 // Mouse-wheel zoom is a direct convenience on the canvas (like the click/hover handling
                 // above), independent of the editor_zoom_in/out actions LevelEditor dispatches for
@@ -314,6 +330,9 @@ namespace Uberkarl {
         /// <summary>Erase the cell under a global (viewport-space) point, if it maps to a cell — the mouse
         /// right-click-tap erase convenience, resolved by the controller and routed like any other erase.</summary>
         public void EraseAtGlobal(Vector2 globalPosition) {
+            if (MutationLocked())
+                return;
+
             Vector2 local = globalPosition - GlobalPosition;
             if (TryCell(local, out int cx, out int cy)) {
                 if (cursor != null && cursor.MoveTo(cx, cy)) {
@@ -325,6 +344,8 @@ namespace Uberkarl {
         }
 
         void EmitCellAt(Vector2 localPosition) {
+            if (MutationLocked())
+                return;
             if (!TryCell(localPosition, out int cx, out int cy))
                 return;
             if (cx == lastCellX && cy == lastCellY)
