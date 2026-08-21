@@ -27,4 +27,7 @@ public static class ScriptResourcePaths
         var slug = value[Directory.Length..^Suffix.Length];
         return slug.Length == 0 ? null : slug;
     }
+
+    /// <summary>The human-facing label for a script resource — the slug when <paramref name="path"/> follows the <c>scripts/&lt;slug&gt;.poo</c> convention, else the raw path. Shared by the assignment picker's "existing script" row and the canvas/status-line overlay so both name a script the same way.</summary>
+    public static string DisplayLabel(ResourcePath path) => SlugFromScriptPath(path) ?? path.Value;
 }

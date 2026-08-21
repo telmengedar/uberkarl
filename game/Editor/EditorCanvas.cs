@@ -58,6 +58,7 @@ namespace Uberkarl {
 
         IReadOnlyList<EditableObjectPlacement> overlayObjects = Array.Empty<EditableObjectPlacement>();
         IReadOnlyList<AreaTriggerDefinition> overlayTriggers = Array.Empty<AreaTriggerDefinition>();
+        IReadOnlyList<TileBehaviorOverride> overlayTileBehaviorOverrides = Array.Empty<TileBehaviorOverride>();
 
         /// <summary>Set by the controller while a pop-in radial is open or a toolbar/panel focus-zone is
         /// active: directional input is being consumed by that surface, so the grid cursor must freeze even
@@ -133,10 +134,13 @@ namespace Uberkarl {
             QueueRedraw();
         }
 
-        /// <summary>Sets the placed-object/trigger data the authoring overlay draws. <c>null</c> lists are treated as empty.</summary>
-        public void SetOverlay(IReadOnlyList<EditableObjectPlacement> objects, IReadOnlyList<AreaTriggerDefinition> triggers) {
+        /// <summary>Sets the placed-object/trigger/tile-override data the authoring overlay draws. <c>null</c>
+        /// lists are treated as empty; <paramref name="tileBehaviorOverrides"/> is expected pre-filtered to
+        /// the active layer.</summary>
+        public void SetOverlay(IReadOnlyList<EditableObjectPlacement> objects, IReadOnlyList<AreaTriggerDefinition> triggers, IReadOnlyList<TileBehaviorOverride> tileBehaviorOverrides) {
             overlayObjects = objects ?? Array.Empty<EditableObjectPlacement>();
             overlayTriggers = triggers ?? Array.Empty<AreaTriggerDefinition>();
+            overlayTileBehaviorOverrides = tileBehaviorOverrides ?? Array.Empty<TileBehaviorOverride>();
             QueueRedraw();
         }
 
@@ -469,6 +473,7 @@ namespace Uberkarl {
 
             DrawObjectOverlay(origin, step);
             DrawTriggerOverlay(origin, step);
+            DrawTileBehaviorOverrideOverlay(origin, step);
 
             // Hovered-cell highlight (mouse) — a soft amber wash.
             if (hoverX >= 0 && hoverY >= 0) {
@@ -506,6 +511,8 @@ namespace Uberkarl {
                 if (!string.IsNullOrEmpty(placement.Placement.Name))
                     DrawString(font, cellPos + new Vector2(2f, step - 4f), placement.Placement.Name,
                         HorizontalAlignment.Left, step - 4f, fontSize - 3, outline);
+                if (placement.EffectiveBehavior is not null)
+                    DrawBehaviorMarker(rect, outline);
             }
         }
 
@@ -520,11 +527,35 @@ namespace Uberkarl {
             foreach (AreaTriggerDefinition trigger in overlayTriggers) {
                 Vector2 rectPos = origin + new Vector2(trigger.X, trigger.Y) * step;
                 Vector2 rectSize = new Vector2(trigger.Width, trigger.Height) * step;
-                DrawRect(new Rect2(rectPos, rectSize), outline, false, 2f);
+                Rect2 rect = new Rect2(rectPos, rectSize);
+                DrawRect(rect, outline, false, 2f);
                 if (!string.IsNullOrEmpty(trigger.Name))
                     DrawString(font, rectPos + new Vector2(2f, 14f), trigger.Name,
                         HorizontalAlignment.Left, rectSize.X - 4f, fontSize - 3, outline);
+                DrawBehaviorMarker(rect, outline);
             }
+        }
+
+        void DrawTileBehaviorOverrideOverlay(Vector2 origin, float step) {
+            if (overlayTileBehaviorOverrides.Count == 0)
+                return;
+
+            Color outline = new Color(0.8f, 0.45f, 0.95f, 0.9f);
+
+            foreach (TileBehaviorOverride entry in overlayTileBehaviorOverrides) {
+                Vector2 cellPos = origin + new Vector2(entry.Cell.X, entry.Cell.Y) * step;
+                Rect2 rect = new Rect2(cellPos, new Vector2(step, step));
+                DrawRect(rect, outline, false, 2f);
+                DrawBehaviorMarker(rect, outline);
+            }
+        }
+
+        const float BehaviorMarkerSize = 12f;
+
+        void DrawBehaviorMarker(Rect2 rect, Color color) {
+            float size = Mathf.Min(BehaviorMarkerSize, Mathf.Min(rect.Size.X, rect.Size.Y) * 0.6f);
+            Vector2 topRight = rect.Position + new Vector2(rect.Size.X, 0f);
+            DrawColoredPolygon(new[] { topRight + new Vector2(-size, 0f), topRight, topRight + new Vector2(0f, size) }, color);
         }
     }
 }
