@@ -728,7 +728,10 @@ namespace Uberkarl {
             Control spacer = new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill };
             row.AddChild(spacer);
 
-            statusLabel = new Label { Text = string.Empty, VerticalAlignment = VerticalAlignment.Center };
+            statusLabel = new Label {
+                Text = string.Empty, VerticalAlignment = VerticalAlignment.Center,
+                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            };
             statusLabel.AddThemeColorOverride("font_color", EditorTheme.TextDim);
             row.AddChild(statusLabel);
 
@@ -1061,11 +1064,8 @@ namespace Uberkarl {
             UpdateState();
         }
 
-        /// <summary>The full, unbounded, parameter-including label for whatever behavior-scriptable subject
-        /// is under the grid cursor right now — the status-line answer to "what is it", for what the canvas
-        /// marker can only answer as "does it have one". Uses the same lookup
-        /// <see cref="AssignBehaviorAtCursor"/> does, so "what the status line names" and "what the picker
-        /// would edit" are always the same subject.</summary>
+        /// <summary>The status-line label for whatever behavior-scriptable subject is under the grid cursor
+        /// right now: the subject's kind and name, then its behavior — or "none" when nothing resolves.</summary>
         string CursorSubjectStatusText() {
             (int x, int y) = canvas.CursorCell;
             if (x < 0 || y < 0)
@@ -1075,7 +1075,7 @@ namespace Uberkarl {
             if (!target.Found)
                 return "none";
 
-            return target.Kind switch {
+            string behaviorText = target.Kind switch {
                 BehaviorSubjectKind.Object => session.Level.Objects[target.Index].EffectiveBehavior is { } behavior
                     ? BehaviorBindingLabel.FormatFull(behavior)
                     : "none",
@@ -1083,6 +1083,8 @@ namespace Uberkarl {
                 BehaviorSubjectKind.Tile => TileOverrideStatusText(target.Layer, target.X, target.Y),
                 _ => "none",
             };
+
+            return $"{BehaviorSubjectLabel.Format(target.Kind, SubjectDisplayName(target))} — {behaviorText}";
         }
 
         string TileOverrideStatusText(int layer, int x, int y) {
