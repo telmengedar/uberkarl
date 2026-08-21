@@ -92,6 +92,7 @@ namespace Uberkarl {
         BehaviorAssignmentPanel behaviorAssignmentPanel;
         BehaviorSubjectTarget pendingBehaviorTarget;
         PlaytestOverlay playtestOverlay;
+        (int X, int Y) lastCursorStatusCell = (int.MinValue, int.MinValue);
         // Tile/layer selection STATE persists here (the radials read it); the visible side-panel lists that
         // used to mirror it are gone — the Tiles (LB) / Layers (RB) radials fully cover selection.
         readonly List<int> paletteTileIds = new List<int>();
@@ -151,6 +152,8 @@ namespace Uberkarl {
         public override void _Process(double delta) {
             if (popIn == null || Playtesting)
                 return;
+
+            UpdateCursorSubjectStatus();
 
             float d = (float)delta;
             UpdateReveals();
@@ -725,7 +728,10 @@ namespace Uberkarl {
             Control spacer = new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill };
             row.AddChild(spacer);
 
-            statusLabel = new Label { Text = string.Empty, VerticalAlignment = VerticalAlignment.Center };
+            statusLabel = new Label {
+                Text = string.Empty, VerticalAlignment = VerticalAlignment.Center,
+                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            };
             statusLabel.AddThemeColorOverride("font_color", EditorTheme.TextDim);
             row.AddChild(statusLabel);
 
@@ -861,6 +867,7 @@ namespace Uberkarl {
             if (session == null)
                 return;
             canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(session.Level));
+            RefreshOverlay();
             UpdateState();
         }
 
@@ -1041,7 +1048,50 @@ namespace Uberkarl {
         void RefreshOverlay() {
             if (session == null)
                 return;
-            canvas.SetOverlay(session.Level.Objects, session.Level.Triggers);
+            canvas.SetOverlay(session.Level.Objects, session.Level.Triggers, ActiveLayerTileBehaviorOverrides());
+        }
+
+        IReadOnlyList<TileBehaviorOverride> ActiveLayerTileBehaviorOverrides() =>
+            session.Level.TileBehaviorOverrides.Where(entry => entry.Layer == activeLayerIndex).ToList();
+
+        void UpdateCursorSubjectStatus() {
+            if (session == null || canvas == null)
+                return;
+            (int x, int y) = canvas.CursorCell;
+            if (x == lastCursorStatusCell.X && y == lastCursorStatusCell.Y)
+                return;
+            lastCursorStatusCell = (x, y);
+            UpdateState();
+        }
+
+        /// <summary>The label for the behavior-scriptable subject under the grid cursor, or null when nothing resolves there.</summary>
+        string CursorSubjectLabelText() {
+            if (session == null || canvas == null)
+                return null;
+
+            (int x, int y) = canvas.CursorCell;
+            if (x < 0 || y < 0)
+                return null;
+
+            BehaviorSubjectTarget target = session.Level.FindBehaviorSubjectAt(activeLayerIndex, x, y);
+            if (!target.Found)
+                return null;
+
+            string behaviorText = target.Kind switch {
+                BehaviorSubjectKind.Object => session.Level.Objects[target.Index].EffectiveBehavior is { } behavior
+                    ? BehaviorBindingLabel.FormatFull(behavior)
+                    : "none",
+                BehaviorSubjectKind.Trigger => BehaviorBindingLabel.FormatFull(session.Level.Triggers[target.Index].Binding),
+                BehaviorSubjectKind.Tile => TileOverrideStatusText(target.Layer, target.X, target.Y),
+                _ => "none",
+            };
+
+            return $"{BehaviorSubjectLabel.Format(target.Kind, SubjectDisplayName(target))} — {behaviorText}";
+        }
+
+        string TileOverrideStatusText(int layer, int x, int y) {
+            int index = session.Level.FindTileBehaviorOverrideIndex(layer, x, y);
+            return index >= 0 ? BehaviorBindingLabel.FormatFull(session.Level.TileBehaviorOverrides[index]) : "none";
         }
 
         // Rebuild the tile-selection STATE the Tiles radial reads: the ordered tile ids and their textures
@@ -1465,6 +1515,7 @@ namespace Uberkarl {
 
         void OnLayerSelected(long index) {
             activeLayerIndex = (int)index;
+            RefreshOverlay();
             UpdateState();
         }
 
@@ -1481,10 +1532,12 @@ namespace Uberkarl {
                 redoButton.Disabled = !session.CanRedo;
             }
 
-            statusLabel.Text = BuildStatusText();
+            string cursorSubjectLabel = CursorSubjectLabelText();
+            canvas?.SetCursorSubjectLabel(cursorSubjectLabel);
+            statusLabel.Text = BuildStatusText(cursorSubjectLabel);
         }
 
-        string BuildStatusText() {
+        string BuildStatusText(string cursorSubjectLabel) {
             if (session == null)
                 return string.Empty;
 
@@ -1505,7 +1558,9 @@ namespace Uberkarl {
                     _ => activeTileId == LayerDefinition.EmptyCell ? "none" : $"#{activeTileId}",
                 };
             string tileSet = tileSetSession != null ? tileSetSession.TileSet.Name : "none";
-            return $"{session.Level.Name}{dirty}  ·  package: {package}  ·  tileset: {tileSet}  ·  layer: {layer}  ·  tool: {activeTool} ({tile})";
+            string levelScript = session.Level.LevelScript is { } binding ? BehaviorBindingLabel.Format(binding) : "none";
+            string cursorSubject = cursorSubjectLabel ?? "none";
+            return $"{session.Level.Name}{dirty}  ·  package: {package}  ·  tileset: {tileSet}  ·  layer: {layer}  ·  tool: {activeTool} ({tile})  ·  level script: {levelScript}  ·  at cursor: {cursorSubject}";
         }
 
         // ----- small factory helpers -----

@@ -160,7 +160,7 @@ public sealed class BehaviorAssignmentPicker
         foreach (var predefined in predefineds)
             choices.Add(BehaviorAssignmentChoice.ForPredefined(predefined.Label));
         foreach (var path in existingScripts)
-            choices.Add(BehaviorAssignmentChoice.ForExistingScript(ScriptResourcePaths.SlugFromScriptPath(path) ?? path.Value));
+            choices.Add(BehaviorAssignmentChoice.ForExistingScript(ScriptResourcePaths.DisplayLabel(path)));
         choices.Add(BehaviorAssignmentChoice.ForNewScript("＋ New script…"));
         return choices;
     }
