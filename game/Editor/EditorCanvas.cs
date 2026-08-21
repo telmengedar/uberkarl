@@ -59,6 +59,7 @@ namespace Uberkarl {
         IReadOnlyList<EditableObjectPlacement> overlayObjects = Array.Empty<EditableObjectPlacement>();
         IReadOnlyList<AreaTriggerDefinition> overlayTriggers = Array.Empty<AreaTriggerDefinition>();
         IReadOnlyList<TileBehaviorOverride> overlayTileBehaviorOverrides = Array.Empty<TileBehaviorOverride>();
+        string cursorSubjectLabel;
 
         /// <summary>Set by the controller while a pop-in radial is open or a toolbar/panel focus-zone is
         /// active: directional input is being consumed by that surface, so the grid cursor must freeze even
@@ -141,6 +142,14 @@ namespace Uberkarl {
             overlayObjects = objects ?? Array.Empty<EditableObjectPlacement>();
             overlayTriggers = triggers ?? Array.Empty<AreaTriggerDefinition>();
             overlayTileBehaviorOverrides = tileBehaviorOverrides ?? Array.Empty<TileBehaviorOverride>();
+            QueueRedraw();
+        }
+
+        /// <summary>Sets the label drawn near the grid cursor; null or empty draws nothing.</summary>
+        public void SetCursorSubjectLabel(string label) {
+            if (cursorSubjectLabel == label)
+                return;
+            cursorSubjectLabel = label;
             QueueRedraw();
         }
 
@@ -492,6 +501,37 @@ namespace Uberkarl {
                 DrawRect(new Rect2(cellPos, new Vector2(step, step)), new Color(1f, 0.85f, 0.2f, active ? 0.18f : 0.08f));
                 DrawRect(new Rect2(cellPos, new Vector2(step, step)), new Color(1f, 0.85f, 0.2f, alpha), false, thickness);
             }
+
+            DrawCursorSubjectLabel(origin, step);
+        }
+
+        static readonly Color CursorLabelBackground = new Color(0.05f, 0.05f, 0.08f, 0.85f);
+        static readonly Color CursorLabelBorder = new Color(1f, 1f, 1f, 0.22f);
+        static readonly Color CursorLabelText = new Color(0.95f, 0.95f, 0.95f, 1f);
+        const float CursorLabelPaddingX = 6f;
+        const float CursorLabelPaddingY = 4f;
+
+        void DrawCursorSubjectLabel(Vector2 origin, float step) {
+            if (string.IsNullOrEmpty(cursorSubjectLabel) || cursor == null)
+                return;
+
+            Font font = GetThemeDefaultFont();
+            int fontSize = GetThemeDefaultFontSize();
+            Vector2 textSize = font.GetStringSize(cursorSubjectLabel, HorizontalAlignment.Left, -1f, fontSize);
+            Vector2 labelSize = textSize + new Vector2(CursorLabelPaddingX, CursorLabelPaddingY) * 2f;
+
+            Vector2 cellPos = origin + new Vector2(cursor.X, cursor.Y) * step;
+            (double x, double y) = CursorLabelAnchor.Resolve(
+                cellPos.X, cellPos.Y, step, step,
+                labelSize.X, labelSize.Y,
+                0, 0, Size.X, Size.Y);
+            Vector2 labelPos = new Vector2((float)x, (float)y);
+
+            DrawRect(new Rect2(labelPos, labelSize), CursorLabelBackground);
+            DrawRect(new Rect2(labelPos, labelSize), CursorLabelBorder, false, 1f);
+            float baselineY = labelPos.Y + CursorLabelPaddingY + font.GetAscent(fontSize);
+            DrawString(font, new Vector2(labelPos.X + CursorLabelPaddingX, baselineY), cursorSubjectLabel,
+                HorizontalAlignment.Left, -1f, fontSize, CursorLabelText);
         }
 
         void DrawObjectOverlay(Vector2 origin, float step) {

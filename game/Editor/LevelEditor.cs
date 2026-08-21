@@ -1064,16 +1064,18 @@ namespace Uberkarl {
             UpdateState();
         }
 
-        /// <summary>The status-line label for whatever behavior-scriptable subject is under the grid cursor
-        /// right now: the subject's kind and name, then its behavior — or "none" when nothing resolves.</summary>
-        string CursorSubjectStatusText() {
+        /// <summary>The label for the behavior-scriptable subject under the grid cursor, or null when nothing resolves there.</summary>
+        string CursorSubjectLabelText() {
+            if (session == null || canvas == null)
+                return null;
+
             (int x, int y) = canvas.CursorCell;
             if (x < 0 || y < 0)
-                return "none";
+                return null;
 
             BehaviorSubjectTarget target = session.Level.FindBehaviorSubjectAt(activeLayerIndex, x, y);
             if (!target.Found)
-                return "none";
+                return null;
 
             string behaviorText = target.Kind switch {
                 BehaviorSubjectKind.Object => session.Level.Objects[target.Index].EffectiveBehavior is { } behavior
@@ -1530,10 +1532,12 @@ namespace Uberkarl {
                 redoButton.Disabled = !session.CanRedo;
             }
 
-            statusLabel.Text = BuildStatusText();
+            string cursorSubjectLabel = CursorSubjectLabelText();
+            canvas?.SetCursorSubjectLabel(cursorSubjectLabel);
+            statusLabel.Text = BuildStatusText(cursorSubjectLabel);
         }
 
-        string BuildStatusText() {
+        string BuildStatusText(string cursorSubjectLabel) {
             if (session == null)
                 return string.Empty;
 
@@ -1555,7 +1559,7 @@ namespace Uberkarl {
                 };
             string tileSet = tileSetSession != null ? tileSetSession.TileSet.Name : "none";
             string levelScript = session.Level.LevelScript is { } binding ? BehaviorBindingLabel.Format(binding) : "none";
-            string cursorSubject = CursorSubjectStatusText();
+            string cursorSubject = cursorSubjectLabel ?? "none";
             return $"{session.Level.Name}{dirty}  ·  package: {package}  ·  tileset: {tileSet}  ·  layer: {layer}  ·  tool: {activeTool} ({tile})  ·  level script: {levelScript}  ·  at cursor: {cursorSubject}";
         }
 
