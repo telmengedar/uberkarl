@@ -22,16 +22,11 @@ public static class LevelResourcePaths
     private const string LevelDirectory = "levels/";
     private const string LevelSuffix = ".json";
 
-    /// <summary>
-    /// Sanitizes <paramref name="name"/> into a lowercase, hyphenated path segment: letters/digits are
-    /// kept, every run of anything else collapses to a single '-', and leading/trailing hyphens are
-    /// trimmed. Falls back to <c>"level"</c> when the input has no alphanumeric content at all, so a
-    /// slug is always a valid, non-empty <see cref="ResourcePath"/> segment.
-    /// </summary>
-    public static string Slugify(string name)
+    /// <summary>Sanitizes <paramref name="name"/> into a per-character-lowercased, hyphenated path segment, falling back to <paramref name="fallback"/> for empty input.</summary>
+    public static string Slugify(string name, string fallback = "level")
     {
         if (string.IsNullOrWhiteSpace(name))
-            return "level";
+            return fallback;
 
         var builder = new StringBuilder(name.Length);
         var lastWasDash = false;
@@ -52,7 +47,7 @@ public static class LevelResourcePaths
         while (builder.Length > 0 && builder[^1] == '-')
             builder.Length--;
 
-        return builder.Length == 0 ? "level" : builder.ToString();
+        return builder.Length == 0 ? fallback : builder.ToString();
     }
 
     /// <summary>The in-package path a level definition with this slug is stored at.</summary>

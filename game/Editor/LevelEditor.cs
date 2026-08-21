@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Godot;
 using Uberkarl.Behavior;
 using Uberkarl.Content;
@@ -453,10 +454,23 @@ namespace Uberkarl {
             if (session == null)
                 return;
             pendingBehaviorTarget = target;
-            behaviorAssignmentPanel.Summon(target.Kind);
+            behaviorAssignmentPanel.Summon(target.Kind, session.Level.Scripts.Keys.ToList(), NewScriptSlugTakenPredicate());
+        }
+
+        /// <summary>The new-script naming step's collision predicate.</summary>
+        Func<string, bool> NewScriptSlugTakenPredicate() {
+            IReadOnlyList<ResourceEntry> siblingResources = Array.Empty<ResourceEntry>();
+            if (session.Level.IsAttached && packageContext != null && packageSource != null) {
+                using Package package = packageSource.Open(packageContext.Handle);
+                siblingResources = package.Manifest.Resources;
+            }
+            return session.NewScriptSlugTaken(siblingResources);
         }
 
         void OnBehaviorAssigned(BehaviorBinding binding) {
+            if (behaviorAssignmentPanel.MintedScriptPath is { } mintedPath)
+                session.UpsertScriptSource(mintedPath, behaviorAssignmentPanel.MintedScriptSource);
+
             switch (pendingBehaviorTarget.Kind) {
                 case BehaviorSubjectKind.Object:
                     session.AssignObjectBehavior(pendingBehaviorTarget.Index, binding);
@@ -474,10 +488,10 @@ namespace Uberkarl {
 
             RefreshOverlay();
             UpdateState();
-            canvas?.GrabFocus();
+            canvas?.CallDeferred(Control.MethodName.GrabFocus);
         }
 
-        void OnBehaviorAssignmentCancelled() => canvas?.GrabFocus();
+        void OnBehaviorAssignmentCancelled() => canvas?.CallDeferred(Control.MethodName.GrabFocus);
 
         void SummonLayerManager() {
             if (session == null)
@@ -637,6 +651,7 @@ namespace Uberkarl {
 
             behaviorAssignmentPanel = new BehaviorAssignmentPanel();
             behaviorAssignmentPanel.AttachChoiceList(choiceList);
+            behaviorAssignmentPanel.AttachKeyboard(textKeyboard);
             behaviorAssignmentPanel.Assigned += OnBehaviorAssigned;
             behaviorAssignmentPanel.Cancelled += OnBehaviorAssignmentCancelled;
             AddChild(behaviorAssignmentPanel);

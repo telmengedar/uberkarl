@@ -258,6 +258,12 @@ public sealed class EditableLevel
     public BehaviorBinding? CaptureBehavior(Package package, BehaviorBinding? binding, string role)
         => EditableBehaviorBindings.Capture(package, binding, role, scripts);
 
+    /// <summary>Upserts (creates or replaces) the script table entry at <paramref name="path"/> with <paramref name="source"/>. Never removes an entry.</summary>
+    public void UpsertScript(ResourcePath path, string source)
+    {
+        scripts[path] = source ?? throw new ArgumentNullException(nameof(source));
+    }
+
     /// <summary>The index of the first trigger whose rect contains cell (x,y), or -1 when none does.</summary>
     public int FindTriggerIndexAt(int x, int y)
     {
