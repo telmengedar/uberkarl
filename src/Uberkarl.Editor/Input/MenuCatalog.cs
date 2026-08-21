@@ -46,7 +46,7 @@ public static class MenuCatalog
         return new MenuModel("Layers", items);
     }
 
-    /// <summary>The Actions menu: file ops, undo/redo, tool toggle, and a trailing "More…" that opens <see cref="BuildActionsOverflowMenu"/>. Takes no content — fixed in code, and fits <see cref="RadialCap"/>.</summary>
+    /// <summary>The Actions menu: file ops, undo/redo, tool toggle, "Assign…" for the cursor's subject, and a trailing "More…" that opens <see cref="BuildActionsOverflowMenu"/>. Takes no content — fixed in code, and fits exactly to <see cref="RadialCap"/>.</summary>
     public static MenuModel BuildActionsMenu()
     {
         MenuItem[] items =
@@ -57,6 +57,7 @@ public static class MenuCatalog
             new MenuItem("Redo", MenuOutcome.Invoke(EditorAction.Redo)),
             new MenuItem("Tool", MenuOutcome.Invoke(EditorAction.ToggleTool)),
             new MenuItem("Play", MenuOutcome.Invoke(EditorAction.Playtest)),
+            new MenuItem("Assign…", MenuOutcome.AssignBehaviorAtCursor()),
             new MenuItem("More…", MenuOutcome.OpenActionsOverflow()),
         };
         return new MenuModel("Actions", items);

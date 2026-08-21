@@ -17,6 +17,7 @@ namespace Uberkarl {
 
         BehaviorAssignmentPicker picker;
         Func<string, bool> pendingSlugTaken;
+        string subjectName;
 
         /// <summary>Raised once, on a successful pick, with the assembled binding.</summary>
         public event Action<BehaviorBinding> Assigned;
@@ -70,9 +71,10 @@ namespace Uberkarl {
         /// <summary>Attaches the shared <see cref="OnScreenKeyboard"/> the new-script naming step uses.</summary>
         public void AttachKeyboard(OnScreenKeyboard onScreenKeyboard) => keyboard = onScreenKeyboard;
 
-        /// <summary>Summons the picker for <paramref name="subjectKind"/> over <paramref name="existingScripts"/>, checking a committed new-script name against <paramref name="isNewScriptSlugTaken"/>.</summary>
-        public void Summon(BehaviorSubjectKind subjectKind, IReadOnlyList<ResourcePath> existingScripts, Func<string, bool> isNewScriptSlugTaken) {
+        /// <summary>Summons the picker for <paramref name="subjectKind"/> over <paramref name="existingScripts"/>, checking a committed new-script name against <paramref name="isNewScriptSlugTaken"/>. <paramref name="subjectName"/>, when given, is shown in the picker title.</summary>
+        public void Summon(BehaviorSubjectKind subjectKind, string subjectName, IReadOnlyList<ResourcePath> existingScripts, Func<string, bool> isNewScriptSlugTaken) {
             picker = new BehaviorAssignmentPicker(subjectKind, existingScripts);
+            this.subjectName = subjectName;
             pendingSlugTaken = isNewScriptSlugTaken;
             MintedScriptPath = null;
             MintedScriptSource = null;
@@ -80,9 +82,13 @@ namespace Uberkarl {
         }
 
         void OpenChoiceList() {
-            choiceList.Open($"Assign Behavior — {SubjectLabel(picker.SubjectKind)}", "✕ Cancel", picker.Choices.Count, ChoiceRow,
+            choiceList.Open($"Assign Behavior — {PickerTitleSuffix(picker.SubjectKind, subjectName)}", "✕ Cancel", picker.Choices.Count, ChoiceRow,
                 "No behaviors available.", OnChoiceChosen, OnChoiceListDismissed);
         }
+
+        /// <summary>The picker title's subject portion: the kind, plus the given name when there is one.</summary>
+        static string PickerTitleSuffix(BehaviorSubjectKind subjectKind, string subjectName) =>
+            string.IsNullOrEmpty(subjectName) ? SubjectLabel(subjectKind) : $"{SubjectLabel(subjectKind)} '{subjectName}'";
 
         /// <summary>The subject kind's display label for the picker title.</summary>
         static string SubjectLabel(BehaviorSubjectKind subjectKind) => subjectKind switch {

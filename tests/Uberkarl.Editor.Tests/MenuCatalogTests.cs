@@ -172,7 +172,7 @@ public sealed class MenuCatalogTests
     }
 
     [Test]
-    [Description("QA #8616 W8: pins each surviving (Label, Outcome) pair in order, so a rebind, drop or reorder goes red -- a builder compared against itself cannot.")]
+    [Description("QA #8616 W8, extended by DiVoid #8802's \"Assign…\" wedge: pins each surviving (Label, Outcome) pair in order, so a rebind, drop or reorder goes red -- a builder compared against itself cannot.")]
     public void BuildActionsMenu_LabelsAndOutcomes_MatchThePinnedMapping_InOrder()
     {
         (string Label, MenuOutcome Outcome)[] expected =
@@ -183,6 +183,7 @@ public sealed class MenuCatalogTests
             ("Redo", MenuOutcome.Invoke(EditorAction.Redo)),
             ("Tool", MenuOutcome.Invoke(EditorAction.ToggleTool)),
             ("Play", MenuOutcome.Invoke(EditorAction.Playtest)),
+            ("Assign…", MenuOutcome.AssignBehaviorAtCursor()),
             ("More…", MenuOutcome.OpenActionsOverflow()),
         };
 
@@ -191,7 +192,9 @@ public sealed class MenuCatalogTests
         Assert.That(menu.Title, Is.EqualTo("Actions"), "title is displayed data, not derivable from the entry count");
         Assert.That(menu.Count, Is.EqualTo(expected.Length), "entry count");
 
-        Assert.That(menu.Items[6].Outcome.Kind, Is.EqualTo(MenuOutcomeKind.OpenActionsOverflow),
+        Assert.That(menu.Items[6].Outcome.Kind, Is.EqualTo(MenuOutcomeKind.AssignBehaviorAtCursor),
+            "the Assign... wedge must route to the cursor-subject picker, not merely be data-equal to whatever the factory returns");
+        Assert.That(menu.Items[7].Outcome.Kind, Is.EqualTo(MenuOutcomeKind.OpenActionsOverflow),
             "the More... wedge must route to the overflow, not merely be data-equal to whatever the factory returns");
 
         Assert.Multiple(() =>
@@ -234,12 +237,12 @@ public sealed class MenuCatalogTests
     }
 
     [Test]
-    [Description("DiVoid #8628: Actions must fit MenuCatalog.RadialCap -- a regrowth past 8 is caught here as well as by EnforceRadialCap.")]
-    public void BuildActionsMenu_FitsTheRadialCap_AfterU5Trim()
+    [Description("DiVoid #8628, extended by #8802: Actions must fit MenuCatalog.RadialCap -- a regrowth past 8 is caught here as well as by EnforceRadialCap.")]
+    public void BuildActionsMenu_FitsTheRadialCap_AtTheCapAfterAssignWedge()
     {
         MenuModel menu = MenuCatalog.BuildActionsMenu();
 
-        Assert.That(menu.Count, Is.EqualTo(7), "pinned post-U5 entry count -- if this just went red, read this test's [Description]");
+        Assert.That(menu.Count, Is.EqualTo(8), "pinned post-#8802 entry count -- if this just went red, read this test's [Description]");
         Assert.That(menu.Count, Is.LessThanOrEqualTo(MenuCatalog.RadialCap),
             $"Actions ({menu.Count} entries) must fit the radial cap ({MenuCatalog.RadialCap}).");
     }
