@@ -42,6 +42,7 @@ public sealed class EditableLevel
     private IReadOnlyDictionary<ResourcePath, string> tileScripts;
     private readonly List<AreaTriggerDefinition> triggers;
     private readonly List<EditableObjectPlacement> objects;
+    private readonly List<TileBehaviorOverride> tileBehaviorOverrides;
     private readonly Dictionary<ResourcePath, string> scripts;
 
     public EditableLevel(
@@ -85,7 +86,7 @@ public sealed class EditableLevel
             throw new ArgumentNullException(nameof(layers));
         this.layers = new List<EditableLayer>(layers);
         IsAttached = isAttached;
-        TileBehaviorOverrides = tileBehaviorOverrides ?? Array.Empty<TileBehaviorOverride>();
+        this.tileBehaviorOverrides = tileBehaviorOverrides is null ? new List<TileBehaviorOverride>() : new List<TileBehaviorOverride>(tileBehaviorOverrides);
         this.triggers = triggers is null ? new List<AreaTriggerDefinition>() : new List<AreaTriggerDefinition>(triggers);
         this.objects = objects is null ? new List<EditableObjectPlacement>() : new List<EditableObjectPlacement>(objects);
         LevelScript = levelScript;
@@ -152,17 +153,17 @@ public sealed class EditableLevel
     /// <see cref="AppendLayer"/>/<see cref="RemoveLayerAt"/>/<see cref="MoveLayer"/>/<see cref="SetLayerProperties"/>.</summary>
     public IReadOnlyList<EditableLayer> Layers => layers;
 
-    /// <summary>The level's sparse per-instance tile-behavior overrides/removals.</summary>
-    public IReadOnlyList<TileBehaviorOverride> TileBehaviorOverrides { get; }
+    /// <summary>The level's sparse per-instance tile-behavior overrides/removals. Mutated via <see cref="SetTileBehaviorOverride"/>.</summary>
+    public IReadOnlyList<TileBehaviorOverride> TileBehaviorOverrides => tileBehaviorOverrides;
 
-    /// <summary>The level's grid-rect area triggers, read-only in this milestone.</summary>
+    /// <summary>The level's grid-rect area triggers. Rects are placed only via M4b; bindings are mutated via <see cref="SetTriggerBehavior"/>.</summary>
     public IReadOnlyList<AreaTriggerDefinition> Triggers => triggers;
 
-    /// <summary>The level's placed free-moving objects. Mutated via <see cref="InsertObject"/>/<see cref="RemoveObjectAt"/>.</summary>
+    /// <summary>The level's placed free-moving objects. Mutated via <see cref="InsertObject"/>/<see cref="RemoveObjectAt"/>/<see cref="SetObjectBehavior"/>.</summary>
     public IReadOnlyList<EditableObjectPlacement> Objects => objects;
 
-    /// <summary>The level's global lifecycle/<c>onUpdate</c> script binding, or <c>null</c> when the level declares none.</summary>
-    public BehaviorBinding? LevelScript { get; }
+    /// <summary>The level's global lifecycle/<c>onUpdate</c> script binding, or <c>null</c> when the level declares none. Mutated via <see cref="SetLevelScript"/>.</summary>
+    public BehaviorBinding? LevelScript { get; private set; }
 
     /// <summary>
     /// Script source text for every script-kind tile behavior binding declared by the currently-bound tile
@@ -256,6 +257,124 @@ public sealed class EditableLevel
     /// <summary>Captures <paramref name="binding"/>'s script source (if any) from <paramref name="package"/> into this level's script table. Returns <paramref name="binding"/> unchanged.</summary>
     public BehaviorBinding? CaptureBehavior(Package package, BehaviorBinding? binding, string role)
         => EditableBehaviorBindings.Capture(package, binding, role, scripts);
+
+    /// <summary>The index of the first trigger whose rect contains cell (x,y), or -1 when none does.</summary>
+    public int FindTriggerIndexAt(int x, int y)
+    {
+        for (var i = 0; i < triggers.Count; i++)
+        {
+            var trigger = triggers[i];
+            if (x >= trigger.X && x < trigger.X + trigger.Width && y >= trigger.Y && y < trigger.Y + trigger.Height)
+                return i;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// The scriptable subject at cell (x,y), in priority order object &gt; trigger &gt; tile instance.
+    /// <see cref="BehaviorSubjectTarget.None"/> when the cell holds none of the three.
+    /// </summary>
+    public BehaviorSubjectTarget FindBehaviorSubjectAt(int layerIndex, int x, int y)
+    {
+        var objectIndex = FindObjectIndexAt(x, y);
+        if (objectIndex >= 0)
+            return BehaviorSubjectTarget.ForObject(objectIndex);
+
+        var triggerIndex = FindTriggerIndexAt(x, y);
+        if (triggerIndex >= 0)
+            return BehaviorSubjectTarget.ForTrigger(triggerIndex);
+
+        if (GetCell(layerIndex, x, y) != LayerDefinition.EmptyCell)
+            return BehaviorSubjectTarget.ForTile(layerIndex, x, y);
+
+        return BehaviorSubjectTarget.None;
+    }
+
+    /// <summary>Replaces the placed object at <paramref name="index"/>'s own behavior override with <paramref name="binding"/>. Throws when out of range.</summary>
+    public void SetObjectBehavior(int index, BehaviorBinding binding)
+    {
+        if (binding is null)
+            throw new ArgumentNullException(nameof(binding));
+
+        var current = objects[index];
+        objects[index] = new EditableObjectPlacement(
+            new ObjectPlacement
+            {
+                ObjectSet = current.Placement.ObjectSet,
+                ObjectId = current.Placement.ObjectId,
+                Cell = current.Placement.Cell,
+                Name = current.Placement.Name,
+                Behavior = binding,
+            },
+            current.CollisionRole,
+            current.Graphic,
+            binding,
+            current.State);
+    }
+
+    /// <summary>Replaces the trigger at <paramref name="index"/>'s binding with <paramref name="binding"/>. Throws when out of range — a trigger's binding is required (design #8049 M2 addendum), never null.</summary>
+    public void SetTriggerBehavior(int index, BehaviorBinding binding)
+    {
+        if (binding is null)
+            throw new ArgumentNullException(nameof(binding));
+
+        var current = triggers[index];
+        triggers[index] = new AreaTriggerDefinition
+        {
+            Name = current.Name,
+            X = current.X,
+            Y = current.Y,
+            Width = current.Width,
+            Height = current.Height,
+            Binding = binding,
+        };
+    }
+
+    /// <summary>The index into <see cref="TileBehaviorOverrides"/> of the entry for (layerIndex,x,y), or -1 when none exists.</summary>
+    public int FindTileBehaviorOverrideIndex(int layerIndex, int x, int y)
+    {
+        for (var i = 0; i < tileBehaviorOverrides.Count; i++)
+        {
+            var entry = tileBehaviorOverrides[i];
+            if (entry.Layer == layerIndex && entry.Cell.X == x && entry.Cell.Y == y)
+                return i;
+        }
+
+        return -1;
+    }
+
+    /// <summary>Sets (adding or replacing) the per-instance behavior override at (layerIndex,x,y) to <paramref name="binding"/>.</summary>
+    public void SetTileBehaviorOverride(int layerIndex, int x, int y, BehaviorBinding binding)
+    {
+        if (binding is null)
+            throw new ArgumentNullException(nameof(binding));
+
+        var entry = new TileBehaviorOverride { Layer = layerIndex, Cell = new GridPosition(x, y), Binding = binding };
+        var existingIndex = FindTileBehaviorOverrideIndex(layerIndex, x, y);
+        if (existingIndex >= 0)
+            tileBehaviorOverrides[existingIndex] = entry;
+        else
+            tileBehaviorOverrides.Add(entry);
+    }
+
+    /// <summary>Sets the level's global lifecycle/<c>onUpdate</c> script binding.</summary>
+    public void SetLevelScript(BehaviorBinding? binding) => LevelScript = binding;
+
+    /// <summary>Replaces the object at <paramref name="index"/> verbatim.</summary>
+    public void ReplaceObjectAt(int index, EditableObjectPlacement placement) =>
+        objects[index] = placement ?? throw new ArgumentNullException(nameof(placement));
+
+    /// <summary>Replaces the trigger at <paramref name="index"/> verbatim.</summary>
+    public void ReplaceTriggerAt(int index, AreaTriggerDefinition trigger) =>
+        triggers[index] = trigger ?? throw new ArgumentNullException(nameof(trigger));
+
+    /// <summary>Replaces the tile behavior override at <paramref name="index"/> verbatim.</summary>
+    public void ReplaceTileBehaviorOverrideAt(int index, TileBehaviorOverride entry) =>
+        tileBehaviorOverrides[index] = entry ?? throw new ArgumentNullException(nameof(entry));
+
+    /// <summary>Removes the tile behavior override at <paramref name="index"/>. Used by <see cref="SetTileBehaviorOverrideCommand"/> to undo a newly-appended entry on revert.</summary>
+    public void RemoveTileBehaviorOverrideAt(int index) => tileBehaviorOverrides.RemoveAt(index);
 
     // ----- layer structural mutations (create / delete / reorder / property edit) -----
 

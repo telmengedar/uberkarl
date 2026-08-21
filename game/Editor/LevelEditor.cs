@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Godot;
+using Uberkarl.Behavior;
 using Uberkarl.Content;
 using Uberkarl.Editor;
 using Uberkarl.Editor.Input;
@@ -87,6 +88,8 @@ namespace Uberkarl {
         TileSetEditor tileSetEditor;
         TileSetBindPanel tileSetBindPanel;
         OnScreenKeyboard textKeyboard;
+        BehaviorAssignmentPanel behaviorAssignmentPanel;
+        BehaviorSubjectTarget pendingBehaviorTarget;
         PlaytestOverlay playtestOverlay;
         // Tile/layer selection STATE persists here (the radials read it); the visible side-panel lists that
         // used to mirror it are gone — the Tiles (LB) / Layers (RB) radials fully cover selection.
@@ -306,7 +309,7 @@ namespace Uberkarl {
             (popIn != null && popIn.IsOpen) || (choiceList != null && choiceList.IsOpen) ||
             (layerManager != null && layerManager.IsOpen) || (resizePanel != null && resizePanel.IsOpen) ||
             (tileSetEditor != null && tileSetEditor.IsOpen) || (tileSetBindPanel != null && tileSetBindPanel.IsOpen) ||
-            (textKeyboard != null && textKeyboard.IsOpen);
+            (textKeyboard != null && textKeyboard.IsOpen) || (behaviorAssignmentPanel != null && behaviorAssignmentPanel.IsOpen);
 
         static string ActionName(EditorAction action) => EditorActionMap.NameOf(action);
 
@@ -421,6 +424,9 @@ namespace Uberkarl {
                 case MenuOutcomeKind.OpenActionsOverflow:
                     OpenActionsOverflowList();
                     break;
+                case MenuOutcomeKind.AssignLevelScriptBehavior:
+                    SummonBehaviorAssignment(BehaviorSubjectTarget.ForLevelScript());
+                    break;
             }
         }
 
@@ -432,6 +438,46 @@ namespace Uberkarl {
         }
 
         ChoiceListRow ActionsOverflowListRow(MenuModel menu, int index) => new ChoiceListRow(menu.Items[index].Label, string.Empty);
+
+        void OnAssignBehaviorPressed() {
+            if (session == null || AnyModalOpen())
+                return;
+
+            (int x, int y) = canvas.CursorCell;
+            BehaviorSubjectTarget target = session.Level.FindBehaviorSubjectAt(activeLayerIndex, x, y);
+            if (target.Found)
+                SummonBehaviorAssignment(target);
+        }
+
+        void SummonBehaviorAssignment(BehaviorSubjectTarget target) {
+            if (session == null)
+                return;
+            pendingBehaviorTarget = target;
+            behaviorAssignmentPanel.Summon(target.Kind);
+        }
+
+        void OnBehaviorAssigned(BehaviorBinding binding) {
+            switch (pendingBehaviorTarget.Kind) {
+                case BehaviorSubjectKind.Object:
+                    session.AssignObjectBehavior(pendingBehaviorTarget.Index, binding);
+                    break;
+                case BehaviorSubjectKind.Trigger:
+                    session.AssignTriggerBehavior(pendingBehaviorTarget.Index, binding);
+                    break;
+                case BehaviorSubjectKind.Tile:
+                    session.AssignTileBehaviorOverride(pendingBehaviorTarget.Layer, pendingBehaviorTarget.X, pendingBehaviorTarget.Y, binding);
+                    break;
+                case BehaviorSubjectKind.LevelScript:
+                    session.AssignLevelScript(binding);
+                    break;
+            }
+
+            RefreshOverlay();
+            UpdateState();
+            canvas?.GrabFocus();
+        }
+
+        void OnBehaviorAssignmentCancelled() => canvas?.GrabFocus();
 
         void SummonLayerManager() {
             if (session == null)
@@ -520,6 +566,7 @@ namespace Uberkarl {
             else if (Fired(@event, EditorAction.Playtest)) StartPlaytest();
             else if (Fired(@event, EditorAction.ZoomIn)) canvas.ZoomIn();
             else if (Fired(@event, EditorAction.ZoomOut)) canvas.ZoomOut();
+            else if (Fired(@event, EditorAction.AssignBehavior)) OnAssignBehaviorPressed();
             else return;
 
             GetViewport().SetInputAsHandled();
@@ -587,6 +634,12 @@ namespace Uberkarl {
             tileSetBindPanel.TileSetChosen += OnTileSetBindChosen;
             tileSetBindPanel.Cancelled += OnTileSetBindPanelClosed;
             AddChild(tileSetBindPanel);
+
+            behaviorAssignmentPanel = new BehaviorAssignmentPanel();
+            behaviorAssignmentPanel.AttachChoiceList(choiceList);
+            behaviorAssignmentPanel.Assigned += OnBehaviorAssigned;
+            behaviorAssignmentPanel.Cancelled += OnBehaviorAssignmentCancelled;
+            AddChild(behaviorAssignmentPanel);
 
             // Added last so it draws on top of everything else while a run is live.
             playtestOverlay = new PlaytestOverlay();

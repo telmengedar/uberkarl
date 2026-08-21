@@ -62,7 +62,7 @@ public static class MenuCatalog
         return new MenuModel("Actions", items);
     }
 
-    /// <summary>The Actions overflow list: New, Save As, Resize…, Edit Tileset…, Bind Tileset… — reached through <see cref="BuildActionsMenu"/>'s "More…" entry and rendered on the list surface.</summary>
+    /// <summary>The Actions overflow list: New, Save As, Resize…, Edit Tileset…, Bind Tileset…, Level Script… — reached through <see cref="BuildActionsMenu"/>'s "More…" entry and rendered on the list surface.</summary>
     public static MenuModel BuildActionsOverflowMenu()
     {
         MenuItem[] items =
@@ -72,6 +72,7 @@ public static class MenuCatalog
             new MenuItem("Resize…", MenuOutcome.OpenResizePanel()),
             new MenuItem("Edit Tileset…", MenuOutcome.OpenTileSetEditor()),
             new MenuItem("Bind Tileset…", MenuOutcome.OpenTileSetBindPanel()),
+            new MenuItem("Level Script…", MenuOutcome.AssignLevelScriptBehavior()),
         };
         return new MenuModel("More", items);
     }

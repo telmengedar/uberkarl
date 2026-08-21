@@ -35,6 +35,9 @@ public enum MenuOutcomeKind
 
     /// <summary>Summon the Actions menu's overflow list — the commands trimmed off the radial to fit the entry cap.</summary>
     OpenActionsOverflow,
+
+    /// <summary>Open the behavior assignment picker for the level script (design #8049 M4).</summary>
+    AssignLevelScriptBehavior,
 }
 
 /// <summary>The file-lifecycle commands a menu can request; the controller maps these to its file IO.</summary>
@@ -121,4 +124,8 @@ public readonly struct MenuOutcome
     /// <summary>An outcome that summons the Actions overflow list. Rides the existing Actions radial trigger.</summary>
     public static MenuOutcome OpenActionsOverflow() =>
         new(MenuOutcomeKind.OpenActionsOverflow, -1, default, default);
+
+    /// <summary>An outcome that opens the behavior assignment picker for the level script. Rides the Actions overflow list.</summary>
+    public static MenuOutcome AssignLevelScriptBehavior() =>
+        new(MenuOutcomeKind.AssignLevelScriptBehavior, -1, default, default);
 }

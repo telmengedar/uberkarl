@@ -9,8 +9,9 @@ namespace Uberkarl.Editor.Input;
 /// action is triggered without touching *what* it means.
 ///
 /// This is the foundation set — the actions needed to operate the current editor on every device.
-/// Deferred actions (open-menu, confirm/cancel for a modal pop-in, assign-predefined-script) are named
-/// in the design doc but intentionally not added here, to avoid speculative bindings.
+/// Deferred actions (open-menu, confirm/cancel for a modal pop-in) are named in the design doc but
+/// intentionally not added here, to avoid speculative bindings. <see cref="AssignBehavior"/> (design #8049
+/// M4) is the one deferred action this milestone reaches.
 /// </summary>
 public enum EditorAction
 {
@@ -82,4 +83,7 @@ public enum EditorAction
 
     /// <summary>Step the editor viewport's fixed zoom out one level.</summary>
     ZoomOut,
+
+    /// <summary>Open the behavior assignment picker for the scriptable subject at the grid cursor (design #8049 M4).</summary>
+    AssignBehavior,
 }
