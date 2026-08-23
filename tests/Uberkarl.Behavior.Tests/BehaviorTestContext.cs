@@ -47,11 +47,5 @@ internal sealed class BehaviorTestContext
         return compiled;
     }
 
-    private Dictionary<string, object> Globals(BehaviorSubject subject) => new()
-    {
-        ["self"] = subject,
-        ["level"] = Level,
-        ["player"] = Player,
-        ["event"] = Scheduler.CurrentEvent,
-    };
+    private IReadOnlyDictionary<string, object> Globals(BehaviorSubject subject) => BehaviorGlobals.Compose(subject, Level, Player, Scheduler.CurrentEvent);
 }

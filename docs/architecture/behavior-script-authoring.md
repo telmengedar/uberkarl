@@ -298,6 +298,8 @@ Three reasons, in order of weight:
 
 **Decision (e): the honest limitation, named rather than discovered.** Because `Compile` executes the script's top-level init, and the editor binds inert stand-in facades, a script whose init reads live level or player state can report a reason here that it would not produce at runtime — and can pass here and quarantine at play. **The footer is advisory; playtest is authoritative; M6 is the milestone that makes playtest's verdict visible.** That is the seam between the two milestones and it is why #8049 ordered them M5 → M6.
 
+A second, narrower instance of the same limitation (DiVoid #9076): the validator's `self` facade always carries an empty kind and an empty name, regardless of which subject the script is actually bound to. A script that branches on `self.kind` or `self.name` can therefore compile clean in the footer and quarantine at play, or the reverse — the same advisory/authoritative split as decision (e), on one more field.
+
 ### 5.7 Sharing, and what happens when the last binding goes away
 
 **Binding a second subject to an existing script** is one flow, two steps, no new machinery: cursor on object B → assign → pick the script row → `BehaviorBinding.FromScript(ResourceReference.ToSelf(path))` → `AssignObjectBehavior`, the same M4 command as any predefined. The table is not touched; no entry is added; `LevelMergeWriter` still emits one `PendingResource` for that path. **This is the acceptance criterion, and it is satisfied by construction rather than by new code.**
