@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Godot;
 using Uberkarl.Behavior;
+using Uberkarl.Editor;
 using Uberkarl.Editor.Input;
 using Uberkarl.Packages;
 
@@ -82,22 +83,9 @@ namespace Uberkarl {
         }
 
         void OpenChoiceList() {
-            choiceList.Open($"Assign Behavior — {PickerTitleSuffix(picker.SubjectKind, subjectName)}", "✕ Cancel", picker.Choices.Count, ChoiceRow,
+            choiceList.Open($"Assign Behavior — {BehaviorSubjectLabel.Format(picker.SubjectKind, subjectName)}", "✕ Cancel", picker.Choices.Count, ChoiceRow,
                 "No behaviors available.", OnChoiceChosen, OnChoiceListDismissed);
         }
-
-        /// <summary>The picker title's subject portion: the kind, plus the given name when there is one.</summary>
-        static string PickerTitleSuffix(BehaviorSubjectKind subjectKind, string subjectName) =>
-            string.IsNullOrEmpty(subjectName) ? SubjectLabel(subjectKind) : $"{SubjectLabel(subjectKind)} '{subjectName}'";
-
-        /// <summary>The subject kind's display label for the picker title.</summary>
-        static string SubjectLabel(BehaviorSubjectKind subjectKind) => subjectKind switch {
-            BehaviorSubjectKind.Tile => "Tile",
-            BehaviorSubjectKind.Trigger => "Trigger",
-            BehaviorSubjectKind.Object => "Object",
-            BehaviorSubjectKind.LevelScript => "Level Script",
-            _ => subjectKind.ToString(),
-        };
 
         ChoiceListRow ChoiceRow(int index) {
             BehaviorAssignmentChoice choice = picker.Choices[index];
