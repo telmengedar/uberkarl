@@ -12,6 +12,9 @@ public enum MenuOutcomeKind
     /// <summary>Select an object type in the active object palette by its index — switches the active paint mode to object placement.</summary>
     SelectObjectType,
 
+    /// <summary>Select the two-corner trigger tool (design #8049 M4b) — switches the active paint mode to trigger placement.</summary>
+    SelectTriggerTool,
+
     /// <summary>Select a layer by its index.</summary>
     SelectLayer,
 
@@ -93,6 +96,10 @@ public readonly struct MenuOutcome
     /// <summary>An outcome that selects the object palette type at <paramref name="index"/> — switches the active paint mode to object placement.</summary>
     public static MenuOutcome SelectObjectType(int index) =>
         new(MenuOutcomeKind.SelectObjectType, index, default, default);
+
+    /// <summary>An outcome that selects the two-corner trigger tool (design #8049 M4b) — switches the active paint mode to trigger placement.</summary>
+    public static MenuOutcome SelectTriggerTool() =>
+        new(MenuOutcomeKind.SelectTriggerTool, -1, default, default);
 
     /// <summary>An outcome that selects the layer at <paramref name="index"/>.</summary>
     public static MenuOutcome SelectLayer(int index) =>

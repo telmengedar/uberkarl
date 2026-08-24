@@ -8,9 +8,12 @@ using Uberkarl.Packages;
 
 namespace Uberkarl.Editor.Tests;
 
-/// <summary>Covers the M2 object palette: <see cref="EditableLevel"/> object-list mutations, <see cref="LevelEditSession"/> placement/removal with undo/redo, and both runtime projections.</summary>
+/// <summary>Covers the M2 object palette (<see cref="EditableLevel"/> object-list mutations, <see cref="LevelEditSession"/>
+/// placement/removal with undo/redo, and both runtime projections) and the M4b trigger rect tool (the same
+/// shape, over <see cref="AreaTriggerDefinition"/>, with the commit step requiring a binding — design #8049's
+/// 2026-08-18 addendum: "a trigger has no identity apart from its binding").</summary>
 [TestFixture]
-public sealed class ObjectPlacementTests
+public sealed class ObjectAndTriggerPlacementTests
 {
     private const int TileSize = 16;
     private const int Width = 6;
@@ -137,6 +140,7 @@ public sealed class ObjectPlacementTests
     }
 
     [Test]
+    [Description("QA #9375 CF-3 (the object-side sibling of QA #8760 B1, mirrored on the trigger side by Session_EraseTriggerAt_...): erasing index 0 of a two-object list can't distinguish a correct index-preserving revert from a degenerate one that always reverts to index 0 -- both restore [\"a\",\"b\"]. Erases \"b\" (index 1) instead, deliberately not \"a\" (index 0), so a revert that always re-inserts at 0 rather than at the removed index is distinguishable from a correct one.")]
     public void Session_EraseObjectAt_RemovesOnlyTheOccupyingObject_AndIsUndoable()
     {
         var (packageBytes, level) = BuildFixture();
@@ -149,12 +153,12 @@ public sealed class ObjectPlacementTests
         var erasedEmptyCell = session.EraseObjectAt(0, 0);
         Assert.That(erasedEmptyCell, Is.False, "erasing an empty cell must no-op, not remove the nearest object.");
 
-        var erased = session.EraseObjectAt(1, 0);
+        var erased = session.EraseObjectAt(3, 0);
         Assert.Multiple(() =>
         {
             Assert.That(erased, Is.True);
             Assert.That(level.Objects, Has.Count.EqualTo(1));
-            Assert.That(level.Objects[0].Placement.Name, Is.EqualTo("b"), "erasing must remove the object AT that cell, not the wrong one.");
+            Assert.That(level.Objects[0].Placement.Name, Is.EqualTo("a"), "erasing must remove the object AT that cell, not the wrong one.");
         });
 
         session.Undo();
@@ -162,7 +166,7 @@ public sealed class ObjectPlacementTests
         {
             Assert.That(level.Objects, Has.Count.EqualTo(2));
             Assert.That(level.Objects.Select(o => o.Placement.Name), Is.EqualTo(new[] { "a", "b" }),
-                "undo must restore the removed object at its ORIGINAL index, not merely to the set -- order is load-bearing (LevelMergeWriter writes Objects in list order).");
+                "undo must restore the removed object at its ORIGINAL index (1), not merely to the set -- order is load-bearing (LevelMergeWriter writes Objects in list order).");
         });
     }
 
@@ -281,6 +285,202 @@ public sealed class ObjectPlacementTests
         Assert.Throws<LevelContentException>(() => EditableObjectSetReader.FromPackage(package, ResourceReference.ToSelf(ObjectSetPath)));
     }
 
+    [Test]
+    public void InsertTrigger_ThenRemoveTriggerAt_RoundTripsTheSameInstance()
+    {
+        var level = BlankLevel();
+        var trigger = MakeTrigger(x: 1, y: 0, width: 2, height: 1, name: "a");
+
+        level.InsertTrigger(0, trigger);
+        Assert.That(level.Triggers, Has.Count.EqualTo(1));
+
+        var removed = level.RemoveTriggerAt(0);
+        Assert.Multiple(() =>
+        {
+            Assert.That(removed, Is.SameAs(trigger));
+            Assert.That(level.Triggers, Is.Empty);
+        });
+    }
+
+    [Test]
+    public void Session_PlaceTrigger_NullBinding_Throws()
+    {
+        var level = BlankLevel();
+        var session = new LevelEditSession(level);
+
+        Assert.Throws<ArgumentNullException>(() => session.PlaceTrigger(0, 0, 1, 1, null!));
+    }
+
+    [Test]
+    public void Session_PlaceTrigger_OutOfBounds_IsNoOp_AndDoesNotMarkDirty()
+    {
+        var level = BlankLevel();
+        var session = new LevelEditSession(level);
+
+        session.PlaceTrigger(Width, 0, 1, 1, BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(level.Triggers, Is.Empty);
+            Assert.That(session.IsDirty, Is.False);
+        });
+    }
+
+    [Test]
+    [Description("The acceptance clause, at the model level: deliberately choosing healOnEnter must persist as exactly that predefined id, with the plain data (name, rect, binding label) asserted as literals -- not re-derived from a shared factory (DiVoid #8642).")]
+    public void Session_PlaceTrigger_InsertsIt_WithTheChosenBinding_MarksDirty_AndIsUndoRedoable()
+    {
+        var level = BlankLevel();
+        var session = new LevelEditSession(level);
+        var binding = BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter, new Dictionary<string, object?> { ["amount"] = 20d });
+
+        session.PlaceTrigger(1, 1, 3, 2, binding, "heal-zone");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(level.Triggers, Has.Count.EqualTo(1));
+            Assert.That(level.Triggers[0].Name, Is.EqualTo("heal-zone"));
+            Assert.That(level.Triggers[0].X, Is.EqualTo(1));
+            Assert.That(level.Triggers[0].Y, Is.EqualTo(1));
+            Assert.That(level.Triggers[0].Width, Is.EqualTo(3));
+            Assert.That(level.Triggers[0].Height, Is.EqualTo(2));
+            Assert.That(level.Triggers[0].Binding.IsPredefined, Is.True);
+            Assert.That(level.Triggers[0].Binding.PredefinedId, Is.EqualTo("healOnEnter"), "the acceptance clause's own literal -- deliberately chosen, not re-derived from PredefinedBehaviors.HealOnEnter.");
+            Assert.That(BehaviorBindingLabel.Format(level.Triggers[0].Binding), Is.EqualTo("Heal on Enter"));
+            Assert.That(session.IsDirty, Is.True);
+            Assert.That(session.CanUndo, Is.True);
+        });
+
+        session.Undo();
+        Assert.That(level.Triggers, Is.Empty, "undo must remove exactly the placed trigger.");
+
+        session.Redo();
+        Assert.Multiple(() =>
+        {
+            Assert.That(level.Triggers, Has.Count.EqualTo(1), "redo must re-insert the placed trigger.");
+            Assert.That(level.Triggers[0].Name, Is.EqualTo("heal-zone"));
+            Assert.That(level.Triggers[0].Binding.PredefinedId, Is.EqualTo("healOnEnter"));
+        });
+    }
+
+    [Test]
+    [Description("Placement defaults to an unnamed trigger (mirrors ObjectPlacement's existing default) -- naming is optional, not a second required field alongside the binding.")]
+    public void Session_PlaceTrigger_WithNoNameGiven_DefaultsToEmptyName()
+    {
+        var level = BlankLevel();
+        var session = new LevelEditSession(level);
+
+        session.PlaceTrigger(0, 0, 1, 1, BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter));
+
+        Assert.That(level.Triggers[0].Name, Is.EqualTo(string.Empty));
+    }
+
+    [Test]
+    [Description("QA #8760 B1's lesson, applied here directly: undo of a SECOND placement (an overwrite-shaped case, not a from-empty one) must restore exactly the first trigger, not merely return the count to 1. Erases \"b\" (index 1), deliberately not \"a\" (index 0), so a revert that always re-inserts at 0 rather than at the removed index is distinguishable from a correct one.")]
+    public void Session_EraseTriggerAt_RemovesOnlyTheOccupyingTrigger_AndUndoRestoresTheOriginalAtItsIndex()
+    {
+        var level = BlankLevel();
+        var session = new LevelEditSession(level);
+        var healBinding = BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter, new Dictionary<string, object?> { ["amount"] = 20d });
+        var scriptBinding = BehaviorBinding.FromScript(ResourceReference.ToSelf(ObjectScriptPath));
+        session.PlaceTrigger(1, 0, 1, 1, healBinding, "a");
+        session.PlaceTrigger(3, 0, 1, 1, scriptBinding, "b");
+        Assert.That(level.Triggers[1].Binding.IsScript, Is.True,
+            "each placement must carry the binding it was actually given, not e.g. always the first-placed trigger's.");
+
+        var erasedEmptyCell = session.EraseTriggerAt(0, 0);
+        Assert.That(erasedEmptyCell, Is.False, "erasing a cell with no trigger must no-op, not remove the nearest one.");
+
+        var erased = session.EraseTriggerAt(3, 0);
+        Assert.Multiple(() =>
+        {
+            Assert.That(erased, Is.True);
+            Assert.That(level.Triggers, Has.Count.EqualTo(1));
+            Assert.That(level.Triggers[0].Name, Is.EqualTo("a"), "erasing must remove the trigger AT that cell, not the wrong one.");
+        });
+
+        session.Undo();
+        Assert.Multiple(() =>
+        {
+            Assert.That(level.Triggers, Has.Count.EqualTo(2));
+            Assert.That(level.Triggers.Select(t => t.Name), Is.EqualTo(new[] { "a", "b" }),
+                "undo must restore the removed trigger at its ORIGINAL index (1), order load-bearing exactly like the object case above.");
+            Assert.That(level.Triggers[1].Binding.IsScript, Is.True, "the restored trigger's own binding, not the surviving one's.");
+            Assert.That(level.Triggers[1].X, Is.EqualTo(3), "the restored trigger's rect must also survive the round trip, not only its name.");
+        });
+    }
+
+    [Test]
+    [Description("The addendum's own emphasis: this is the same default John chose in M2 -- the difference is that the author chose it. Walks the acceptance's persistence half at the model level: placed, saved, reloaded through the standalone LevelLoader path game/Play/LevelPlay.cs uses.")]
+    public void PlacedTrigger_WithDeliberatelyChosenHealOnEnter_SurvivesSaveAndReload_ThroughTheStandaloneLevelLoader()
+    {
+        var (packageBytes, level) = BuildFixture();
+        var session = new LevelEditSession(level);
+        session.PlaceTrigger(2, 1, 2, 2, BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter, new Dictionary<string, object?> { ["amount"] = 20d }), "heal-zone");
+
+        byte[] savedBytes;
+        using (var package = PackageReader.Open(new MemoryStream(packageBytes)))
+            savedBytes = LevelMergeWriter.Compose(package, LevelMergeWriter.BuildContributions(level));
+
+        using var registry = new PackageRegistry(PackageReader.Open(new MemoryStream(savedBytes)));
+        var resolved = LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(resolved.Triggers, Has.Count.EqualTo(1),
+                "the editor-placed trigger did not reach the standalone LevelLoader path game/Play/LevelPlay.cs uses -- it would not fire in standalone LevelPlay.");
+            Assert.That(resolved.Triggers[0].Name, Is.EqualTo("heal-zone"));
+            Assert.That(resolved.Triggers[0].X, Is.EqualTo(2));
+            Assert.That(resolved.Triggers[0].Y, Is.EqualTo(1));
+            Assert.That(resolved.Triggers[0].Width, Is.EqualTo(2));
+            Assert.That(resolved.Triggers[0].Height, Is.EqualTo(2));
+            Assert.That(resolved.Triggers[0].Binding, Is.Not.Null);
+            Assert.That(resolved.Triggers[0].Binding!.IsPredefined, Is.True);
+            Assert.That(resolved.Triggers[0].Binding!.PredefinedId, Is.EqualTo(PredefinedBehaviors.HealOnEnter));
+        });
+    }
+
+    [Test]
+    [Description("Undo after placement must also round-trip clean, mirroring the object case -- the removal is undoable, not just the placement.")]
+    public void RemovedTrigger_AfterPlacementUndo_SurvivesSaveAndReload_AsAbsent()
+    {
+        var (packageBytes, level) = BuildFixture();
+        var session = new LevelEditSession(level);
+        session.PlaceTrigger(2, 1, 2, 2, BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter), "heal-zone");
+        session.Undo();
+
+        byte[] savedBytes;
+        using (var package = PackageReader.Open(new MemoryStream(packageBytes)))
+            savedBytes = LevelMergeWriter.Compose(package, LevelMergeWriter.BuildContributions(level));
+
+        using var registry = new PackageRegistry(PackageReader.Open(new MemoryStream(savedBytes)));
+        var resolved = LevelLoader.Load(registry, ResourceReference.ToSelf(LevelPath));
+
+        Assert.That(resolved.Triggers, Is.Empty, "an undone placement must not resurrect on save/reload.");
+    }
+
+    [Test]
+    [Description("EditableLevelSnapshot.ToResolvedLevel feeds the in-editor playtest -- a placed trigger's rect and binding must survive THIS projection too, independent of the standalone LevelLoader path above.")]
+    public void PlacedTrigger_ProjectsThroughTheEditorPlaytestSnapshot_WithItsRectAndBindingIntact()
+    {
+        var level = BlankLevel();
+        var session = new LevelEditSession(level);
+        session.PlaceTrigger(2, 1, 2, 2, BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter, new Dictionary<string, object?> { ["amount"] = 20d }), "heal-zone");
+
+        var resolved = EditableLevelSnapshot.ToResolvedLevel(level);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(resolved.Triggers, Has.Count.EqualTo(1));
+            Assert.That(resolved.Triggers[0].Name, Is.EqualTo("heal-zone"));
+            Assert.That(resolved.Triggers[0].Width, Is.EqualTo(2));
+            Assert.That(resolved.Triggers[0].Height, Is.EqualTo(2));
+            Assert.That(resolved.Triggers[0].Binding, Is.Not.Null,
+                "a placement's binding must reach the playtest projection, or a trigger that works in standalone play would do nothing in an in-editor playtest.");
+            Assert.That(resolved.Triggers[0].Binding!.PredefinedId, Is.EqualTo(PredefinedBehaviors.HealOnEnter));
+        });
+    }
+
     private static EditableLevel BlankLevel()
     {
         var cells = new int[Width * Height];
@@ -300,6 +500,16 @@ public sealed class ObjectPlacementTests
         Encoding.UTF8.GetBytes("WIDGET-PNG"),
         effectiveBehavior: null,
         state: new Dictionary<string, object?>());
+
+    private static AreaTriggerDefinition MakeTrigger(int x, int y, int width, int height, string name) => new()
+    {
+        Name = name,
+        X = x,
+        Y = y,
+        Width = width,
+        Height = height,
+        Binding = BehaviorBinding.FromPredefined(PredefinedBehaviors.HealOnEnter),
+    };
 
     private static (byte[] PackageBytes, EditableLevel Level) BuildFixture()
     {

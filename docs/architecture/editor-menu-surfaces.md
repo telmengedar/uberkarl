@@ -639,3 +639,27 @@ The wedge label stays static (`"Assign…"`), matching every sibling wedge's fix
 ### What this addendum does not reopen
 
 The `editor_assign_behavior` binding, `FindBehaviorSubjectAt`, and the picker's own stage machine (`BehaviorAssignmentPicker`, `BehaviorAssignmentPanel`'s parameter-tuning step) are unchanged — this addendum is entry-point plumbing onto an existing, already-verified assignment path (DiVoid #8760 §A), not a rework of it.
+
+## ADDENDUM 2026-08-24 — §12's "unbounded room" premise was false as implemented (DiVoid #9376, QA #9375 CF-1)
+
+§12 put the M4b trigger tool on the tiles list rather than a radial wedge on the strength of one sentence:
+*"The list has unbounded room, so the concern about growing the tiles wheel disappears."* That is true of the
+list's **capacity** and false of its **reachability**. `ChoiceList`'s `ScrollContainer` never set `FollowFocus`,
+so it defaulted to `false`: `ContainListFocus` chains every row via `FocusNeighborTop`/`FocusNeighborBottom`, so
+keyboard/gamepad focus walks the whole list correctly, but the container never scrolls to follow it. Any row
+past the visible height stays focusable and invocable while being permanently invisible, and the mouse wheel
+does not rescue it either — the canvas claims the wheel for zoom, and the list has no wheel handling of its
+own.
+
+Measured live against `content/sample.pkg` (11-row Tiles list, 340px viewport): rows 8–10 (the two object rows
+and the M4b trigger row — precisely the rows this section's tool selection depends on) sat 8–70px below the
+viewport bottom with `scroll_vertical` pinned at 0 regardless of which row held focus. This is very likely the
+whole of the report that opened M4b's own task (`#9353`/`#8840`): *"i can not even place objects or areas. i
+can select an existing object from the tileset, but then only place it and nothing more."* The objects were
+never missing — they were off-screen. Room without reachability is not the "unbounded" §12 claimed.
+
+The fix is at the surface, not per-consumer: `FollowFocus = true` on `ChoiceList`'s `ScrollContainer`, plus an
+explicit `EnsureControlVisible` guard on focus change so the fix is checkable directly against
+viewport/scroll state rather than trusted to `FollowFocus` alone. This is a correction to every `ChoiceList`
+consumer — Tiles, the Actions overflow list, the behavior assignment picker, the package browser's resource
+list — not only M4b's trigger row.
