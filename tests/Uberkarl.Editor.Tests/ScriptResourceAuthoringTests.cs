@@ -248,13 +248,15 @@ public sealed class ScriptResourceAuthoringTests
     }
 
     [Test]
-    [Description("Erasing the only trigger bound to a script must flip IsScriptBound back to false; the table entry itself stays put, mirroring the object-reassignment case above (#8049 §5.2's no-GC ruling).")]
+    [Description("The table entry survives the erase; only the binding goes. #8049 §5.2.")]
     public void IsScriptBound_AfterTheOnlyBoundTriggerIsErased_ReturnsFalse()
     {
         var (_, level) = BuildFixture();
         var session = new LevelEditSession(level);
         session.UpsertScriptSource(DoorOpener, "{ }");
         session.PlaceTrigger(1, 1, 2, 2, BehaviorBinding.FromScript(ResourceReference.ToSelf(DoorOpener)), "gate");
+
+        Assert.That(level.IsScriptBound(DoorOpener), Is.True, "the trigger arm must match before the erase");
 
         session.EraseTriggerAt(1, 1);
 
