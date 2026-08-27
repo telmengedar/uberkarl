@@ -221,6 +221,8 @@ public sealed class ObjectSetRoundTripTests
 
         Assert.That(withoutPackage, Is.EqualTo(withPackage),
             "a level with no object placements must return the same (empty) contribution list whether or not a source package is supplied.");
+        Assert.That(withoutPackage, Is.Empty,
+            "a level with no object placements must return an empty contribution list.");
     }
 
     [Test]
@@ -256,6 +258,34 @@ public sealed class ObjectSetRoundTripTests
         Assert.That(() => session.SaveFresh("Collision Pack", extra),
             Throws.TypeOf<LevelContentException>().With.Message.Contains(CollidingObjectSetPath.Value),
             "an object set's own path colliding with a freshly-attached tile set's derived path must surface as a named conflict, not silently drop the object set.");
+    }
+
+    [Test]
+    public void BuildFresh_WithIdenticalBytesAndMediaTypeButDifferingAttributionAtSharedPath_ThrowsLevelContentException()
+    {
+        PendingResource first = new PendingResource(GrassPath, ResourceKind.Sprite, "image/png",
+            Encoding.UTF8.GetBytes("GRASS-PNG"), new Attribution { Author = "FIRST", License = "CC0-1.0" });
+        PendingResource second = new PendingResource(GrassPath, ResourceKind.Sprite, "image/png",
+            Encoding.UTF8.GetBytes("GRASS-PNG"), new Attribution { Author = "SECOND", License = "CC-BY-4.0" });
+
+        Assert.That(() => PackageMergeWriter.BuildFresh("Attribution Collision Pack", new[] { first, second }),
+            Throws.TypeOf<LevelContentException>().With.Message.Contains(GrassPath.Value),
+            "identical bytes and media type must not silently discard a differing attribution (e.g. a licence) at a shared path.");
+    }
+
+    [Test]
+    public void BuildFresh_WithIdenticalContentAndIdenticalAttributionAtSharedPath_CollapsesToOne()
+    {
+        PendingResource first = new PendingResource(GrassPath, ResourceKind.TileGraphic, "image/png",
+            Encoding.UTF8.GetBytes("GRASS-PNG"), new Attribution { Author = "SHARED", License = "CC0-1.0" });
+        PendingResource second = new PendingResource(GrassPath, ResourceKind.Sprite, "image/png",
+            Encoding.UTF8.GetBytes("GRASS-PNG"), new Attribution { Author = "SHARED", License = "CC0-1.0" });
+
+        byte[] freshBytes = PackageMergeWriter.BuildFresh("Attribution Match Pack", new[] { first, second });
+        using Package freshPackage = PackageReader.Open(new MemoryStream(freshBytes));
+
+        Assert.That(freshPackage.Manifest.Resources.Count(entry => entry.Path == GrassPath), Is.EqualTo(1),
+            "content and attribution that are field-wise identical on separate instances must still collapse to one entry.");
     }
 
     private static byte[] BuildFreshPackageBytes(byte[] packageBytes)

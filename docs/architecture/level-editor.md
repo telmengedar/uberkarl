@@ -183,11 +183,18 @@ view drops) and *distinct from* `LevelDefinition` (its grids are mutable). It is
 - **The archive a save produces never carries a resource path twice.** Every save path — level or tile set,
   fresh or merged — funnels through `PackageMergeWriter.Compose`/`BuildFresh`, which is therefore the one
   place the property is enforced, regardless of how many contribution lists were concatenated to build the
-  list handed in. Two contributions landing on the same path collapse to one when their bytes and media type
-  are identical (the reachable case: an object's graphic reusing an already-attached tile's graphic path
-  reads the same package entry on both sides, so the two are the same bytes by construction — which side
-  survives is therefore unobservable); anything else is a genuine content conflict and throws
-  `LevelContentException` naming the path and the conflicting kinds, rather than silently discarding one
+  list handed in. Two contributions landing on the same path collapse to one when their media type, payload
+  bytes, and attribution are all identical (the reachable case: an object's graphic reusing an
+  already-attached tile's graphic path reads the same package entry on both sides, so the two are the same
+  bytes by construction, and neither side supplies an attribution of its own). The collapse does not require
+  `Kind` to match — the only pair of kinds that can reach the collapse branch with a differing `Kind` is
+  `TileGraphic`/`Sprite` (every other collision carries a differing payload and throws before `Kind` is ever
+  consulted), and neither `TileGraphic` nor `Sprite` is read by any consumer in `src/` or `game/`; the kinds
+  that consumers *do* resolve by (`Level`, `TileSet`) can therefore only reach this point with matching
+  content. That is why which side's `Kind` survives is unobservable today — and the exclusion stops being
+  safe the moment something starts reading `ResourceKind.Sprite` or `ResourceKind.TileGraphic`. Anything
+  that is not identical on all three fields is a genuine content conflict and throws `LevelContentException`
+  naming the path and which of media type, bytes, or attribution differ, rather than silently discarding one
   side.
 
 ## 9. Cross-Cutting Concerns
