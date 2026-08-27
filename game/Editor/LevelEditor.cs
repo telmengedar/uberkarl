@@ -1559,7 +1559,11 @@ namespace Uberkarl {
                 tileSetContributions = tileSetSession.BuildContributions();
             }
 
-            byte[] bytes = save(tileSetContributions);
+            IReadOnlyList<PendingResource> objectSetContributions = objectTypes.Count > 0
+                ? ObjectSetMergeWriter.BuildContributions(activeObjectSetReference.Path, objectTypes)
+                : Array.Empty<PendingResource>();
+
+            byte[] bytes = save(tileSetContributions.Concat(objectSetContributions).ToList());
             tileSetSession?.MarkSaved();
             return bytes;
         }
