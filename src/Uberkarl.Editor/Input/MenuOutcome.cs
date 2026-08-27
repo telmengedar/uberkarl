@@ -44,6 +44,12 @@ public enum MenuOutcomeKind
 
     /// <summary>Open the behavior assignment picker for whatever subject the grid cursor is over.</summary>
     AssignBehaviorAtCursor,
+
+    /// <summary>Summon the list of the level's script table keys, to open one for editing.</summary>
+    OpenScriptEditorList,
+
+    /// <summary>Open the script source editor for the script at the given index into that list.</summary>
+    EditScript,
 }
 
 /// <summary>The file-lifecycle commands a menu can request; the controller maps these to its file IO.</summary>
@@ -142,4 +148,12 @@ public readonly struct MenuOutcome
     /// <summary>An outcome that opens the behavior assignment picker for whatever subject the grid cursor is over. Rides the Actions radial.</summary>
     public static MenuOutcome AssignBehaviorAtCursor() =>
         new(MenuOutcomeKind.AssignBehaviorAtCursor, -1, default, default);
+
+    /// <summary>An outcome that summons the level's script list for editing. Rides the Actions overflow list.</summary>
+    public static MenuOutcome OpenScriptEditorList() =>
+        new(MenuOutcomeKind.OpenScriptEditorList, -1, default, default);
+
+    /// <summary>An outcome that opens the script source editor for the script at <paramref name="index"/> into the just-summoned script list.</summary>
+    public static MenuOutcome EditScript(int index) =>
+        new(MenuOutcomeKind.EditScript, index, default, default);
 }

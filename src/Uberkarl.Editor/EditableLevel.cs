@@ -280,6 +280,18 @@ public sealed class EditableLevel
         return removed;
     }
 
+    /// <summary>Whether <paramref name="path"/> is bound as a script by the level script, a tile behavior override, a trigger, or an object.</summary>
+    public bool IsScriptBound(ResourcePath path)
+    {
+        if (LevelScript is { IsScript: true } levelBinding && levelBinding.Script!.Value.Path == path)
+            return true;
+        if (tileBehaviorOverrides.Any(entry => entry.Binding is { IsScript: true } binding && binding.Script!.Value.Path == path))
+            return true;
+        if (triggers.Any(trigger => trigger.Binding is { IsScript: true } binding && binding.Script!.Value.Path == path))
+            return true;
+        return objects.Any(placement => placement.EffectiveBehavior is { IsScript: true } binding && binding.Script!.Value.Path == path);
+    }
+
     /// <summary>The index of the first trigger whose rect contains cell (x,y), or -1 when none does.</summary>
     public int FindTriggerIndexAt(int x, int y)
     {

@@ -224,7 +224,7 @@ public sealed class MenuCatalogTests
     }
 
     [Test]
-    [Description("DiVoid #8525 §11 U5 / #8628: the entries the radial trim moved off the wheel, reached through Actions' \"More...\" entry and rendered on the list surface so none of them becomes unreachable on a gamepad with no keyboard and no mouse -- only the gesture count changes. Pins each (Label, Outcome) pair against the pre-trim BuildActionsMenu entries they were moved from, in order, so a rebind, drop, or reorder goes red.")]
+    [Description("DiVoid #8525 §11 U5 / #8628, extended by design #8769 M5b's \"Edit Script...\" row: the entries the radial trim moved off the wheel, reached through Actions' \"More...\" entry and rendered on the list surface so none of them becomes unreachable on a gamepad with no keyboard and no mouse -- only the gesture count changes. Pins each (Label, Outcome) pair against the pre-trim BuildActionsMenu entries they were moved from, in order, so a rebind, drop, or reorder goes red.")]
     public void BuildActionsOverflowMenu_LabelsAndOutcomes_MatchThePinnedMapping_InOrder()
     {
         (string Label, MenuOutcome Outcome)[] expected =
@@ -235,6 +235,7 @@ public sealed class MenuCatalogTests
             ("Edit Tileset…", MenuOutcome.OpenTileSetEditor()),
             ("Bind Tileset…", MenuOutcome.OpenTileSetBindPanel()),
             ("Level Script…", MenuOutcome.AssignLevelScriptBehavior()),
+            ("✎ Edit Script…", MenuOutcome.OpenScriptEditorList()),
         };
 
         MenuModel menu = MenuCatalog.BuildActionsOverflowMenu();
@@ -250,6 +251,31 @@ public sealed class MenuCatalogTests
                 Assert.That(menu.Items[i].Outcome, Is.EqualTo(expected[i].Outcome), $"entry {i} outcome");
             }
         });
+    }
+
+    [Test]
+    public void BuildScriptsMenu_OneEntryPerLabel_InOrder()
+    {
+        MenuModel menu = MenuCatalog.BuildScriptsMenu(new[] { "door-opener", "patrol-fast" });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(menu.Title, Is.EqualTo("Edit Script"));
+            Assert.That(menu.Count, Is.EqualTo(2));
+            Assert.That(menu.Items[0].Label, Is.EqualTo("door-opener"));
+            Assert.That(menu.Items[0].Outcome, Is.EqualTo(MenuOutcome.EditScript(0)));
+            Assert.That(menu.Items[1].Label, Is.EqualTo("patrol-fast"));
+            Assert.That(menu.Items[1].Outcome, Is.EqualTo(MenuOutcome.EditScript(1)));
+        });
+    }
+
+    [Test]
+    public void BuildScriptsMenu_NoScripts_IsAnEmptyMenu_ThatKeepsItsTitle()
+    {
+        MenuModel menu = MenuCatalog.BuildScriptsMenu(System.Array.Empty<string>());
+
+        Assert.That(menu.Title, Is.EqualTo("Edit Script"));
+        Assert.That(menu.Count, Is.EqualTo(0));
     }
 
     [Test]
