@@ -573,8 +573,15 @@ namespace Uberkarl {
         }
 
         void OnBehaviorAssignmentCancelled() {
-            pendingTriggerRect = null;
+            ResetPendingTrigger();
             canvas?.CallDeferred(Control.MethodName.GrabFocus);
+        }
+
+        void ResetPendingTrigger() {
+            pendingTriggerRect = null;
+            pendingTriggerBinding = null;
+            pendingTriggerMintedPath = null;
+            pendingTriggerMintedSource = null;
         }
 
         void OpenScriptEditorForExisting(int index) {
@@ -1089,10 +1096,7 @@ namespace Uberkarl {
 
         void AdoptSession(EditableLevel level) {
             session = new LevelEditSession(level);
-            pendingTriggerRect = null;
-            pendingTriggerBinding = null;
-            pendingTriggerMintedPath = null;
-            pendingTriggerMintedSource = null;
+            ResetPendingTrigger();
             canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(level));
             PopulatePalette(level);
             PopulateObjectPalette(level);
@@ -1340,10 +1344,7 @@ namespace Uberkarl {
             BehaviorBinding binding = pendingTriggerBinding;
             ResourcePath? mintedPath = pendingTriggerMintedPath;
             string mintedSource = pendingTriggerMintedSource;
-            pendingTriggerRect = null;
-            pendingTriggerBinding = null;
-            pendingTriggerMintedPath = null;
-            pendingTriggerMintedSource = null;
+            ResetPendingTrigger();
             session.PlaceTrigger(rect.X, rect.Y, rect.Width, rect.Height, binding, name.Trim());
 
             if (mintedPath is { } newlyMintedPath) {

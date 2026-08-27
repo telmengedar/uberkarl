@@ -235,6 +235,36 @@ public sealed class ScriptResourceAuthoringTests
         });
     }
 
+    [Test]
+    public void IsScriptBound_ScriptBoundToATrigger_ReturnsTrue()
+    {
+        var (_, level) = BuildFixture();
+        var session = new LevelEditSession(level);
+        session.UpsertScriptSource(DoorOpener, "{ }");
+
+        session.PlaceTrigger(1, 1, 2, 2, BehaviorBinding.FromScript(ResourceReference.ToSelf(DoorOpener)), "gate");
+
+        Assert.That(level.IsScriptBound(DoorOpener), Is.True);
+    }
+
+    [Test]
+    [Description("Erasing the only trigger bound to a script must flip IsScriptBound back to false; the table entry itself stays put, mirroring the object-reassignment case above (#8049 §5.2's no-GC ruling).")]
+    public void IsScriptBound_AfterTheOnlyBoundTriggerIsErased_ReturnsFalse()
+    {
+        var (_, level) = BuildFixture();
+        var session = new LevelEditSession(level);
+        session.UpsertScriptSource(DoorOpener, "{ }");
+        session.PlaceTrigger(1, 1, 2, 2, BehaviorBinding.FromScript(ResourceReference.ToSelf(DoorOpener)), "gate");
+
+        session.EraseTriggerAt(1, 1);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(level.Scripts.ContainsKey(DoorOpener), Is.True, "the table entry itself is never removed");
+            Assert.That(level.IsScriptBound(DoorOpener), Is.False);
+        });
+    }
+
     private static (byte[] PackageBytes, EditableLevel Level) BuildFixture()
     {
         var objectDefinitions = new[]
