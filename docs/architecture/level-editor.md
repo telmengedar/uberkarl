@@ -165,25 +165,30 @@ view drops) and *distinct from* `LevelDefinition` (its grids are mutable). It is
 - **TileMapLevelBuilder.BuildEditable** — returns the parent node, the per-layer `TileMapLayer`s
   (index-aligned to the model's layers), and the tile-id→atlas-source map, so the canvas paints
   `Layers[i].SetCell(cell, SourceByTile[id], 0)` and erases `Layers[i].EraseCell(cell)`.
-- **`LevelEditor.WriteMergedIntoExisting`'s `attachAsNew`** — a plain re-save (`Save()`) passes `false`: it
-  must reuse whatever resource slot the level already occupies, because the level is always already attached
-  (loaded from a real resource, or attached by an earlier Save-As in the same session). Save-As's "+ New
-  level…" outcome passes `true`: it must derive a fresh namespaced slot from the level's new name even when
-  the level is already attached to a *different* resource (e.g. loading "demo" then Save-As'ing it as a
-  brand-new "veriforest"). Checking `!session.Level.IsAttached` instead of the caller's explicit `attachAsNew`
-  would wrongly treat "already attached to something" as "nothing to do," silently overwriting the origin
-  resource instead of creating the new one — the bug this parameter exists to prevent.
+- **`LevelEditor.WriteMergedIntoExisting`'s `attachAsNew`** — a plain re-save (`Save()`) passes `false`; the
+  method falls back to `AttachAsNewResource` when the level is not attached (`!session.Level.IsAttached`), so
+  an unattached level saved via this path still gets a namespaced slot rather than being silently dropped.
+  Save-As's "+ New level…" outcome passes `true`: it must derive a fresh namespaced slot from the level's new
+  name even when the level is already attached to a *different* resource (e.g. loading "demo" then
+  Save-As'ing it as a brand-new "veriforest"). Checking `!session.Level.IsAttached` alone, without the
+  caller's explicit `attachAsNew`, would wrongly treat "already attached to something" as "nothing to do,"
+  silently overwriting the origin resource instead of creating the new one — the bug this parameter exists to
+  prevent.
 - **`ObjectSetMergeWriter.BuildContributionsForLevel`'s null-package contract** — a null source package is
   only valid when the level has no object placements to resolve. The guard is keyed on
   `level.Objects.Count > 0` — whether there is placement data actually at risk — not on whether the level has
   ever been attached to a package. A never-attached level with placements is unreachable today
   (`PlaceObject`/`PlaceActiveObject` both require a package), but the contract does not rely on that
   reachability holding: if it is ever violated, the guard still throws instead of silently dropping the data.
-- **The assembled save contribution list is duplicate-free.** `LevelSaveOrchestration.BuildExtraContributions`
-  concatenates the tile set's contributions with every referenced object set's, then de-duplicates the result
-  by resource path once, at that outermost point — the property `PackageBuilder.AddResource` requires of any
-  list handed to it. The tile set's entry wins over a stale object-set copy of the same path (it appears
-  first in the concatenation), which matters when an object's graphic reuses a tile's graphic path.
+- **The archive a save produces never carries a resource path twice.** Every save path — level or tile set,
+  fresh or merged — funnels through `PackageMergeWriter.Compose`/`BuildFresh`, which is therefore the one
+  place the property is enforced, regardless of how many contribution lists were concatenated to build the
+  list handed in. Two contributions landing on the same path collapse to one when their bytes and media type
+  are identical (the reachable case: an object's graphic reusing an already-attached tile's graphic path
+  reads the same package entry on both sides, so the two are the same bytes by construction — which side
+  survives is therefore unobservable); anything else is a genuine content conflict and throws
+  `LevelContentException` naming the path and the conflicting kinds, rather than silently discarding one
+  side.
 
 ## 9. Cross-Cutting Concerns
 

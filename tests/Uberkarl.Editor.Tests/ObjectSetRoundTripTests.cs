@@ -21,6 +21,7 @@ public sealed class ObjectSetRoundTripTests
     private static readonly ResourcePath PlatformGraphicPath = ResourcePath.Create("objects/platform.png");
     private static readonly ResourcePath JumpBlockGraphicPath = ResourcePath.Create("objects/jump-block.png");
     private static readonly ResourcePath TargetOwnResourcePath = ResourcePath.Create("targets/own-resource.png");
+    private static readonly ResourcePath CollidingObjectSetPath = ResourcePath.Create("tilesets/probe-c-set.json");
 
     private static readonly byte[] PlatformGraphicBytes = Encoding.UTF8.GetBytes("PLATFORM-PNG");
     private static readonly byte[] JumpBlockGraphicBytes = Encoding.UTF8.GetBytes("JUMP-BLOCK-PNG");
@@ -109,7 +110,6 @@ public sealed class ObjectSetRoundTripTests
         session.AttachAsNewResource(targetPackage.Manifest.Resources);
 
         IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, targetPackage.Manifest.Resources, originPackage);
-        AssertContributionPathsAreUnique(extra);
         byte[] mergedBytes = session.Save(targetPackage, extra);
 
         EditableLevel reloaded = EditableLevelReader.FromPackageBytes(mergedBytes);
@@ -126,7 +126,7 @@ public sealed class ObjectSetRoundTripTests
             Assert.That(mergedPackage.GetEntry(ObjectSetPath).Kind, Is.EqualTo(ResourceKind.ObjectSet),
                 "the object set resource must be stamped with the objectset kind after the merge.");
             Assert.That(mergedPackage.GetEntry(TargetOwnResourcePath).Kind, Is.EqualTo(ResourceKind.Sprite),
-                "the target package's own pre-existing resource must survive the merge (carry-forward, DiVoid #7571/#7572).");
+                "the target package's own pre-existing resource must survive the merge.");
             Assert.That(mergedPackage.ReadBytes(TargetOwnResourcePath), Is.EqualTo(TargetOwnResourceBytes),
                 "the target package's own pre-existing resource bytes must survive the merge unchanged.");
         });
@@ -144,7 +144,6 @@ public sealed class ObjectSetRoundTripTests
         LevelEditSession session = new LevelEditSession(level);
 
         IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, package.Manifest.Resources, package);
-        AssertContributionPathsAreUnique(extra);
         byte[] mergedBytes = session.Save(package, extra);
 
         EditableLevel reloaded = EditableLevelReader.FromPackageBytes(mergedBytes);
@@ -192,7 +191,7 @@ public sealed class ObjectSetRoundTripTests
             Assert.That(reloaded.Objects, Has.Count.EqualTo(1),
                 "the placement must resolve when its object type's graphic path equals the tile set's own graphic path.");
             Assert.That(reloaded.Objects[0].Graphic, Is.EqualTo(Encoding.UTF8.GetBytes("GRASS-PNG")),
-                "the shared path's single assembled entry must carry the tile set's bytes, not a second copy.");
+                "the shared path's single assembled entry must carry the shared graphic bytes.");
             Assert.That(freshPackage.Manifest.Resources.Count(entry => entry.Path == GrassPath), Is.EqualTo(1),
                 "the assembled manifest must not carry the shared path twice.");
         });
@@ -217,18 +216,46 @@ public sealed class ObjectSetRoundTripTests
         using Package package = PackageReader.Open(new MemoryStream(packageBytes));
         EditableLevel level = EditableLevelReader.FromPackage(package, LevelPath);
 
-        IReadOnlyList<PendingResource> contributions = ObjectSetMergeWriter.BuildContributionsForLevel(null, level);
+        IReadOnlyList<PendingResource> withoutPackage = ObjectSetMergeWriter.BuildContributionsForLevel(null, level);
+        IReadOnlyList<PendingResource> withPackage = ObjectSetMergeWriter.BuildContributionsForLevel(package, level);
 
-        Assert.That(contributions, Is.Empty,
-            "a level with no object placements has nothing to lose when no source package is available.");
+        Assert.That(withoutPackage, Is.EqualTo(withPackage),
+            "a level with no object placements must return the same (empty) contribution list whether or not a source package is supplied.");
     }
 
-    /// <summary>Asserts every contribution's resource path is unique — the property <see cref="PackageBuilder"/> requires of any list handed to it.</summary>
-    private static void AssertContributionPathsAreUnique(IReadOnlyList<PendingResource> contributions)
+    [Test]
+    public void SaveAsNewPackage_WithLevelPathCollidingWithReferencedObjectSet_ThrowsLevelContentException()
     {
-        List<ResourcePath> paths = contributions.Select(contribution => contribution.Path).ToList();
-        Assert.That(paths, Is.Unique,
-            "the contribution list handed to PackageBuilder must contain each resource path at most once.");
+        byte[] packageBytes = BuildPackageBytes();
+        using Package package = PackageReader.Open(new MemoryStream(packageBytes));
+        EditableLevel level = EditableLevelReader.FromPackage(package, LevelPath);
+        EditableTileSet tileSet = EditableTileSetReader.FromPackage(package, ResourceReference.ToSelf(TileSetPath));
+        TileSetEditSession tileSetSession = new TileSetEditSession(tileSet);
+        LevelEditSession session = new LevelEditSession(level);
+        session.AttachToExistingResource(ObjectSetPath);
+
+        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, Array.Empty<ResourceEntry>(), package);
+
+        Assert.That(() => session.SaveFresh("Collision Pack", extra),
+            Throws.TypeOf<LevelContentException>().With.Message.Contains(ObjectSetPath.Value),
+            "the level's own resource path colliding with a referenced object set's path must surface as a named conflict, not silently drop one side.");
+    }
+
+    [Test]
+    public void SaveAsNewPackage_WithReferencedObjectSetPathCollidingWithAFreshTileSetsDerivedPath_ThrowsLevelContentException()
+    {
+        byte[] packageBytes = BuildObjectSetPathCollidesWithFreshTileSetPackageBytes();
+        using Package package = PackageReader.Open(new MemoryStream(packageBytes));
+        EditableLevel level = EditableLevelReader.FromPackage(package, LevelPath);
+        EditableTileSet freshTileSet = EditableTileSet.CreateBlank("Probe C Set");
+        TileSetEditSession tileSetSession = new TileSetEditSession(freshTileSet);
+        LevelEditSession session = new LevelEditSession(level);
+
+        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, Array.Empty<ResourceEntry>(), package);
+
+        Assert.That(() => session.SaveFresh("Collision Pack", extra),
+            Throws.TypeOf<LevelContentException>().With.Message.Contains(CollidingObjectSetPath.Value),
+            "an object set's own path colliding with a freshly-attached tile set's derived path must surface as a named conflict, not silently drop the object set.");
     }
 
     private static byte[] BuildFreshPackageBytes(byte[] packageBytes)
@@ -240,7 +267,6 @@ public sealed class ObjectSetRoundTripTests
         LevelEditSession session = new LevelEditSession(level);
 
         IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, Array.Empty<ResourceEntry>(), package);
-        AssertContributionPathsAreUnique(extra);
         return session.SaveFresh("Fresh Object Pack", extra);
     }
 
@@ -398,6 +424,29 @@ public sealed class ObjectSetRoundTripTests
 
         PackageBuilder builder = StartPackage();
         builder.AddResource(ResourceKind.ObjectSet, ObjectSetPath, LevelContentSerializer.WriteObjectSet(objectSet));
+        builder.AddResource(ResourceKind.Level, LevelPath, LevelContentSerializer.WriteLevel(level));
+
+        return FinishPackage(builder);
+    }
+
+    private static byte[] BuildObjectSetPathCollidesWithFreshTileSetPackageBytes()
+    {
+        ObjectSetDefinition objectSet = new ObjectSetDefinition
+        {
+            Objects = new[]
+            {
+                new ObjectDefinition { Id = "crate", Name = "Crate", Graphic = ResourceReference.ToSelf(PlatformGraphicPath), CollisionRole = ObjectCollisionRole.Solid },
+            },
+        };
+
+        LevelDefinition level = BuildLevel(new[]
+        {
+            new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(CollidingObjectSetPath), ObjectId = "crate", Cell = new GridPosition(1, 0), Name = "crate-1" },
+        });
+
+        PackageBuilder builder = StartPackage();
+        builder.AddResource(ResourceKind.Sprite, PlatformGraphicPath, PlatformGraphicBytes, "image/png");
+        builder.AddResource(ResourceKind.ObjectSet, CollidingObjectSetPath, LevelContentSerializer.WriteObjectSet(objectSet));
         builder.AddResource(ResourceKind.Level, LevelPath, LevelContentSerializer.WriteLevel(level));
 
         return FinishPackage(builder);

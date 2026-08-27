@@ -7,7 +7,7 @@ namespace Uberkarl.Editor;
 /// <summary>Builds the resource contributions the object sets a level references own on save.</summary>
 public static class ObjectSetMergeWriter
 {
-    /// <summary>One object set's resource contributions — its definition, and each distinct object graphic.</summary>
+    /// <summary>One object set's resource contributions — its definition, and each object type's graphic.</summary>
     public static IReadOnlyList<PendingResource> BuildContributions(ResourcePath objectSetPath, IReadOnlyList<EditableObjectType> objectTypes)
     {
         if (objectTypes is null)
@@ -29,7 +29,7 @@ public static class ObjectSetMergeWriter
         return contributions;
     }
 
-    /// <summary>The contributions of every object set <paramref name="level"/>'s placements reference, read from <paramref name="package"/>, keyed on whether there is placement data to lose rather than on whether the level was ever attached: a null <paramref name="package"/> throws only when <paramref name="level"/>.Objects is non-empty.</summary>
+    /// <summary>The contributions of every object set <paramref name="level"/>'s placements reference, read from <paramref name="package"/>. A null <paramref name="package"/> throws only when <paramref name="level"/>.Objects is non-empty.</summary>
     public static IReadOnlyList<PendingResource> BuildContributionsForLevel(Package? package, EditableLevel level)
     {
         if (level is null)
