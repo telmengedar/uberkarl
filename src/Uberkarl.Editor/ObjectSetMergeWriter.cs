@@ -29,13 +29,15 @@ public static class ObjectSetMergeWriter
         return contributions;
     }
 
-    /// <summary>The contributions of every object set <paramref name="level"/>'s placements reference, read from <paramref name="package"/>.</summary>
-    public static IReadOnlyList<PendingResource> BuildContributionsForLevel(Package package, EditableLevel level)
+    /// <summary>The contributions of every object set <paramref name="level"/>'s placements reference, read from <paramref name="package"/> and de-duplicated by path across all of them. A null <paramref name="package"/> is only valid when the level has no object placements to resolve; otherwise it throws.</summary>
+    public static IReadOnlyList<PendingResource> BuildContributionsForLevel(Package? package, EditableLevel level)
     {
-        if (package is null)
-            throw new ArgumentNullException(nameof(package));
         if (level is null)
             throw new ArgumentNullException(nameof(level));
+        if (package is null && level.Objects.Count > 0)
+            throw new ArgumentNullException(nameof(package));
+        if (package is null)
+            return Array.Empty<PendingResource>();
 
         var contributions = new List<PendingResource>();
         var seen = new HashSet<ResourceReference>();
@@ -49,6 +51,6 @@ public static class ObjectSetMergeWriter
             contributions.AddRange(BuildContributions(reference.Path, objectTypes));
         }
 
-        return contributions;
+        return contributions.DistinctBy(contribution => contribution.Path).ToList();
     }
 }

@@ -25,9 +25,7 @@ public static class LevelSaveOrchestration
             tileSetContributions = tileSetSession.BuildContributions();
         }
 
-        IReadOnlyList<PendingResource> objectSetContributions = objectSetSourcePackage is null
-            ? Array.Empty<PendingResource>()
-            : ObjectSetMergeWriter.BuildContributionsForLevel(objectSetSourcePackage, level);
+        IReadOnlyList<PendingResource> objectSetContributions = ObjectSetMergeWriter.BuildContributionsForLevel(objectSetSourcePackage, level);
 
         return tileSetContributions.Concat(objectSetContributions).ToList();
     }

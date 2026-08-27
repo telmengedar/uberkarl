@@ -1527,23 +1527,7 @@ namespace Uberkarl {
                 SummonSaveBrowser();
         }
 
-        // Merges the level into the package at `handle` — opens the existing archive, merges the level's
-        // contributions onto it (every sibling resource + the archive's identity carried forward
-        // unchanged — DiVoid #7571/#7572), and writes the merged bytes back.
-        //
-        // `overwriteResourcePath` set: the level attaches to that EXACT resource slot first (Save-As's
-        // "pick existing level to overwrite" outcome) — always re-attaches, regardless of `attachAsNew`.
-        //
-        // `overwriteResourcePath` null: `attachAsNew` decides. A plain re-save (`Save()`) passes `false` —
-        // it must reuse whatever slot the level already occupies (it is always already attached: it was
-        // either loaded from a real resource or established by an earlier Save-As in this same session).
-        // Save-As's "＋ New level…" outcome passes `true` — it MUST derive a fresh namespaced slot from
-        // the level's new name even when the level is already attached to a DIFFERENT resource (e.g. the
-        // author loaded "demo" and Save-As'd it as a brand-new "veriforest" level): checking
-        // `!session.Level.IsAttached` here would wrongly treat "already attached to something" as "nothing
-        // to do," silently overwriting the ORIGIN resource instead of creating the new one — the bug this
-        // parameter exists to prevent.
-        byte[] SaveLevelAndTileSet(IReadOnlyList<ResourceEntry> existingResources, Package objectSetSourcePackage, Func<IReadOnlyList<PendingResource>, byte[]> save) {
+        byte[] SaveLevelAndTileSet(IReadOnlyList<ResourceEntry> existingResources, Package? objectSetSourcePackage, Func<IReadOnlyList<PendingResource>, byte[]> save) {
             IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(session.Level, tileSetSession, existingResources, objectSetSourcePackage);
             byte[] bytes = save(extra);
             tileSetSession?.MarkSaved();
@@ -1559,13 +1543,14 @@ namespace Uberkarl {
                 // The read handle must be released before writing back over the same file (FolderPackageSource
                 // atomically renames a temp file over it) — Windows refuses to replace a file that is still
                 // open for read, so this open/merge is its own scope, closed before writable.Write below.
-                using (Package existing = packageSource.Open(handle)) {
+                using (Package existing = packageSource.Open(handle))
+                using (Package objectSetSource = TryOpenCurrentPackage()) {
                     if (overwriteResourcePath is { } path)
                         session.AttachToExistingResource(path);
                     else if (attachAsNew || !session.Level.IsAttached)
                         session.AttachAsNewResource(existing.Manifest.Resources);
 
-                    bytes = SaveLevelAndTileSet(existing.Manifest.Resources, existing, extra => session.Save(existing, extra));
+                    bytes = SaveLevelAndTileSet(existing.Manifest.Resources, objectSetSource, extra => session.Save(existing, extra));
                 }
 
                 writable.Write(handle, bytes);
@@ -1616,10 +1601,11 @@ namespace Uberkarl {
                 byte[] bytes;
                 // Same read-before-write ordering hazard as WriteMergedIntoExisting: release the read
                 // handle before overwriting the same path.
-                using (Package existing = PackageReader.Open(absolutePath)) {
+                using (Package existing = PackageReader.Open(absolutePath))
+                using (Package objectSetSource = TryOpenCurrentPackage()) {
                     if (!session.Level.IsAttached)
                         session.AttachAsNewResource(existing.Manifest.Resources);
-                    bytes = SaveLevelAndTileSet(existing.Manifest.Resources, existing, extra => session.Save(existing, extra));
+                    bytes = SaveLevelAndTileSet(existing.Manifest.Resources, objectSetSource, extra => session.Save(existing, extra));
                 }
                 File.WriteAllBytes(absolutePath, bytes);
                 currentFilePath = absolutePath;
