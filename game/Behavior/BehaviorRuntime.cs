@@ -127,12 +127,7 @@ namespace Uberkarl {
             ApplyIntents();
         }
 
-        Dictionary<string, object> Globals(BehaviorSubject self) => new Dictionary<string, object> {
-            ["self"] = self,
-            ["level"] = levelFacade,
-            ["player"] = playerFacade,
-            ["event"] = scheduler.CurrentEvent,
-        };
+        IReadOnlyDictionary<string, object> Globals(BehaviorSubject self) => BehaviorGlobals.Compose(self, levelFacade, playerFacade, scheduler.CurrentEvent);
 
         void RegisterScriptedTiles(ResolvedLevel level) {
             foreach (var (layer, cell, binding) in level.EffectiveTileBehaviors()) {

@@ -63,7 +63,7 @@ public static class MenuCatalog
         return new MenuModel("Actions", items);
     }
 
-    /// <summary>The Actions overflow list: New, Save As, Resize…, Edit Tileset…, Bind Tileset…, Level Script… — reached through <see cref="BuildActionsMenu"/>'s "More…" entry and rendered on the list surface.</summary>
+    /// <summary>The Actions overflow list: New, Save As, Resize…, Edit Tileset…, Bind Tileset…, Level Script…, Edit Script… — reached through <see cref="BuildActionsMenu"/>'s "More…" entry and rendered on the list surface.</summary>
     public static MenuModel BuildActionsOverflowMenu()
     {
         MenuItem[] items =
@@ -74,8 +74,19 @@ public static class MenuCatalog
             new MenuItem("Edit Tileset…", MenuOutcome.OpenTileSetEditor()),
             new MenuItem("Bind Tileset…", MenuOutcome.OpenTileSetBindPanel()),
             new MenuItem("Level Script…", MenuOutcome.AssignLevelScriptBehavior()),
+            new MenuItem("✎ Edit Script…", MenuOutcome.OpenScriptEditorList()),
         };
         return new MenuModel("More", items);
+    }
+
+    /// <summary>The level's script table as a list surface menu: one entry per script path, in <paramref name="scriptLabels"/>'s order — reached through <see cref="BuildActionsOverflowMenu"/>'s "✎ Edit Script…" entry.</summary>
+    public static MenuModel BuildScriptsMenu(IReadOnlyList<string> scriptLabels)
+    {
+        List<MenuItem> items = new List<MenuItem>(scriptLabels.Count);
+        for (int i = 0; i < scriptLabels.Count; i++)
+            items.Add(new MenuItem(scriptLabels[i], MenuOutcome.EditScript(i)));
+
+        return new MenuModel("Edit Script", items);
     }
 
     /// <summary>The radial surface's entry-point guard: throws rather than rendering or truncating <paramref name="menu"/> if it carries more than <see cref="RadialCap"/> entries.</summary>

@@ -91,6 +91,7 @@ namespace Uberkarl {
         OnScreenKeyboard textKeyboard;
         BehaviorAssignmentPanel behaviorAssignmentPanel;
         BehaviorSubjectTarget pendingBehaviorTarget;
+        ScriptSourceEditor scriptSourceEditor;
         PlaytestOverlay playtestOverlay;
         (int X, int Y) lastCursorStatusCell = (int.MinValue, int.MinValue);
         // Tile/layer selection STATE persists here (the radials read it); the visible side-panel lists that
@@ -313,7 +314,8 @@ namespace Uberkarl {
             (popIn != null && popIn.IsOpen) || (choiceList != null && choiceList.IsOpen) ||
             (layerManager != null && layerManager.IsOpen) || (resizePanel != null && resizePanel.IsOpen) ||
             (tileSetEditor != null && tileSetEditor.IsOpen) || (tileSetBindPanel != null && tileSetBindPanel.IsOpen) ||
-            (textKeyboard != null && textKeyboard.IsOpen) || (behaviorAssignmentPanel != null && behaviorAssignmentPanel.IsOpen);
+            (textKeyboard != null && textKeyboard.IsOpen) || (behaviorAssignmentPanel != null && behaviorAssignmentPanel.IsOpen) ||
+            (scriptSourceEditor != null && scriptSourceEditor.IsOpen);
 
         static string ActionName(EditorAction action) => EditorActionMap.NameOf(action);
 
@@ -434,6 +436,12 @@ namespace Uberkarl {
                 case MenuOutcomeKind.AssignBehaviorAtCursor:
                     AssignBehaviorAtCursor();
                     break;
+                case MenuOutcomeKind.OpenScriptEditorList:
+                    OpenScriptEditorList();
+                    break;
+                case MenuOutcomeKind.EditScript:
+                    OpenScriptEditorForExisting(outcome.Index);
+                    break;
             }
         }
 
@@ -445,6 +453,19 @@ namespace Uberkarl {
         }
 
         ChoiceListRow ActionsOverflowListRow(MenuModel menu, int index) => new ChoiceListRow(menu.Items[index].Label, string.Empty);
+
+        void OpenScriptEditorList() {
+            if (session == null)
+                return;
+
+            List<string> labels = ScriptEditorListPaths().Select(ScriptResourcePaths.DisplayLabel).ToList();
+            MenuModel menu = MenuCatalog.BuildScriptsMenu(labels);
+            openListMenu = menu;
+            choiceList.Open(menu.Title, "✕ Close", menu.Count, index => ScriptsListRow(menu, index),
+                "No scripts in this level yet.", OnListChosen, OnListDismissed);
+        }
+
+        ChoiceListRow ScriptsListRow(MenuModel menu, int index) => new ChoiceListRow(menu.Items[index].Label, string.Empty);
 
         void OnAssignBehaviorPressed() {
             if (session == null || AnyModalOpen())
@@ -499,9 +520,25 @@ namespace Uberkarl {
         }
 
         void OnBehaviorAssigned(BehaviorBinding binding) {
-            if (behaviorAssignmentPanel.MintedScriptPath is { } mintedPath)
-                session.UpsertScriptSource(mintedPath, behaviorAssignmentPanel.MintedScriptSource);
+            ResourcePath? mintedPath = behaviorAssignmentPanel.MintedScriptPath;
+            string mintedSource = behaviorAssignmentPanel.MintedScriptSource;
+            if (mintedPath is { } path)
+                session.UpsertScriptSource(path, mintedSource);
 
+            ApplyBehaviorAssignment(binding);
+
+            if (mintedPath is { } newlyMintedPath) {
+                BehaviorScriptRole role = pendingBehaviorTarget.Kind == BehaviorSubjectKind.LevelScript ? BehaviorScriptRole.Init : BehaviorScriptRole.Behavior;
+                OpenScriptEditor(newlyMintedPath, mintedSource, role);
+                return;
+            }
+
+            RefreshOverlay();
+            UpdateState();
+            canvas?.CallDeferred(Control.MethodName.GrabFocus);
+        }
+
+        void ApplyBehaviorAssignment(BehaviorBinding binding) {
             switch (pendingBehaviorTarget.Kind) {
                 case BehaviorSubjectKind.Object:
                     session.AssignObjectBehavior(pendingBehaviorTarget.Index, binding);
@@ -516,13 +553,40 @@ namespace Uberkarl {
                     session.AssignLevelScript(binding);
                     break;
             }
+        }
 
+        void OnBehaviorAssignmentCancelled() => canvas?.CallDeferred(Control.MethodName.GrabFocus);
+
+        void OpenScriptEditorForExisting(int index) {
+            if (session == null)
+                return;
+
+            List<ResourcePath> paths = ScriptEditorListPaths();
+            if (index < 0 || index >= paths.Count)
+                return;
+
+            ResourcePath path = paths[index];
+            OpenScriptEditor(path, session.Level.Scripts[path], RoleForScript(path));
+        }
+
+        /// <summary>The script paths the Edit-Script list offers, in one shared order both the list and its selection resolve against.</summary>
+        List<ResourcePath> ScriptEditorListPaths() => session.Level.Scripts.Keys.Where(session.Level.IsScriptBound).ToList();
+
+        /// <summary>The Init role when <paramref name="path"/> is bound as the level's own script, the Behavior role otherwise.</summary>
+        BehaviorScriptRole RoleForScript(ResourcePath path) =>
+            session.Level.LevelScript is { IsScript: true } levelBinding && levelBinding.Script!.Value.Path == path
+                ? BehaviorScriptRole.Init
+                : BehaviorScriptRole.Behavior;
+
+        void OpenScriptEditor(ResourcePath path, string source, BehaviorScriptRole role) =>
+            scriptSourceEditor.Summon(path, ScriptResourcePaths.DisplayLabel(path), source, role);
+
+        void OnScriptSourceEditorClosed(ResourcePath path, string source) {
+            session.UpsertScriptSource(path, source);
             RefreshOverlay();
             UpdateState();
             canvas?.CallDeferred(Control.MethodName.GrabFocus);
         }
-
-        void OnBehaviorAssignmentCancelled() => canvas?.CallDeferred(Control.MethodName.GrabFocus);
 
         void SummonLayerManager() {
             if (session == null)
@@ -686,6 +750,10 @@ namespace Uberkarl {
             behaviorAssignmentPanel.Assigned += OnBehaviorAssigned;
             behaviorAssignmentPanel.Cancelled += OnBehaviorAssignmentCancelled;
             AddChild(behaviorAssignmentPanel);
+
+            scriptSourceEditor = new ScriptSourceEditor();
+            scriptSourceEditor.Closed += OnScriptSourceEditorClosed;
+            AddChild(scriptSourceEditor);
 
             // Added last so it draws on top of everything else while a run is live.
             playtestOverlay = new PlaytestOverlay();

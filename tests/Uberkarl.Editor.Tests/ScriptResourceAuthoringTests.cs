@@ -185,6 +185,56 @@ public sealed class ScriptResourceAuthoringTests
         }
     }
 
+    [Test]
+    [Description("DiVoid #9076 W-2: a script only in the table, bound to nothing, is what the reload round trip silently drops -- the Edit-Script list must know it will not survive.")]
+    public void IsScriptBound_ScriptInTableButUnbound_ReturnsFalse()
+    {
+        var (_, level) = BuildFixture();
+        level.UpsertScript(DoorOpener, "{ }");
+
+        Assert.That(level.IsScriptBound(DoorOpener), Is.False);
+    }
+
+    [Test]
+    public void IsScriptBound_ScriptBoundToAnObject_ReturnsTrue()
+    {
+        var (packageBytes, level) = BuildFixture();
+        var session = new LevelEditSession(level);
+        using (var package = PackageReader.Open(new MemoryStream(packageBytes)))
+        {
+            var objectType = EditableObjectSetReader.FromPackage(package, ResourceReference.ToSelf(ObjectSetPath))[0];
+            session.PlaceObject(package, ResourceReference.ToSelf(ObjectSetPath), objectType, 0, 0, "door-a");
+        }
+        session.UpsertScriptSource(DoorOpener, "{ }");
+        session.AssignObjectBehavior(level.FindObjectIndexAt(0, 0), BehaviorBinding.FromScript(ResourceReference.ToSelf(DoorOpener)));
+
+        Assert.That(level.IsScriptBound(DoorOpener), Is.True);
+    }
+
+    [Test]
+    [Description("Rebinding the only bound subject away from a script leaves the table entry in place (#8049 §5.2's no-GC ruling) but must flip it back to unbound.")]
+    public void IsScriptBound_AfterTheOnlyBoundObjectIsReassigned_ReturnsFalse()
+    {
+        var (packageBytes, level) = BuildFixture();
+        var session = new LevelEditSession(level);
+        using (var package = PackageReader.Open(new MemoryStream(packageBytes)))
+        {
+            var objectType = EditableObjectSetReader.FromPackage(package, ResourceReference.ToSelf(ObjectSetPath))[0];
+            session.PlaceObject(package, ResourceReference.ToSelf(ObjectSetPath), objectType, 0, 0, "door-a");
+        }
+        int objectIndex = level.FindObjectIndexAt(0, 0);
+        session.UpsertScriptSource(DoorOpener, "{ }");
+        session.AssignObjectBehavior(objectIndex, BehaviorBinding.FromScript(ResourceReference.ToSelf(DoorOpener)));
+
+        session.AssignObjectBehavior(objectIndex, BehaviorBinding.FromPredefined("static-solid"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(level.Scripts.ContainsKey(DoorOpener), Is.True, "the table entry itself is never removed");
+            Assert.That(level.IsScriptBound(DoorOpener), Is.False);
+        });
+    }
+
     private static (byte[] PackageBytes, EditableLevel Level) BuildFixture()
     {
         var objectDefinitions = new[]
