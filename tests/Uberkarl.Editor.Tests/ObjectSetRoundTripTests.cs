@@ -395,6 +395,7 @@ public sealed class ObjectSetRoundTripTests
         session.EraseObjectAt(1, 0);
         objectSetSession.RemoveType(typeId);
         session.DiscardHistoryForObjectTypeRemoval();
+        session.Undo();
 
         IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(
             level, tileSetSession, Array.Empty<ResourceEntry>(), objectSetSourcePackage: null, objectSetSession);
