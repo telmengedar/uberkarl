@@ -235,6 +235,38 @@ public sealed class ScriptResourceAuthoringTests
         });
     }
 
+    [Test]
+    public void IsScriptBound_ScriptBoundToATrigger_ReturnsTrue()
+    {
+        var (_, level) = BuildFixture();
+        var session = new LevelEditSession(level);
+        session.UpsertScriptSource(DoorOpener, "{ }");
+
+        session.PlaceTrigger(1, 1, 2, 2, BehaviorBinding.FromScript(ResourceReference.ToSelf(DoorOpener)), "gate");
+
+        Assert.That(level.IsScriptBound(DoorOpener), Is.True);
+    }
+
+    [Test]
+    [Description("The table entry survives the erase; only the binding goes. #8049 §5.2.")]
+    public void IsScriptBound_AfterTheOnlyBoundTriggerIsErased_ReturnsFalse()
+    {
+        var (_, level) = BuildFixture();
+        var session = new LevelEditSession(level);
+        session.UpsertScriptSource(DoorOpener, "{ }");
+        session.PlaceTrigger(1, 1, 2, 2, BehaviorBinding.FromScript(ResourceReference.ToSelf(DoorOpener)), "gate");
+
+        Assert.That(level.IsScriptBound(DoorOpener), Is.True, "the trigger arm must match before the erase");
+
+        session.EraseTriggerAt(1, 1);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(level.Scripts.ContainsKey(DoorOpener), Is.True, "the table entry itself is never removed");
+            Assert.That(level.IsScriptBound(DoorOpener), Is.False);
+        });
+    }
+
     private static (byte[] PackageBytes, EditableLevel Level) BuildFixture()
     {
         var objectDefinitions = new[]

@@ -59,6 +59,7 @@ namespace Uberkarl {
         IReadOnlyList<EditableObjectPlacement> overlayObjects = Array.Empty<EditableObjectPlacement>();
         IReadOnlyList<AreaTriggerDefinition> overlayTriggers = Array.Empty<AreaTriggerDefinition>();
         IReadOnlyList<TileBehaviorOverride> overlayTileBehaviorOverrides = Array.Empty<TileBehaviorOverride>();
+        TriggerRect? pendingTriggerRect;
         string cursorSubjectLabel;
 
         /// <summary>Set by the controller while a pop-in radial is open or a toolbar/panel focus-zone is
@@ -142,6 +143,16 @@ namespace Uberkarl {
             overlayObjects = objects ?? Array.Empty<EditableObjectPlacement>();
             overlayTriggers = triggers ?? Array.Empty<AreaTriggerDefinition>();
             overlayTileBehaviorOverrides = tileBehaviorOverrides ?? Array.Empty<TileBehaviorOverride>();
+            QueueRedraw();
+        }
+
+        /// <summary>Sets the live preview rect the two-corner trigger tool draws while a first corner is pending
+        /// (design #8049 M4b — "placing invisible things is not authoring" applies to an in-progress placement
+        /// too, not only committed content). <c>null</c> clears it.</summary>
+        public void SetPendingTriggerRect(TriggerRect? rect) {
+            if (pendingTriggerRect.Equals(rect))
+                return;
+            pendingTriggerRect = rect;
             QueueRedraw();
         }
 
@@ -482,6 +493,7 @@ namespace Uberkarl {
 
             DrawObjectOverlay(origin, step);
             DrawTriggerOverlay(origin, step);
+            DrawPendingTriggerRectOverlay(origin, step);
             DrawTileBehaviorOverrideOverlay(origin, step);
 
             // Hovered-cell highlight (mouse) — a soft amber wash.
@@ -574,6 +586,16 @@ namespace Uberkarl {
                         HorizontalAlignment.Left, rectSize.X - 4f, fontSize - 3, outline);
                 DrawBehaviorMarker(rect, outline);
             }
+        }
+
+        void DrawPendingTriggerRectOverlay(Vector2 origin, float step) {
+            if (pendingTriggerRect is not { } rect)
+                return;
+
+            Vector2 rectPos = origin + new Vector2(rect.X, rect.Y) * step;
+            Vector2 rectSize = new Vector2(rect.Width, rect.Height) * step;
+            DrawRect(new Rect2(rectPos, rectSize), new Color(0.95f, 0.95f, 0.25f, 0.2f));
+            DrawRect(new Rect2(rectPos, rectSize), new Color(0.95f, 0.95f, 0.25f, 0.9f), false, 2f);
         }
 
         void DrawTileBehaviorOverrideOverlay(Vector2 origin, float step) {

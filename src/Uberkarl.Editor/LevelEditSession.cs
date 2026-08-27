@@ -138,6 +138,45 @@ public sealed class LevelEditSession
         return true;
     }
 
+    /// <summary>
+    /// Places a trigger covering the <paramref name="width"/>x<paramref name="height"/> rect at (x,y), bound to
+    /// <paramref name="binding"/> — required, per design #8049's 2026-08-18 addendum: a trigger has no identity
+    /// apart from its binding, so placement and binding assignment ship as one act. No-op when the rect's
+    /// origin is out of bounds. Undoable.
+    /// </summary>
+    public void PlaceTrigger(int x, int y, int width, int height, BehaviorBinding binding, string name = "")
+    {
+        if (binding is null)
+            throw new ArgumentNullException(nameof(binding));
+        if (!Level.InBounds(x, y))
+            return;
+
+        var trigger = new AreaTriggerDefinition
+        {
+            Name = name ?? string.Empty,
+            X = x,
+            Y = y,
+            Width = width,
+            Height = height,
+            Binding = binding,
+        };
+
+        history.Execute(new PlaceTriggerCommand(trigger), Level);
+        IsDirty = true;
+    }
+
+    /// <summary>Removes the trigger whose rect contains cell (x,y), if any — the trigger paint mode's erase. Returns <c>false</c> (no-op) when no trigger's rect contains that cell. Undoable.</summary>
+    public bool EraseTriggerAt(int x, int y)
+    {
+        var index = Level.FindTriggerIndexAt(x, y);
+        if (index < 0)
+            return false;
+
+        history.Execute(new RemoveTriggerCommand(index), Level);
+        IsDirty = true;
+        return true;
+    }
+
     /// <summary>Assigns <paramref name="binding"/> as the placed object at <paramref name="index"/>'s own behavior override. Undoable.</summary>
     public void AssignObjectBehavior(int index, BehaviorBinding binding)
     {

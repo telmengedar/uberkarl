@@ -73,7 +73,7 @@ namespace Uberkarl {
 
             root.AddChild(new HSeparator());
 
-            scroll = new ScrollContainer { CustomMinimumSize = new Vector2(460f, 340f) };
+            scroll = new ScrollContainer { CustomMinimumSize = new Vector2(460f, 340f), FollowFocus = true };
             root.AddChild(scroll);
 
             listBox = new VBoxContainer();
@@ -144,7 +144,7 @@ namespace Uberkarl {
                 CallDeferred(Control.MethodName.GrabFocus);
         }
 
-        static void ContainListFocus(List<Button> buttons) {
+        void ContainListFocus(List<Button> buttons) {
             NodePath self = new NodePath(".");
             for (int i = 0; i < buttons.Count; i++) {
                 Button button = buttons[i];
@@ -154,6 +154,9 @@ namespace Uberkarl {
                 button.FocusNeighborBottom = i < buttons.Count - 1 ? button.GetPathTo(buttons[i + 1]) : self;
                 button.FocusNext = self;
                 button.FocusPrevious = self;
+
+                Button target = button;
+                target.FocusEntered += () => scroll.EnsureControlVisible(target);
             }
         }
 

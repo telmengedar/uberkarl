@@ -386,6 +386,8 @@ The index-space concatenation living here is the specific reason #8525 §8 gave 
 7. The author types. The validator runs on open and on typing pause; the footer shows its verdict.
 8. On close, the buffer is upserted into the table and the session marked dirty; focus returns to the canvas.
 
+**Trigger detour, between steps 5 and 6:** for `BehaviorSubjectKind.Trigger`, step 5 does not yet commit the trigger — the binding is held pending the trigger's own naming step, and `LevelEditor` calls `LevelEditSession.PlaceTrigger` only once that naming commits or cancels. Step 6 straddles the detour, not just follows it: its table upsert already ran before the naming step, so a minted script is persisted whether the trigger naming commits or is cancelled; only its source editor opens after the trigger is placed, never before — opening it first would let it operate on a not-yet-placed trigger (the #8237 shape), and naming is never skipped just because a script was minted (#9763).
+
 **Bind-to-existing:** steps 1–3, then the author picks a script row; the picker produces a script binding naming that existing path, minting nothing; step 5; done. No table write, no editor.
 
 **Edit-only:** Actions overflow → `✎ Edit Script…` → `ChoiceList` over the table keys → step 6's editor, seeded from the table, with no binding touched.

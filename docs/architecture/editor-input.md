@@ -380,3 +380,21 @@ action can cycle between them. The two input families reveal the toolbar differe
 reveal it *by cycling focus onto it* (crossing into `FocusZone.Toolbar`); the mouse reveals it instead by
 edge-hover (§13's edge-reveal), independent of which `FocusZone` currently holds focus. A reader of the
 `FocusZone` enum alone would not see that the mouse's reveal path is deliberately decoupled from it.
+
+## 19. Implementation note — cancellation refreshes through the shared exit tail, not each caller (DiVoid #8505, QA #9375 CF-2)
+
+#8505 named the risk before M4b built the surface it warned about: a routing resolver like `PaintModeRouting`
+can decide *what* an input should do, but "a resolver returns an action; it cannot express 'and then the UI is
+refreshed'." `LevelEditor.CancelTriggerPlacement()` is the demonstrated instance. Six call sites —
+`OpenMenu` and all five `Summon*` modal-summoning methods — cancel a pending trigger corner on the way to
+opening something else, and cancellation only matters to a user if the status line and canvas overlay catch up
+afterward.
+
+The first cut cancelled the corner but did not call `UpdateState()`, so the status line kept reading "pick
+second corner" after the corner was actually gone, and a second click silently started a fresh corner instead
+of reaching the picker the stale text still promised (QA #9375 CF-2). The fix is not "remember to call
+`UpdateState()` at each of the six sites" — that is the rule-someone-must-remember shape #8505 rejected in
+favour of a structural one. `CancelTriggerPlacement()` itself calls `UpdateState()` whenever it actually
+cancels a pending corner, so refreshing happens once, at the one exit every cancelling path already reaches,
+rather than being redundantly re-added at each call site (most of which already reach `UpdateState()` again
+anyway, for unrelated reasons, now harmlessly redundant with this one).

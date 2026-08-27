@@ -28,8 +28,6 @@ namespace Uberkarl {
 
         enum Tool { Paint, Erase }
 
-        enum PaintMode { Tile, Terrain, Object }
-
         // Which pop-in menu, if any, is currently open. One at a time; the owning trigger commits on release.
         enum Trigger { None, Tiles, Layers, Actions }
 
@@ -57,7 +55,7 @@ namespace Uberkarl {
         Tool activeTool = Tool.Paint;
         int activeTileId = LayerDefinition.EmptyCell;
         int activePaletteIndex = -1;
-        PaintMode paintMode = PaintMode.Tile;
+        PaintModeKind paintMode = PaintModeKind.Tile;
         int activeTerrainId = LayerDefinition.EmptyCell;
         readonly List<int> paletteTerrainIds = new List<int>();
         readonly List<string> paletteTerrainLabels = new List<string>();
@@ -66,6 +64,12 @@ namespace Uberkarl {
         readonly List<string> objectTypeLabels = new List<string>();
         EditableObjectType activeObjectType;
         ResourceReference activeObjectSetReference;
+
+        readonly TriggerRectTool triggerRectTool = new TriggerRectTool();
+        TriggerRect? pendingTriggerRect;
+        BehaviorBinding pendingTriggerBinding;
+        ResourcePath? pendingTriggerMintedPath;
+        string pendingTriggerMintedSource;
 
         int activeLayerIndex;
         string currentFilePath;
@@ -155,6 +159,7 @@ namespace Uberkarl {
                 return;
 
             UpdateCursorSubjectStatus();
+            UpdateTriggerRectPreview();
 
             float d = (float)delta;
             UpdateReveals();
@@ -325,6 +330,8 @@ namespace Uberkarl {
             if (session == null)
                 return;
 
+            CancelTriggerPlacement();
+
             switch (trigger) {
                 case Trigger.Tiles:
                     activeTrigger = trigger;
@@ -404,6 +411,9 @@ namespace Uberkarl {
                 case MenuOutcomeKind.SelectObjectType:
                     if (outcome.Index >= 0 && outcome.Index < objectTypes.Count)
                         OnObjectTypeSelected(outcome.Index);
+                    break;
+                case MenuOutcomeKind.SelectTriggerTool:
+                    OnTriggerToolSelected();
                     break;
                 case MenuOutcomeKind.SelectLayer:
                     if (session != null && outcome.Index >= 0 && outcome.Index < session.Level.Layers.Count)
@@ -499,6 +509,7 @@ namespace Uberkarl {
         void SummonBehaviorAssignment(BehaviorSubjectTarget target) {
             if (session == null)
                 return;
+            CancelTriggerPlacement();
             pendingBehaviorTarget = target;
             behaviorAssignmentPanel.Summon(target.Kind, SubjectDisplayName(target), session.Level.Scripts.Keys.ToList(), NewScriptSlugTakenPredicate());
         }
@@ -525,6 +536,14 @@ namespace Uberkarl {
             if (mintedPath is { } path)
                 session.UpsertScriptSource(path, mintedSource);
 
+            if (pendingTriggerRect != null) {
+                pendingTriggerBinding = binding;
+                pendingTriggerMintedPath = mintedPath;
+                pendingTriggerMintedSource = mintedSource;
+                textKeyboard.RequestText("Name trigger (optional)", string.Empty, OnTriggerNameCommitted, OnTriggerNameCancelled);
+                return;
+            }
+
             ApplyBehaviorAssignment(binding);
 
             if (mintedPath is { } newlyMintedPath) {
@@ -533,9 +552,7 @@ namespace Uberkarl {
                 return;
             }
 
-            RefreshOverlay();
-            UpdateState();
-            canvas?.CallDeferred(Control.MethodName.GrabFocus);
+            FinishBehaviorAssignmentFlow();
         }
 
         void ApplyBehaviorAssignment(BehaviorBinding binding) {
@@ -555,7 +572,17 @@ namespace Uberkarl {
             }
         }
 
-        void OnBehaviorAssignmentCancelled() => canvas?.CallDeferred(Control.MethodName.GrabFocus);
+        void OnBehaviorAssignmentCancelled() {
+            ResetPendingTrigger();
+            canvas?.CallDeferred(Control.MethodName.GrabFocus);
+        }
+
+        void ResetPendingTrigger() {
+            pendingTriggerRect = null;
+            pendingTriggerBinding = null;
+            pendingTriggerMintedPath = null;
+            pendingTriggerMintedSource = null;
+        }
 
         void OpenScriptEditorForExisting(int index) {
             if (session == null)
@@ -591,23 +618,27 @@ namespace Uberkarl {
         void SummonLayerManager() {
             if (session == null)
                 return;
+            CancelTriggerPlacement();
             layerManager.Summon(session, activeLayerIndex);
         }
 
         void SummonResizePanel() {
             if (session == null)
                 return;
+            CancelTriggerPlacement();
             resizePanel.Summon(session);
         }
 
         void SummonTileSetEditor() {
             if (tileSetSession == null)
                 return;
+            CancelTriggerPlacement();
             tileSetEditor.Summon(tileSetSession, session.Level.TileSize);
         }
 
         /// <summary>Opens <see cref="tileSetBindPanel"/> against the level's siblings, or its unavailable state (DiVoid #7551 bugfix) when there's no package to browse yet.</summary>
         void SummonTileSetBindPanel() {
+            CancelTriggerPlacement();
             string unavailableReason = TileSetBindAvailability.UnavailableReason(session != null, packageContext != null);
             if (unavailableReason != null) {
                 tileSetBindPanel.SummonUnavailable(unavailableReason);
@@ -874,6 +905,7 @@ namespace Uberkarl {
         void SummonSaveBrowser() {
             if (session == null || packageSource is not IWritablePackageSource)
                 return;
+            CancelTriggerPlacement();
             packageBrowser.SummonSave(packageSource, session.Level.Name);
         }
 
@@ -990,6 +1022,7 @@ namespace Uberkarl {
             if (session == null || Playtesting)
                 return;
 
+            CancelTriggerPlacement();
             try {
                 ResolvedLevel level = EditableLevelSnapshot.ToResolvedLevel(session.Level);
                 playtestOverlay.Start(level);
@@ -1063,6 +1096,7 @@ namespace Uberkarl {
 
         void AdoptSession(EditableLevel level) {
             session = new LevelEditSession(level);
+            ResetPendingTrigger();
             canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(level));
             PopulatePalette(level);
             PopulateObjectPalette(level);
@@ -1132,6 +1166,15 @@ namespace Uberkarl {
             UpdateState();
         }
 
+        void UpdateTriggerRectPreview() {
+            if (session == null || canvas == null || !triggerRectTool.HasPendingCorner)
+                return;
+            (int x, int y) = canvas.CursorCell;
+            if (x < 0 || y < 0)
+                return;
+            canvas.SetPendingTriggerRect(triggerRectTool.PreviewRect(x, y, session.Level.Width, session.Level.Height));
+        }
+
         /// <summary>The label for the behavior-scriptable subject under the grid cursor, or null when nothing resolves there.</summary>
         string CursorSubjectLabelText() {
             if (session == null || canvas == null)
@@ -1194,8 +1237,9 @@ namespace Uberkarl {
                 }
             }
 
-            paintMode = PaintMode.Tile;
+            paintMode = PaintModeKind.Tile;
             activeTerrainId = LayerDefinition.EmptyCell;
+            CancelTriggerPlacement();
         }
 
         // Reset the active layer to the first. Layer names are read live from the session by the Layers radial
@@ -1220,12 +1264,15 @@ namespace Uberkarl {
             if (activeTool == Tool.Erase) {
                 EraseAtCell(x, y);
             } else {
-                switch (paintMode) {
-                    case PaintMode.Terrain:
+                switch (PaintModeRouting.ResolvePress(paintMode)) {
+                    case CellRoutingDecision.PaintTerrain:
                         ApplyCellChange(session.PaintTerrain(activeLayerIndex, x, y, activeTerrainId));
                         break;
-                    case PaintMode.Object:
+                    case CellRoutingDecision.PlaceObject:
                         PlaceActiveObject(x, y);
+                        break;
+                    case CellRoutingDecision.TriggerRectPress:
+                        HandleTriggerRectPress(x, y);
                         break;
                     default:
                         if (activeTileId != LayerDefinition.EmptyCell)
@@ -1245,15 +1292,73 @@ namespace Uberkarl {
         }
 
         void EraseAtCell(int x, int y) {
-            switch (paintMode) {
-                case PaintMode.Object:
+            switch (PaintModeRouting.ResolveErase(paintMode, triggerRectTool.HasPendingCorner)) {
+                case CellRoutingDecision.EraseObject:
                     if (session.EraseObjectAt(x, y))
+                        RefreshOverlay();
+                    break;
+                case CellRoutingDecision.CancelTriggerCorner:
+                    CancelTriggerPlacement();
+                    break;
+                case CellRoutingDecision.EraseTrigger:
+                    if (session.EraseTriggerAt(x, y))
                         RefreshOverlay();
                     break;
                 default:
                     ApplyCellChange(session.EraseCell(activeLayerIndex, x, y));
                     break;
             }
+        }
+
+        void HandleTriggerRectPress(int x, int y) {
+            TriggerRectResult result = triggerRectTool.Press(x, y, session.Level.Width, session.Level.Height);
+            if (result.Kind == TriggerRectResultKind.CornerStarted) {
+                canvas.SetPendingTriggerRect(new TriggerRect(x, y, 1, 1));
+                return;
+            }
+
+            canvas.SetPendingTriggerRect(null);
+            SummonTriggerBehaviorAssignment(result.Rect);
+        }
+
+        void CancelTriggerPlacement() {
+            if (triggerRectTool.CancelPending()) {
+                canvas?.SetPendingTriggerRect(null);
+                UpdateState();
+            }
+        }
+
+        void SummonTriggerBehaviorAssignment(TriggerRect rect) {
+            if (session == null)
+                return;
+            pendingTriggerRect = rect;
+            behaviorAssignmentPanel.Summon(BehaviorSubjectKind.Trigger, subjectName: null, session.Level.Scripts.Keys.ToList(), NewScriptSlugTakenPredicate());
+        }
+
+        void OnTriggerNameCommitted(string name) => CommitPendingTrigger(name ?? string.Empty);
+
+        void OnTriggerNameCancelled() => CommitPendingTrigger(string.Empty);
+
+        void CommitPendingTrigger(string name) {
+            TriggerRect rect = pendingTriggerRect!.Value;
+            BehaviorBinding binding = pendingTriggerBinding;
+            ResourcePath? mintedPath = pendingTriggerMintedPath;
+            string mintedSource = pendingTriggerMintedSource;
+            ResetPendingTrigger();
+            session.PlaceTrigger(rect.X, rect.Y, rect.Width, rect.Height, binding, name.Trim());
+
+            if (mintedPath is { } newlyMintedPath) {
+                OpenScriptEditor(newlyMintedPath, mintedSource, BehaviorScriptRole.Behavior);
+                return;
+            }
+
+            FinishBehaviorAssignmentFlow();
+        }
+
+        void FinishBehaviorAssignmentFlow() {
+            RefreshOverlay();
+            UpdateState();
+            canvas?.CallDeferred(Control.MethodName.GrabFocus);
         }
 
         void ApplyCellChange(CellChange? change) {
@@ -1394,6 +1499,7 @@ namespace Uberkarl {
         void Undo() {
             if (session == null)
                 return;
+            CancelTriggerPlacement();
             ApplyCellChange(session.Undo());
             RefreshOverlay();
             UpdateState();
@@ -1402,6 +1508,7 @@ namespace Uberkarl {
         void Redo() {
             if (session == null)
                 return;
+            CancelTriggerPlacement();
             ApplyCellChange(session.Redo());
             RefreshOverlay();
             UpdateState();
@@ -1542,12 +1649,13 @@ namespace Uberkarl {
         // ----- signal handlers -----
 
         void OnPaletteSelected(long index) {
+            CancelTriggerPlacement();
             int i = (int)index;
             if (i >= 0 && i < paletteTileIds.Count) {
                 activePaletteIndex = i;
                 activeTileId = paletteTileIds[i];
             }
-            paintMode = PaintMode.Tile;
+            paintMode = PaintModeKind.Tile;
             SetTool(Tool.Paint);
             paintButton.ButtonPressed = true;
             eraseButton.ButtonPressed = false;
@@ -1558,10 +1666,11 @@ namespace Uberkarl {
         // "terrain mode" — OnCellPressed routes to session.PaintTerrain instead of session.PaintCell while
         // this is active. Mirrors OnPaletteSelected exactly, just for the other palette.
         void OnTerrainSelected(long index) {
+            CancelTriggerPlacement();
             int i = (int)index;
             if (i >= 0 && i < paletteTerrainIds.Count) {
                 activeTerrainId = paletteTerrainIds[i];
-                paintMode = PaintMode.Terrain;
+                paintMode = PaintModeKind.Terrain;
             }
             SetTool(Tool.Paint);
             paintButton.ButtonPressed = true;
@@ -1570,11 +1679,21 @@ namespace Uberkarl {
         }
 
         void OnObjectTypeSelected(long index) {
+            CancelTriggerPlacement();
             int i = (int)index;
             if (i >= 0 && i < objectTypes.Count) {
                 activeObjectType = objectTypes[i];
-                paintMode = PaintMode.Object;
+                paintMode = PaintModeKind.Object;
             }
+            SetTool(Tool.Paint);
+            paintButton.ButtonPressed = true;
+            eraseButton.ButtonPressed = false;
+            UpdateState();
+        }
+
+        void OnTriggerToolSelected() {
+            CancelTriggerPlacement();
+            paintMode = PaintModeKind.TriggerRect;
             SetTool(Tool.Paint);
             paintButton.ButtonPressed = true;
             eraseButton.ButtonPressed = false;
@@ -1621,8 +1740,9 @@ namespace Uberkarl {
             string tile = activeTool == Tool.Erase
                 ? "erase"
                 : paintMode switch {
-                    PaintMode.Terrain => $"terrain #{activeTerrainId}",
-                    PaintMode.Object => activeObjectType != null ? $"object: {activeObjectType.Definition.Id}" : "object: none",
+                    PaintModeKind.Terrain => $"terrain #{activeTerrainId}",
+                    PaintModeKind.Object => activeObjectType != null ? $"object: {activeObjectType.Definition.Id}" : "object: none",
+                    PaintModeKind.TriggerRect => triggerRectTool.HasPendingCorner ? "trigger: pick second corner" : "trigger: pick first corner",
                     _ => activeTileId == LayerDefinition.EmptyCell ? "none" : $"#{activeTileId}",
                 };
             string tileSet = tileSetSession != null ? tileSetSession.TileSet.Name : "none";

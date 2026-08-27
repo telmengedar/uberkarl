@@ -264,6 +264,22 @@ public sealed class EditableLevel
         scripts[path] = source ?? throw new ArgumentNullException(nameof(source));
     }
 
+    /// <summary>Inserts a trigger at <paramref name="index"/> (0..<see cref="Triggers"/>.Count). Used by <see cref="PlaceTriggerCommand"/>/<see cref="RemoveTriggerCommand"/> to keep undo/redo symmetric.</summary>
+    public void InsertTrigger(int index, AreaTriggerDefinition trigger)
+    {
+        if (trigger is null)
+            throw new ArgumentNullException(nameof(trigger));
+        triggers.Insert(index, trigger);
+    }
+
+    /// <summary>Removes and returns the trigger at <paramref name="index"/>. Throws when out of range.</summary>
+    public AreaTriggerDefinition RemoveTriggerAt(int index)
+    {
+        var removed = triggers[index];
+        triggers.RemoveAt(index);
+        return removed;
+    }
+
     /// <summary>Whether <paramref name="path"/> is bound as a script by the level script, a tile behavior override, a trigger, or an object.</summary>
     public bool IsScriptBound(ResourcePath path)
     {

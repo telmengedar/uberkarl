@@ -12,7 +12,7 @@ namespace Uberkarl.Editor.Tests;
 public sealed class MenuCatalogTests
 {
     [Test]
-    [Description("Tiles occupy indices [0, 2], terrains [3, 4], objects [5, 7] — pins first/last of each segment plus both seams.")]
+    [Description("Tiles occupy indices [0, 2], terrains [3, 4], objects [5, 7], the trigger tool row [8] — pins first/last of each segment plus every seam.")]
     public void BuildTilesMenu_FirstAndLastOfEachSegment_AndBothSeams_LandAtTheirExactIndices()
     {
         MenuModel menu = MenuCatalog.BuildTilesMenu(
@@ -22,7 +22,7 @@ public sealed class MenuCatalogTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(menu.Count, Is.EqualTo(8));
+            Assert.That(menu.Count, Is.EqualTo(9));
 
             Assert.That(menu.Items[0].Outcome, Is.EqualTo(MenuOutcome.SelectTile(0)), "first tile");
             Assert.That(menu.Items[2].Outcome, Is.EqualTo(MenuOutcome.SelectTile(2)), "last tile");
@@ -32,6 +32,8 @@ public sealed class MenuCatalogTests
 
             Assert.That(menu.Items[5].Outcome, Is.EqualTo(MenuOutcome.SelectObjectType(0)), "seam 2: terrains -> objects, first object");
             Assert.That(menu.Items[7].Outcome, Is.EqualTo(MenuOutcome.SelectObjectType(2)), "last object");
+
+            Assert.That(menu.Items[8].Outcome, Is.EqualTo(MenuOutcome.SelectTriggerTool()), "seam 3: objects -> the trailing trigger tool row");
         });
     }
 
@@ -49,6 +51,7 @@ public sealed class MenuCatalogTests
             Assert.That(menu.Items[0].Label, Is.EqualTo("#4"));
             Assert.That(menu.Items[1].Label, Is.EqualTo("Terrain: sand"));
             Assert.That(menu.Items[2].Label, Is.EqualTo("Object: lever"));
+            Assert.That(menu.Items[3].Label, Is.EqualTo("Trigger Rect"));
         });
     }
 
@@ -62,9 +65,10 @@ public sealed class MenuCatalogTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(menu.Count, Is.EqualTo(3));
+            Assert.That(menu.Count, Is.EqualTo(4));
             Assert.That(menu.Items[1].Outcome, Is.EqualTo(MenuOutcome.SelectTile(1)), "last tile");
             Assert.That(menu.Items[2].Outcome, Is.EqualTo(MenuOutcome.SelectObjectType(0)), "object immediately follows, no terrain gap");
+            Assert.That(menu.Items[3].Outcome, Is.EqualTo(MenuOutcome.SelectTriggerTool()), "trigger row immediately follows, no gap");
         });
     }
 
@@ -79,15 +83,16 @@ public sealed class MenuCatalogTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(menu.Count, Is.EqualTo(3));
+            Assert.That(menu.Count, Is.EqualTo(4));
             Assert.That(menu.Items[0].Outcome, Is.EqualTo(MenuOutcome.SelectTerrain(0)), "terrain segment starts at 0 with no tile segment ahead of it");
             Assert.That(menu.Items[1].Outcome, Is.EqualTo(MenuOutcome.SelectTerrain(1)), "last terrain");
             Assert.That(menu.Items[2].Outcome, Is.EqualTo(MenuOutcome.SelectObjectType(0)), "object immediately follows the terrain segment");
+            Assert.That(menu.Items[3].Outcome, Is.EqualTo(MenuOutcome.SelectTriggerTool()), "trigger row still trails even with an empty tile segment");
         });
     }
 
     [Test]
-    public void BuildTilesMenu_EmptyObjects_EndsOnTheTerrainSegment()
+    public void BuildTilesMenu_EmptyObjects_TriggerRowStillFollowsTheTerrainSegment()
     {
         MenuModel menu = MenuCatalog.BuildTilesMenu(
             paletteTileIds: new[] { 5 },
@@ -96,25 +101,32 @@ public sealed class MenuCatalogTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(menu.Count, Is.EqualTo(2));
+            Assert.That(menu.Count, Is.EqualTo(3));
             Assert.That(menu.Items[0].Outcome, Is.EqualTo(MenuOutcome.SelectTile(0)), "tile segment");
-            Assert.That(menu.Items[1].Outcome, Is.EqualTo(MenuOutcome.SelectTerrain(0)), "terrain segment is the last one present, no trailing object gap");
+            Assert.That(menu.Items[1].Outcome, Is.EqualTo(MenuOutcome.SelectTerrain(0)), "terrain segment is the last content one present, no trailing object gap");
+            Assert.That(menu.Items[2].Outcome, Is.EqualTo(MenuOutcome.SelectTriggerTool()), "trigger row follows directly, no gap");
         });
     }
 
     [Test]
-    public void BuildTilesMenu_AllEmpty_IsAnEmptyMenu_ThatKeepsItsTitle()
+    [Description("Design #8049 M4b + surface ruling #8525 §12: the trigger tool is a row in the tiles list, reachable even from a level with no tile/terrain/object palette at all.")]
+    public void BuildTilesMenu_AllPaletteSegmentsEmpty_StillOffersTheTriggerTool_AndKeepsItsTitle()
     {
         MenuModel menu = MenuCatalog.BuildTilesMenu(
             System.Array.Empty<int>(), System.Array.Empty<string>(), System.Array.Empty<string>());
 
-        Assert.That(menu.Title, Is.EqualTo("Tiles"));
-        Assert.That(menu.Count, Is.EqualTo(0));
+        Assert.Multiple(() =>
+        {
+            Assert.That(menu.Title, Is.EqualTo("Tiles"));
+            Assert.That(menu.Count, Is.EqualTo(1));
+            Assert.That(menu.Items[0].Outcome, Is.EqualTo(MenuOutcome.SelectTriggerTool()));
+            Assert.That(menu.Items[0].Label, Is.EqualTo("Trigger Rect"));
+        });
     }
 
     [Test]
-    [Description("A thirty-tile package (design #8525 §11 U3 acceptance) must build as one flat, unbroken segment with no cap — the whole point of the list surface.")]
-    public void BuildTilesMenu_ThirtyTiles_BuildsOneUncappedSegment()
+    [Description("A thirty-tile package (design #8525 §11 U3 acceptance) must build as one flat, unbroken segment with no cap — the whole point of the list surface. The trigger row still trails it.")]
+    public void BuildTilesMenu_ThirtyTiles_BuildsOneUncappedSegment_WithTheTriggerRowTrailing()
     {
         int[] tileIds = new int[30];
         for (int i = 0; i < tileIds.Length; i++)
@@ -123,8 +135,12 @@ public sealed class MenuCatalogTests
         MenuModel menu = MenuCatalog.BuildTilesMenu(
             tileIds, System.Array.Empty<string>(), System.Array.Empty<string>());
 
-        Assert.That(menu.Count, Is.EqualTo(30));
-        Assert.That(menu.Items[29].Outcome, Is.EqualTo(MenuOutcome.SelectTile(29)));
+        Assert.Multiple(() =>
+        {
+            Assert.That(menu.Count, Is.EqualTo(31));
+            Assert.That(menu.Items[29].Outcome, Is.EqualTo(MenuOutcome.SelectTile(29)));
+            Assert.That(menu.Items[30].Outcome, Is.EqualTo(MenuOutcome.SelectTriggerTool()));
+        });
     }
 
     [Test]

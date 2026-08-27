@@ -11,16 +11,18 @@ public static class MenuCatalog
     public const int RadialCap = 8;
 
     /// <summary>
-    /// The Tiles menu: every palette tile, then every terrain, then every object type, as one flat entry
-    /// list in three segments. Each entry's outcome carries an index local to its own segment (<see cref="MenuOutcome.SelectTile"/>,
-    /// <see cref="MenuOutcome.SelectTerrain"/>, <see cref="MenuOutcome.SelectObjectType"/> each restart at 0).
+    /// The Tiles menu: every palette tile, then every terrain, then every object type, then a trailing
+    /// trigger-tool row, as one flat entry list in four segments. Each entry's outcome carries an index local
+    /// to its own segment (<see cref="MenuOutcome.SelectTile"/>, <see cref="MenuOutcome.SelectTerrain"/>,
+    /// <see cref="MenuOutcome.SelectObjectType"/> each restart at 0); the trigger-tool row carries no index.
+    /// Design #8049 M4b + surface ruling #8525 §12 — the trigger tool is a row here, not a radial wedge.
     /// </summary>
     public static MenuModel BuildTilesMenu(
         IReadOnlyList<int> paletteTileIds,
         IReadOnlyList<string> paletteTerrainLabels,
         IReadOnlyList<string> objectTypeLabels)
     {
-        List<MenuItem> items = new List<MenuItem>(paletteTileIds.Count + paletteTerrainLabels.Count + objectTypeLabels.Count);
+        List<MenuItem> items = new List<MenuItem>(paletteTileIds.Count + paletteTerrainLabels.Count + objectTypeLabels.Count + 1);
 
         for (int i = 0; i < paletteTileIds.Count; i++)
             items.Add(new MenuItem($"#{paletteTileIds[i]}", MenuOutcome.SelectTile(i)));
@@ -30,6 +32,8 @@ public static class MenuCatalog
 
         for (int i = 0; i < objectTypeLabels.Count; i++)
             items.Add(new MenuItem($"Object: {objectTypeLabels[i]}", MenuOutcome.SelectObjectType(i)));
+
+        items.Add(new MenuItem("Trigger Rect", MenuOutcome.SelectTriggerTool()));
 
         return new MenuModel("Tiles", items);
     }
