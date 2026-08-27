@@ -4,14 +4,10 @@ using Uberkarl.Packages;
 
 namespace Uberkarl.Editor;
 
-/// <summary>Builds the resource contributions an object set owns on save: its definition and every object type's graphic.</summary>
+/// <summary>Builds the resource contributions the object sets a level references own on save.</summary>
 public static class ObjectSetMergeWriter
 {
-    /// <summary>
-    /// The object set's resource contributions — its definition at <paramref name="objectSetPath"/>, and
-    /// each object type's graphic at the <see cref="Uberkarl.Packages.ResourceReference"/> the type
-    /// already carries. Pure — no IO, no knowledge of any archive this might be merged into.
-    /// </summary>
+    /// <summary>One object set's resource contributions — its definition, and each distinct object graphic.</summary>
     public static IReadOnlyList<PendingResource> BuildContributions(ResourcePath objectSetPath, IReadOnlyList<EditableObjectType> objectTypes)
     {
         if (objectTypes is null)
@@ -27,17 +23,32 @@ public static class ObjectSetMergeWriter
             objectSetPath, ResourceKind.ObjectSet, PackageFormat.DefaultMediaType,
             LevelContentSerializer.WriteObjectSet(objectSetDefinition), attribution: null));
 
-        foreach (var type in objectTypes)
+        foreach (var type in objectTypes.DistinctBy(type => type.Definition.Graphic.Path))
             contributions.Add(new PendingResource(type.Definition.Graphic.Path, ResourceKind.Sprite, "image/png", type.Graphic, attribution: null));
 
         return contributions;
     }
 
-    /// <summary>Merges <paramref name="contributions"/> onto <paramref name="existingPackage"/>. Delegates to <see cref="PackageMergeWriter.Compose"/>.</summary>
-    public static byte[] Compose(Package existingPackage, IReadOnlyList<PendingResource> contributions)
-        => PackageMergeWriter.Compose(existingPackage, contributions);
+    /// <summary>The contributions of every object set <paramref name="level"/>'s placements reference, read from <paramref name="package"/>.</summary>
+    public static IReadOnlyList<PendingResource> BuildContributionsForLevel(Package package, EditableLevel level)
+    {
+        if (package is null)
+            throw new ArgumentNullException(nameof(package));
+        if (level is null)
+            throw new ArgumentNullException(nameof(level));
 
-    /// <summary>Mints a brand-new archive containing only <paramref name="contributions"/>. Delegates to <see cref="PackageMergeWriter.BuildFresh"/>.</summary>
-    public static byte[] BuildFresh(string newPackageName, IReadOnlyList<PendingResource> contributions)
-        => PackageMergeWriter.BuildFresh(newPackageName, contributions);
+        var contributions = new List<PendingResource>();
+        var seen = new HashSet<ResourceReference>();
+        foreach (var placement in level.Objects)
+        {
+            var reference = placement.Placement.ObjectSet;
+            if (!seen.Add(reference))
+                continue;
+
+            var objectTypes = EditableObjectSetReader.FromPackage(package, reference);
+            contributions.AddRange(BuildContributions(reference.Path, objectTypes));
+        }
+
+        return contributions;
+    }
 }

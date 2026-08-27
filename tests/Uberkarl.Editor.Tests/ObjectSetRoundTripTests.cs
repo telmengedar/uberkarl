@@ -6,7 +6,7 @@ using Uberkarl.Packages;
 
 namespace Uberkarl.Editor.Tests;
 
-/// <summary>Save/reload round-trip coverage for <see cref="ObjectSetMergeWriter"/>.</summary>
+/// <summary>Save/reload round-trip coverage for <see cref="ObjectSetMergeWriter"/> and <see cref="LevelSaveOrchestration"/>.</summary>
 [TestFixture]
 public sealed class ObjectSetRoundTripTests
 {
@@ -36,7 +36,7 @@ public sealed class ObjectSetRoundTripTests
         Assert.Multiple(() =>
         {
             Assert.That(reloaded.Objects, Has.Count.EqualTo(2),
-                "both placed objects must resolve after a fresh-package save -- BuildFresh must emit the object set, not rely on an existing archive already carrying it.");
+                "both placed objects must resolve after a fresh-package save.");
 
             Assert.That(reloaded.Objects[0].Graphic, Is.EqualTo(PlatformGraphicBytes),
                 "the platform's graphic bytes did not survive the fresh-package save.");
@@ -49,23 +49,45 @@ public sealed class ObjectSetRoundTripTests
                 "the jump-block's collision role did not survive the fresh-package save.");
 
             Assert.That(freshPackage.GetEntry(ObjectSetPath).Kind, Is.EqualTo(ResourceKind.ObjectSet),
-                "the object set resource must be stamped with the objectset kind so package browsers can find it.");
+                "the object set resource must be stamped with the objectset kind.");
             Assert.That(freshPackage.GetEntry(PlatformGraphicPath).Kind, Is.EqualTo(ResourceKind.Sprite),
-                "an object graphic resource must be stamped with the sprite kind so package browsers can find it.");
+                "an object graphic resource must be stamped with the sprite kind.");
         });
     }
 
     [Test]
-    public void BuildContributions_WithNoObjectTypes_StillEmitsAnEmptyObjectSetDefinition()
+    public void SaveAsNewPackage_WithPlacementsInTwoDistinctObjectSets_RoundTripsBoth()
     {
-        var contributions = ObjectSetMergeWriter.BuildContributions(ObjectSetPath, Array.Empty<EditableObjectType>());
+        var packageBytes = BuildTwoObjectSetPackageBytes();
+        var freshBytes = BuildFreshPackageBytes(packageBytes);
+        var reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
 
         Assert.Multiple(() =>
         {
-            Assert.That(contributions, Has.Count.EqualTo(1),
-                "an empty object type list must still contribute the (empty) object set definition -- the caller decides whether to call this at all, not this method.");
-            Assert.That(contributions[0].Path, Is.EqualTo(ObjectSetPath));
-            Assert.That(LevelContentSerializer.ReadObjectSet(contributions[0].Payload).Objects, Is.Empty);
+            Assert.That(reloaded.Objects, Has.Count.EqualTo(2),
+                "both placements must resolve when their placements reference two distinct object sets.");
+            Assert.That(reloaded.Objects[0].Graphic, Is.EqualTo(PlatformGraphicBytes),
+                "the object set A placement's graphic did not survive the fresh-package save.");
+            Assert.That(reloaded.Objects[1].Graphic, Is.EqualTo(JumpBlockGraphicBytes),
+                "the object set B placement's graphic did not survive the fresh-package save.");
+        });
+    }
+
+    [Test]
+    public void SaveAsNewPackage_WithTwoObjectTypesSharingOneGraphic_DoesNotThrowAndRoundTripsBoth()
+    {
+        var packageBytes = BuildSharedGraphicPackageBytes();
+        var freshBytes = BuildFreshPackageBytes(packageBytes);
+        var reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(reloaded.Objects, Has.Count.EqualTo(2),
+                "both placements must resolve when their object types share one graphic path.");
+            Assert.That(reloaded.Objects[0].Graphic, Is.EqualTo(PlatformGraphicBytes),
+                "the shared graphic did not survive the fresh-package save for the first placement.");
+            Assert.That(reloaded.Objects[1].Graphic, Is.EqualTo(PlatformGraphicBytes),
+                "the shared graphic did not survive the fresh-package save for the second placement.");
         });
     }
 
@@ -74,22 +96,15 @@ public sealed class ObjectSetRoundTripTests
         using var package = PackageReader.Open(new MemoryStream(packageBytes));
         var level = EditableLevelReader.FromPackage(package, LevelPath);
         var tileSet = EditableTileSetReader.FromPackage(package, ResourceReference.ToSelf(TileSetPath));
-        var objectSetReference = level.Objects[0].Placement.ObjectSet;
-        var objectTypes = EditableObjectSetReader.FromPackage(package, objectSetReference);
+        var tileSetSession = new TileSetEditSession(tileSet);
+        var session = new LevelEditSession(level);
 
-        var combined = LevelMergeWriter.BuildContributions(level)
-            .Concat(TileSetMergeWriter.BuildContributions(tileSet))
-            .Concat(ObjectSetMergeWriter.BuildContributions(objectSetReference.Path, objectTypes))
-            .ToList();
-
-        return PackageMergeWriter.BuildFresh("Fresh Object Pack", combined);
+        var extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, Array.Empty<ResourceEntry>(), package);
+        return session.SaveFresh("Fresh Object Pack", extra);
     }
 
     private static byte[] BuildPackageBytes()
     {
-        var cells = new int[Width * Height];
-        Array.Fill(cells, LayerDefinition.EmptyCell);
-
         var objectSet = new ObjectSetDefinition
         {
             Objects = new[]
@@ -107,20 +122,100 @@ public sealed class ObjectSetRoundTripTests
             },
         };
 
-        var level = new LevelDefinition
+        var level = BuildLevel(new[]
+        {
+            new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(ObjectSetPath), ObjectId = "platform", Cell = new GridPosition(1, 0), Name = "platform-1" },
+            new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(ObjectSetPath), ObjectId = "jump-block", Cell = new GridPosition(2, 0), Name = "jump-block-1" },
+        });
+
+        var builder = StartPackage();
+        builder.AddResource(ResourceKind.Sprite, PlatformGraphicPath, PlatformGraphicBytes, "image/png");
+        builder.AddResource(ResourceKind.Sprite, JumpBlockGraphicPath, JumpBlockGraphicBytes, "image/png");
+        builder.AddResource(ResourceKind.ObjectSet, ObjectSetPath, LevelContentSerializer.WriteObjectSet(objectSet));
+        builder.AddResource(ResourceKind.Level, LevelPath, LevelContentSerializer.WriteLevel(level));
+
+        return FinishPackage(builder);
+    }
+
+    private static byte[] BuildTwoObjectSetPackageBytes()
+    {
+        var objectSetPathA = ResourcePath.Create("objectsets/a.json");
+        var objectSetPathB = ResourcePath.Create("objectsets/b.json");
+
+        var objectSetA = new ObjectSetDefinition
+        {
+            Objects = new[]
+            {
+                new ObjectDefinition { Id = "platform", Name = "Moving Platform", Graphic = ResourceReference.ToSelf(PlatformGraphicPath), CollisionRole = ObjectCollisionRole.Solid },
+            },
+        };
+        var objectSetB = new ObjectSetDefinition
+        {
+            Objects = new[]
+            {
+                new ObjectDefinition { Id = "jump-block", Name = "Jump Block", Graphic = ResourceReference.ToSelf(JumpBlockGraphicPath), CollisionRole = ObjectCollisionRole.Passthrough },
+            },
+        };
+
+        var level = BuildLevel(new[]
+        {
+            new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(objectSetPathA), ObjectId = "platform", Cell = new GridPosition(1, 0), Name = "platform-1" },
+            new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(objectSetPathB), ObjectId = "jump-block", Cell = new GridPosition(2, 0), Name = "jump-block-1" },
+        });
+
+        var builder = StartPackage();
+        builder.AddResource(ResourceKind.Sprite, PlatformGraphicPath, PlatformGraphicBytes, "image/png");
+        builder.AddResource(ResourceKind.Sprite, JumpBlockGraphicPath, JumpBlockGraphicBytes, "image/png");
+        builder.AddResource(ResourceKind.ObjectSet, objectSetPathA, LevelContentSerializer.WriteObjectSet(objectSetA));
+        builder.AddResource(ResourceKind.ObjectSet, objectSetPathB, LevelContentSerializer.WriteObjectSet(objectSetB));
+        builder.AddResource(ResourceKind.Level, LevelPath, LevelContentSerializer.WriteLevel(level));
+
+        return FinishPackage(builder);
+    }
+
+    private static byte[] BuildSharedGraphicPackageBytes()
+    {
+        var objectSet = new ObjectSetDefinition
+        {
+            Objects = new[]
+            {
+                new ObjectDefinition { Id = "solid-crate", Name = "Solid Crate", Graphic = ResourceReference.ToSelf(PlatformGraphicPath), CollisionRole = ObjectCollisionRole.Solid },
+                new ObjectDefinition { Id = "passthrough-crate", Name = "Passthrough Crate", Graphic = ResourceReference.ToSelf(PlatformGraphicPath), CollisionRole = ObjectCollisionRole.Passthrough },
+            },
+        };
+
+        var level = BuildLevel(new[]
+        {
+            new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(ObjectSetPath), ObjectId = "solid-crate", Cell = new GridPosition(1, 0), Name = "solid-crate-1" },
+            new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(ObjectSetPath), ObjectId = "passthrough-crate", Cell = new GridPosition(2, 0), Name = "passthrough-crate-1" },
+        });
+
+        var builder = StartPackage();
+        builder.AddResource(ResourceKind.Sprite, PlatformGraphicPath, PlatformGraphicBytes, "image/png");
+        builder.AddResource(ResourceKind.ObjectSet, ObjectSetPath, LevelContentSerializer.WriteObjectSet(objectSet));
+        builder.AddResource(ResourceKind.Level, LevelPath, LevelContentSerializer.WriteLevel(level));
+
+        return FinishPackage(builder);
+    }
+
+    private static LevelDefinition BuildLevel(ObjectPlacement[] placements)
+    {
+        var cells = new int[Width * Height];
+        Array.Fill(cells, LayerDefinition.EmptyCell);
+
+        return new LevelDefinition
         {
             TileSize = TileSize,
             Width = Width,
             Height = Height,
             TileSet = ResourceReference.ToSelf(TileSetPath),
             Layers = new[] { new LayerDefinition { Name = "terrain", Collision = true, Cells = cells } },
-            Objects = new[]
-            {
-                new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(ObjectSetPath), ObjectId = "platform", Cell = new GridPosition(1, 0), Name = "platform-1" },
-                new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(ObjectSetPath), ObjectId = "jump-block", Cell = new GridPosition(2, 0), Name = "jump-block-1" },
-            },
+            Objects = placements,
         };
+    }
 
+    private static PackageBuilder StartPackage()
+    {
         var tileSet = new TileSetDefinition
         {
             Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), CollisionShape = CollisionShapeDefinition.Full } },
@@ -128,12 +223,12 @@ public sealed class ObjectSetRoundTripTests
 
         var builder = new PackageBuilder().WithName("Object Round Trip Pack").WithVersion("0.1.0");
         builder.AddResource(ResourceKind.TileGraphic, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), "image/png");
-        builder.AddResource(ResourceKind.Sprite, PlatformGraphicPath, PlatformGraphicBytes, "image/png");
-        builder.AddResource(ResourceKind.Sprite, JumpBlockGraphicPath, JumpBlockGraphicBytes, "image/png");
         builder.AddResource(ResourceKind.TileSet, TileSetPath, LevelContentSerializer.WriteTileSet(tileSet));
-        builder.AddResource(ResourceKind.ObjectSet, ObjectSetPath, LevelContentSerializer.WriteObjectSet(objectSet));
-        builder.AddResource(ResourceKind.Level, LevelPath, LevelContentSerializer.WriteLevel(level));
+        return builder;
+    }
 
+    private static byte[] FinishPackage(PackageBuilder builder)
+    {
         using var buffer = new MemoryStream();
         builder.Write(buffer);
         return buffer.ToArray();

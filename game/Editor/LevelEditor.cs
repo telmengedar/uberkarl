@@ -1543,27 +1543,9 @@ namespace Uberkarl {
         // `!session.Level.IsAttached` here would wrongly treat "already attached to something" as "nothing
         // to do," silently overwriting the ORIGIN resource instead of creating the new one — the bug this
         // parameter exists to prevent.
-        // Orchestrates a level save alongside its currently-bound tile set (DiVoid #7551 Phase 1a): the
-        // tile set is attached (namespaced for real) only the FIRST time it is ever saved — a shared
-        // tile set that already has a home is never moved just because the level referencing it is being
-        // saved (Save-As of the level must not relocate a resource other levels may also reference). The
-        // level's TileSetReference is then rebound to wherever the tile set actually lives (its
-        // provisional path on a brand-new tile set's first save, or its already-established path on every
-        // later save) so level.json always serializes the reference that is actually true. `save` performs
-        // the actual level-side compose/build-fresh, given the tile set's contributions to fold in.
-        byte[] SaveLevelAndTileSet(IReadOnlyList<ResourceEntry> existingResources, Func<IReadOnlyList<PendingResource>, byte[]> save) {
-            IReadOnlyList<PendingResource> tileSetContributions = Array.Empty<PendingResource>();
-            if (tileSetSession != null) {
-                tileSetSession.EnsureAttached(existingResources);
-                session.Level.BindTileSet(ResourceReference.ToSelf(tileSetSession.TileSet.TileSetPath), tileSetSession.TileSet.Tiles, tileSetSession.TileSet.Scripts);
-                tileSetContributions = tileSetSession.BuildContributions();
-            }
-
-            IReadOnlyList<PendingResource> objectSetContributions = objectTypes.Count > 0
-                ? ObjectSetMergeWriter.BuildContributions(activeObjectSetReference.Path, objectTypes)
-                : Array.Empty<PendingResource>();
-
-            byte[] bytes = save(tileSetContributions.Concat(objectSetContributions).ToList());
+        byte[] SaveLevelAndTileSet(IReadOnlyList<ResourceEntry> existingResources, Package objectSetSourcePackage, Func<IReadOnlyList<PendingResource>, byte[]> save) {
+            IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(session.Level, tileSetSession, existingResources, objectSetSourcePackage);
+            byte[] bytes = save(extra);
             tileSetSession?.MarkSaved();
             return bytes;
         }
@@ -1583,7 +1565,7 @@ namespace Uberkarl {
                     else if (attachAsNew || !session.Level.IsAttached)
                         session.AttachAsNewResource(existing.Manifest.Resources);
 
-                    bytes = SaveLevelAndTileSet(existing.Manifest.Resources, extra => session.Save(existing, extra));
+                    bytes = SaveLevelAndTileSet(existing.Manifest.Resources, existing, extra => session.Save(existing, extra));
                 }
 
                 writable.Write(handle, bytes);
@@ -1607,7 +1589,8 @@ namespace Uberkarl {
                 return;
 
             try {
-                byte[] bytes = SaveLevelAndTileSet(Array.Empty<ResourceEntry>(), extra => session.SaveFresh(proposedName, extra));
+                using Package sourcePackage = TryOpenCurrentPackage();
+                byte[] bytes = SaveLevelAndTileSet(Array.Empty<ResourceEntry>(), sourcePackage, extra => session.SaveFresh(proposedName, extra));
                 PackageHandle handle = writable.Create(proposedName, bytes);
                 using Package reopened = packageSource.Open(handle);
                 packageContext = PackageContext.FromPackage(reopened, handle);
@@ -1636,7 +1619,7 @@ namespace Uberkarl {
                 using (Package existing = PackageReader.Open(absolutePath)) {
                     if (!session.Level.IsAttached)
                         session.AttachAsNewResource(existing.Manifest.Resources);
-                    bytes = SaveLevelAndTileSet(existing.Manifest.Resources, extra => session.Save(existing, extra));
+                    bytes = SaveLevelAndTileSet(existing.Manifest.Resources, existing, extra => session.Save(existing, extra));
                 }
                 File.WriteAllBytes(absolutePath, bytes);
                 currentFilePath = absolutePath;
