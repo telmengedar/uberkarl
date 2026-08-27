@@ -325,6 +325,72 @@ public sealed class EditableLevel
         return BehaviorSubjectTarget.None;
     }
 
+    /// <summary>How many placements in this level name <paramref name="objectId"/> within <paramref name="objectSet"/>.</summary>
+    public int CountPlacementsOfType(ResourceReference objectSet, string objectId)
+    {
+        int count = 0;
+        foreach (EditableObjectPlacement placement in objects)
+        {
+            if (placement.Placement.ObjectSet == objectSet && placement.Placement.ObjectId == objectId)
+                count++;
+        }
+
+        return count;
+    }
+
+    /// <summary>Re-syncs the cached render data of every placement of <paramref name="objectSet"/> from <paramref name="types"/>'s current live truth. The authored placement itself is carried verbatim.</summary>
+    public void RefreshObjectTypes(ResourceReference objectSet, IReadOnlyList<EditableObjectType> types)
+    {
+        if (types is null)
+            throw new ArgumentNullException(nameof(types));
+
+        for (int i = 0; i < objects.Count; i++)
+        {
+            EditableObjectPlacement current = objects[i];
+            if (current.Placement.ObjectSet != objectSet)
+                continue;
+
+            EditableObjectType? type = FindType(types, current.Placement.ObjectId);
+            if (type is null)
+                continue;
+
+            BehaviorBinding? effectiveBehavior = current.Placement.Behavior ?? type.Definition.Behavior;
+            objects[i] = new EditableObjectPlacement(current.Placement, type.Definition.CollisionRole, type.Graphic, effectiveBehavior, type.Definition.State);
+        }
+    }
+
+    /// <summary>Rebinds every placement whose object set equals <paramref name="from"/> to <paramref name="to"/>, every other field carried verbatim.</summary>
+    public void RebindObjectSet(ResourceReference from, ResourceReference to)
+    {
+        for (int i = 0; i < objects.Count; i++)
+        {
+            EditableObjectPlacement current = objects[i];
+            if (current.Placement.ObjectSet != from)
+                continue;
+
+            ObjectPlacement placement = new ObjectPlacement
+            {
+                ObjectSet = to,
+                ObjectId = current.Placement.ObjectId,
+                Cell = current.Placement.Cell,
+                Name = current.Placement.Name,
+                Behavior = current.Placement.Behavior,
+            };
+            objects[i] = new EditableObjectPlacement(placement, current.CollisionRole, current.Graphic, current.EffectiveBehavior, current.State);
+        }
+    }
+
+    private static EditableObjectType? FindType(IReadOnlyList<EditableObjectType> types, string objectId)
+    {
+        foreach (EditableObjectType type in types)
+        {
+            if (type.Definition.Id == objectId)
+                return type;
+        }
+
+        return null;
+    }
+
     /// <summary>Replaces the placed object at <paramref name="index"/>'s own behavior override with <paramref name="binding"/>. Throws when out of range.</summary>
     public void SetObjectBehavior(int index, BehaviorBinding binding)
     {

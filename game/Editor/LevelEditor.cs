@@ -52,6 +52,7 @@ namespace Uberkarl {
         // level is adopted (NewLevel mints a fresh default-palette tile set; loading a level resolves
         // whichever one it is bound to) — never null while `session` is non-null.
         TileSetEditSession tileSetSession;
+        ObjectSetEditSession objectSetSession;
         Tool activeTool = Tool.Paint;
         int activeTileId = LayerDefinition.EmptyCell;
         int activePaletteIndex = -1;
@@ -60,10 +61,8 @@ namespace Uberkarl {
         readonly List<int> paletteTerrainIds = new List<int>();
         readonly List<string> paletteTerrainLabels = new List<string>();
 
-        readonly List<EditableObjectType> objectTypes = new List<EditableObjectType>();
         readonly List<string> objectTypeLabels = new List<string>();
         EditableObjectType activeObjectType;
-        ResourceReference activeObjectSetReference;
 
         readonly TriggerRectTool triggerRectTool = new TriggerRectTool();
         TriggerRect? pendingTriggerRect;
@@ -92,6 +91,7 @@ namespace Uberkarl {
         LevelResizePanel resizePanel;
         TileSetEditor tileSetEditor;
         TileSetBindPanel tileSetBindPanel;
+        ObjectSetEditor objectSetEditor;
         OnScreenKeyboard textKeyboard;
         BehaviorAssignmentPanel behaviorAssignmentPanel;
         BehaviorSubjectTarget pendingBehaviorTarget;
@@ -224,7 +224,7 @@ namespace Uberkarl {
         bool CanOpenTrigger(int index) => TriggerOrder[index] switch {
             Trigger.Layers => true,
             Trigger.Actions => true,
-            _ => paletteTileIds.Count > 0 || paletteTerrainIds.Count > 0 || objectTypes.Count > 0,
+            _ => paletteTileIds.Count > 0 || paletteTerrainIds.Count > 0 || objectTypeLabels.Count > 0,
         };
 
         static bool TargetsListSurface(int triggerIndex) => TriggerOrder[triggerIndex] is Trigger.Tiles or Trigger.Layers;
@@ -319,6 +319,7 @@ namespace Uberkarl {
             (popIn != null && popIn.IsOpen) || (choiceList != null && choiceList.IsOpen) ||
             (layerManager != null && layerManager.IsOpen) || (resizePanel != null && resizePanel.IsOpen) ||
             (tileSetEditor != null && tileSetEditor.IsOpen) || (tileSetBindPanel != null && tileSetBindPanel.IsOpen) ||
+            (objectSetEditor != null && objectSetEditor.IsOpen) ||
             (textKeyboard != null && textKeyboard.IsOpen) || (behaviorAssignmentPanel != null && behaviorAssignmentPanel.IsOpen) ||
             (scriptSourceEditor != null && scriptSourceEditor.IsOpen);
 
@@ -409,7 +410,7 @@ namespace Uberkarl {
                         OnTerrainSelected(outcome.Index);
                     break;
                 case MenuOutcomeKind.SelectObjectType:
-                    if (outcome.Index >= 0 && outcome.Index < objectTypes.Count)
+                    if (outcome.Index >= 0 && outcome.Index < objectSetSession.Types.Count)
                         OnObjectTypeSelected(outcome.Index);
                     break;
                 case MenuOutcomeKind.SelectTriggerTool:
@@ -436,6 +437,9 @@ namespace Uberkarl {
                     break;
                 case MenuOutcomeKind.OpenTileSetBindPanel:
                     SummonTileSetBindPanel();
+                    break;
+                case MenuOutcomeKind.OpenObjectSetEditor:
+                    SummonObjectSetEditor();
                     break;
                 case MenuOutcomeKind.OpenActionsOverflow:
                     OpenActionsOverflowList();
@@ -647,6 +651,13 @@ namespace Uberkarl {
             tileSetBindPanel.Summon(packageSource, packageContext.Handle, session.Level.TileSetReference);
         }
 
+        void SummonObjectSetEditor() {
+            if (objectSetSession == null)
+                return;
+            CancelTriggerPlacement();
+            objectSetEditor.Summon(objectSetSession, session.Level, session.Level.TileSize);
+        }
+
         void InvokeMenuAction(EditorAction action) {
             switch (action) {
                 case EditorAction.Undo: Undo(); break;
@@ -774,6 +785,12 @@ namespace Uberkarl {
             tileSetBindPanel.TileSetChosen += OnTileSetBindChosen;
             tileSetBindPanel.Cancelled += OnTileSetBindPanelClosed;
             AddChild(tileSetBindPanel);
+
+            objectSetEditor = new ObjectSetEditor();
+            objectSetEditor.ObjectSetModelChanged += OnObjectSetModelChanged;
+            objectSetEditor.Closed += OnObjectSetEditorClosed;
+            objectSetEditor.AttachKeyboard(textKeyboard);
+            AddChild(objectSetEditor);
 
             behaviorAssignmentPanel = new BehaviorAssignmentPanel();
             behaviorAssignmentPanel.AttachChoiceList(choiceList);
@@ -915,6 +932,7 @@ namespace Uberkarl {
                 EditableLevel level = EditableLevelReader.FromPackage(package, path);
                 EditableTileSet tileSet = EditableTileSetReader.FromPackage(package, level.TileSetReference);
                 tileSetSession = new TileSetEditSession(tileSet);
+                objectSetSession = BuildObjectSetSessionForLoad(package, level);
                 packageContext = PackageContext.FromPackage(package, handle);
                 currentFilePath = null;
                 AdoptSession(level);
@@ -1011,6 +1029,17 @@ namespace Uberkarl {
 
         void OnTileSetBindPanelClosed() => canvas?.GrabFocus();
 
+        void OnObjectSetModelChanged() {
+            if (session == null || objectSetSession == null)
+                return;
+            session.Level.RefreshObjectTypes(objectSetSession.Reference, objectSetSession.Types);
+            PopulateObjectPalette();
+            canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(session.Level));
+            UpdateState();
+        }
+
+        void OnObjectSetEditorClosed() => canvas?.GrabFocus();
+
         // ----- playtest -----
 
         // Projects the CURRENT in-memory buffer (not the last-saved file) through the same
@@ -1059,6 +1088,7 @@ namespace Uberkarl {
         void NewLevel() {
             EditableTileSet tileSet = EditableTileSet.CreateBlank("Untitled Tiles", DefaultPalette.Build(NewLevelTileSize));
             tileSetSession = new TileSetEditSession(tileSet);
+            objectSetSession = ObjectSetEditSession.CreateBlank("Untitled Objects");
 
             EditableLevel level = EditableLevel.CreateBlank(
                 "Untitled", NewLevelTileSize, NewLevelWidth, NewLevelHeight,
@@ -1067,6 +1097,14 @@ namespace Uberkarl {
             packageContext = null; // unattached — level.IsAttached is false; first Save routes to Save-As
             AdoptSession(level);
             GD.Print($"LevelEditor: new blank {NewLevelWidth}x{NewLevelHeight} level.");
+        }
+
+        static ObjectSetEditSession BuildObjectSetSessionForLoad(Package package, EditableLevel level) {
+            if (level.Objects.Count == 0)
+                return ObjectSetEditSession.CreateBlank("Untitled Objects");
+
+            ResourceReference reference = level.Objects[0].Placement.ObjectSet;
+            return ObjectSetEditSession.FromPackage(package, reference);
         }
 
         void LoadFromResPath(string resPath) {
@@ -1084,6 +1122,7 @@ namespace Uberkarl {
                 EditableLevel level = EditableLevelReader.FromPackage(package);
                 EditableTileSet tileSet = EditableTileSetReader.FromPackage(package, level.TileSetReference);
                 tileSetSession = new TileSetEditSession(tileSet);
+                objectSetSession = BuildObjectSetSessionForLoad(package, level);
                 currentFilePath = sourcePath;
                 packageContext = null;
                 AdoptSession(level);
@@ -1099,7 +1138,7 @@ namespace Uberkarl {
             ResetPendingTrigger();
             canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(level));
             PopulatePalette(level);
-            PopulateObjectPalette(level);
+            PopulateObjectPalette();
             PopulateLayers(level);
             SetTool(Tool.Paint);
             paintButton.ButtonPressed = true;
@@ -1119,32 +1158,12 @@ namespace Uberkarl {
             return null;
         }
 
-        void PopulateObjectPalette(EditableLevel level) {
-            objectTypes.Clear();
+        void PopulateObjectPalette() {
             objectTypeLabels.Clear();
-            activeObjectType = null;
-            activeObjectSetReference = default;
+            foreach (EditableObjectType type in objectSetSession.Types)
+                objectTypeLabels.Add(string.IsNullOrEmpty(type.Definition.Name) ? type.Definition.Id : type.Definition.Name);
 
-            if (level.Objects.Count == 0)
-                return;
-
-            using Package package = TryOpenCurrentPackage();
-            if (package == null)
-                return;
-
-            try {
-                ResourceReference reference = level.Objects[0].Placement.ObjectSet;
-                IReadOnlyList<EditableObjectType> types = EditableObjectSetReader.FromPackage(package, reference);
-                activeObjectSetReference = reference;
-                foreach (EditableObjectType type in types) {
-                    objectTypes.Add(type);
-                    objectTypeLabels.Add(string.IsNullOrEmpty(type.Definition.Name) ? type.Definition.Id : type.Definition.Name);
-                }
-                if (objectTypes.Count > 0)
-                    activeObjectType = objectTypes[0];
-            } catch (Exception exception) {
-                GD.PrintErr($"LevelEditor: failed to load object palette: {exception.GetType().Name}: {exception.Message}");
-            }
+            activeObjectType = objectSetSession.Types.Count > 0 ? objectSetSession.Types[0] : null;
         }
 
         void RefreshOverlay() {
@@ -1373,11 +1392,8 @@ namespace Uberkarl {
                 return;
 
             using Package package = TryOpenCurrentPackage();
-            if (package == null)
-                return;
-
             try {
-                session.PlaceObject(package, activeObjectSetReference, activeObjectType, x, y);
+                session.PlaceObject(package, objectSetSession.Reference, activeObjectType, x, y);
                 RefreshOverlay();
             } catch (Exception exception) {
                 GD.PrintErr($"LevelEditor: place object failed: {exception.GetType().Name}: {exception.Message}");
@@ -1528,9 +1544,10 @@ namespace Uberkarl {
         }
 
         byte[] SaveLevelAndTileSet(IReadOnlyList<ResourceEntry> existingResources, Package? objectSetSourcePackage, Func<IReadOnlyList<PendingResource>, byte[]> save) {
-            IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(session.Level, tileSetSession, existingResources, objectSetSourcePackage);
+            IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(session.Level, tileSetSession, existingResources, objectSetSourcePackage, objectSetSession);
             byte[] bytes = save(extra);
             tileSetSession?.MarkSaved();
+            objectSetSession?.MarkSaved();
             return bytes;
         }
 
@@ -1654,8 +1671,8 @@ namespace Uberkarl {
         void OnObjectTypeSelected(long index) {
             CancelTriggerPlacement();
             int i = (int)index;
-            if (i >= 0 && i < objectTypes.Count) {
-                activeObjectType = objectTypes[i];
+            if (i >= 0 && i < objectSetSession.Types.Count) {
+                activeObjectType = objectSetSession.Types[i];
                 paintMode = PaintModeKind.Object;
             }
             SetTool(Tool.Paint);

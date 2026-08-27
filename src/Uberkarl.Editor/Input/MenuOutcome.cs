@@ -36,6 +36,9 @@ public enum MenuOutcomeKind
     /// <summary>Summon the "bind a different shared tile set" panel (DiVoid #7551).</summary>
     OpenTileSetBindPanel,
 
+    /// <summary>Summon the object set editor (define, rename, set collision role, replace graphic, or remove object types).</summary>
+    OpenObjectSetEditor,
+
     /// <summary>Summon the Actions menu's overflow list — the commands trimmed off the radial to fit the entry cap.</summary>
     OpenActionsOverflow,
 
@@ -136,6 +139,10 @@ public readonly struct MenuOutcome
     /// <summary>An outcome that summons the tile-set bind panel. Rides the existing Actions radial trigger.</summary>
     public static MenuOutcome OpenTileSetBindPanel() =>
         new(MenuOutcomeKind.OpenTileSetBindPanel, -1, default, default);
+
+    /// <summary>An outcome that summons the object set editor. Rides the Actions overflow list.</summary>
+    public static MenuOutcome OpenObjectSetEditor() =>
+        new(MenuOutcomeKind.OpenObjectSetEditor, -1, default, default);
 
     /// <summary>An outcome that summons the Actions overflow list. Rides the existing Actions radial trigger.</summary>
     public static MenuOutcome OpenActionsOverflow() =>

@@ -234,6 +234,7 @@ public sealed class MenuCatalogTests
             ("Resize…", MenuOutcome.OpenResizePanel()),
             ("Edit Tileset…", MenuOutcome.OpenTileSetEditor()),
             ("Bind Tileset…", MenuOutcome.OpenTileSetBindPanel()),
+            ("Edit Objects…", MenuOutcome.OpenObjectSetEditor()),
             ("Level Script…", MenuOutcome.AssignLevelScriptBehavior()),
             ("✎ Edit Script…", MenuOutcome.OpenScriptEditorList()),
         };

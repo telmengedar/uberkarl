@@ -95,6 +95,38 @@ public sealed class ObjectAndTriggerPlacementTests
     }
 
     [Test]
+    [Description("Design docs/architecture/object-type-authoring.md §6.2: a null package must throw only when it would actually be needed -- here, the placed type's own definition-level Behavior is null, so no capture is required and placement must succeed with no package open (the reachability fix for a level created with New and not yet saved).")]
+    public void Session_PlaceObject_WithNullPackage_AndATypeWithNoBehavior_Succeeds()
+    {
+        byte[] packageBytes = BuildPackageBytes(null, out _);
+        EditableLevel level = EditableLevelReader.FromPackageBytes(packageBytes);
+        LevelEditSession session = new LevelEditSession(level);
+        using Package package = PackageReader.Open(new MemoryStream(packageBytes));
+        EditableObjectType objectType = EditableObjectSetReader.FromPackage(package, ResourceReference.ToSelf(ObjectSetPath))[0];
+
+        session.PlaceObject(null, ResourceReference.ToSelf(ObjectSetPath), objectType, 1, 0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(level.Objects, Has.Count.EqualTo(1));
+            Assert.That(level.Objects[0].EffectiveBehavior, Is.Null);
+        });
+    }
+
+    [Test]
+    [Description("The other half of the null-package rule: a type WITH a definition-level Behavior needs a package to capture it, so a null package must still throw -- never silently drop the behavior.")]
+    public void Session_PlaceObject_WithNullPackage_AndATypeWithABehavior_ThrowsArgumentNullException()
+    {
+        (byte[] packageBytes, EditableLevel level) = BuildFixture();
+        LevelEditSession session = new LevelEditSession(level);
+        using Package package = PackageReader.Open(new MemoryStream(packageBytes));
+        EditableObjectType objectType = EditableObjectSetReader.FromPackage(package, ResourceReference.ToSelf(ObjectSetPath))[0];
+
+        Assert.That(() => session.PlaceObject(null, ResourceReference.ToSelf(ObjectSetPath), objectType, 1, 0),
+            Throws.TypeOf<ArgumentNullException>().With.Property("ParamName").EqualTo("package"));
+    }
+
+    [Test]
     public void Session_PlaceObject_InsertsIt_MarksDirty_AndIsUndoRedoable()
     {
         var (packageBytes, level) = BuildFixture();

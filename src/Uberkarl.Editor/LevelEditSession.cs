@@ -101,25 +101,27 @@ public sealed class LevelEditSession
     public CellChange? EraseTerrain(int layerIndex, int x, int y)
         => PaintTerrain(layerIndex, x, y, LayerDefinition.EmptyCell);
 
-    /// <summary>Places an instance of <paramref name="objectType"/> from <paramref name="objectSet"/> at cell (x,y). No-op when out of bounds. Undoable.</summary>
-    public void PlaceObject(Package package, ResourceReference objectSet, EditableObjectType objectType, int x, int y, string name = "")
+    /// <summary>Places an instance of <paramref name="objectType"/> from <paramref name="objectSet"/> at cell (x,y). No-op when out of bounds. Undoable. <paramref name="package"/> may be <c>null</c>; it is required only when the type carries its own default behavior.</summary>
+    public void PlaceObject(Package? package, ResourceReference objectSet, EditableObjectType objectType, int x, int y, string name = "")
     {
-        if (package is null)
-            throw new ArgumentNullException(nameof(package));
         if (objectType is null)
             throw new ArgumentNullException(nameof(objectType));
+        if (package is null && objectType.Definition.Behavior is not null)
+            throw new ArgumentNullException(nameof(package));
         if (!Level.InBounds(x, y))
             return;
 
-        var effectiveBehavior = Level.CaptureBehavior(package, objectType.Definition.Behavior, $"Object type '{objectType.Definition.Id}'");
-        var placement = new ObjectPlacement
+        BehaviorBinding? effectiveBehavior = objectType.Definition.Behavior is null
+            ? null
+            : Level.CaptureBehavior(package!, objectType.Definition.Behavior, $"Object type '{objectType.Definition.Id}'");
+        ObjectPlacement placement = new ObjectPlacement
         {
             ObjectSet = objectSet,
             ObjectId = objectType.Definition.Id,
             Cell = new GridPosition(x, y),
             Name = name ?? string.Empty,
         };
-        var editablePlacement = new EditableObjectPlacement(
+        EditableObjectPlacement editablePlacement = new EditableObjectPlacement(
             placement, objectType.Definition.CollisionRole, objectType.Graphic, effectiveBehavior, objectType.Definition.State);
 
         history.Execute(new PlaceObjectCommand(editablePlacement), Level);
