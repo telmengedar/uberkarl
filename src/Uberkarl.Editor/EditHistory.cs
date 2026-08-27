@@ -58,15 +58,7 @@ public sealed class EditHistory
         return change;
     }
 
-    /// <summary>
-    /// Discards all history. Called by <see cref="LevelEditSession.DeleteLayer"/>,
-    /// <see cref="LevelEditSession.MoveLayer"/>, <see cref="LevelEditSession.Resize"/> and
-    /// <see cref="LevelEditSession.DiscardHistoryForObjectTypeRemoval"/> — the structural mutations whose
-    /// recorded commands would otherwise alias onto a state that can no longer occur. Not called by
-    /// save-as (<c>WriteToNewPackage</c> does not call it) or by a plain load; a freshly-loaded level
-    /// starts with empty history because a new <see cref="LevelEditSession"/> is constructed for it, not
-    /// because this runs.
-    /// </summary>
+    /// <summary>Discards all history.</summary>
     public void Clear()
     {
         undo.Clear();

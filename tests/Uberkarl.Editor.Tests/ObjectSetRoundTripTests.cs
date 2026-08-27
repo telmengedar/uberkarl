@@ -240,7 +240,7 @@ public sealed class ObjectSetRoundTripTests
     }
 
     [Test]
-    [Description("I8, at the orchestration layer (design §9.1): a zero-type session must never be attached by BuildExtraContributions -- attaching it would gain the package an empty objectsets/*.json for a set that describes nothing -- and must contribute nothing.")]
+    [Description("I8 (design §9.1): a zero-type object-set session must never be attached, and BuildExtraContributions must contribute nothing for it.")]
     public void BuildExtraContributions_WithAZeroTypeObjectSetSession_NeverAttachesIt_ContributesNothing()
     {
         EditableLevel level = BlankLevelWithOnePlacement(ResourceReference.ToSelf(ResourcePath.Create("objectsets/other.json")), "some-other-type");
@@ -258,7 +258,7 @@ public sealed class ObjectSetRoundTripTests
     }
 
     [Test]
-    [Description("A5: BuildExtraContributions must emit the authored session's object-set resource exactly once, with the session's own content — never also a re-read of the same path from the source package, which would be a differing-bytes collision (PackageBuilder's typed check) the moment the two diverge.")]
+    [Description("A5: BuildExtraContributions must emit the authored object-set resource exactly once, using the session's own content, not a re-read from the source package.")]
     public void BuildExtraContributions_WithAnAuthoredSession_EmitsItsObjectSetResourceExactlyOnce_WithItsOwnAuthoredContent()
     {
         ObjectSetEditSession objectSetSession = ObjectSetEditSession.CreateBlank("Untitled Objects");
@@ -280,7 +280,7 @@ public sealed class ObjectSetRoundTripTests
     }
 
     [Test]
-    [Description("A7: attachment moving an unattached object set's provisional path (because the target already holds a sibling at that derived slug) must rebind every placement that named the pre-attach path — otherwise the save round-trips a level whose placements dangle.")]
+    [Description("A7: when attachment moves an unattached object set's provisional path, every placement naming the pre-attach path must be rebound, or the save round-trips a level with dangling placements.")]
     public void SaveIntoExistingPackage_WithAnAuthoredObjectSetForcingUniquification_RebindsEveryPlacement_AndRoundTrips()
     {
         byte[] targetBytes = BuildTargetPackageWithExistingUntitledObjectsPackageBytes();
@@ -344,7 +344,7 @@ public sealed class ObjectSetRoundTripTests
     }
 
     [Test]
-    [Description("A20 (design amendment 2026-08-27, #9879 CF-1) — the walk-around this feature shipped broken: place, erase, remove the now-unused type and discard history; Undo must not reinstate a placement of a vanished type, and the level must still save and reopen.")]
+    [Description("A20 (#9879 CF-1): after removing an unused object type and discarding history, Undo must not reinstate its placement, and the level must still save and reopen.")]
     public void PlaceEraseRemoveTypeDiscardThenUndo_ReinstatesNothing_SaveFreshReopensCleanly()
     {
         EditableTileSet tileSet = EditableTileSet.CreateBlank("Untitled Tiles");

@@ -95,7 +95,7 @@ public sealed class ObjectAndTriggerPlacementTests
     }
 
     [Test]
-    [Description("Design docs/architecture/object-type-authoring.md §6.2: a null package must throw only when it would actually be needed -- here, the placed type's own definition-level Behavior is null, so no capture is required and placement must succeed with no package open (the reachability fix for a level created with New and not yet saved).")]
+    [Description("Design doc §6.2: placing a type with no definition-level Behavior must succeed with a null package, since no capture is needed.")]
     public void Session_PlaceObject_WithNullPackage_AndATypeWithNoBehavior_Succeeds()
     {
         byte[] packageBytes = BuildPackageBytes(null, out _);

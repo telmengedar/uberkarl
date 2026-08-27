@@ -75,7 +75,7 @@ public sealed class ObjectSetAuthoringTests
     }
 
     [Test]
-    [Description("I4: a newly added type's sprite must land in its set's own already-established slug namespace, not a freshly re-derived one from Name — this is what AddType's CurrentSlug/SlugFromObjectSetPath delegation exists for.")]
+    [Description("I4: a newly added type's sprite must land in the set's already-established slug, not one freshly re-derived from Name.")]
     public void AddType_OnAnAlreadyAttachedSession_MintsTheGraphicPathInTheEstablishedSlug_NotARederivedOne()
     {
         ObjectSetEditSession session = ObjectSetEditSession.CreateBlank("Untitled Objects");
@@ -438,7 +438,7 @@ public sealed class ObjectSetAuthoringTests
     }
 
     [Test]
-    [Description("A22 (design amendment 2026-08-27, #9879 CF-1) — the redo route to the same hole: undoing a placement pushes it onto redo, so removing the type and discarding must close that route too, not only the undo stack's.")]
+    [Description("A22 (#9879 CF-1): discarding history for a removed object type must also clear the redo stack, not only undo.")]
     public void PlaceThenUndoRemoveTypeAndDiscard_ThenRedo_ReinstatesNothing()
     {
         ObjectSetEditSession objectSetSession = ObjectSetEditSession.CreateBlank("Untitled Objects");
@@ -463,7 +463,7 @@ public sealed class ObjectSetAuthoringTests
     }
 
     [Test]
-    [Description("A23 (design amendment 2026-08-27, §9.4's addendum) — an undo that reinstates a placement must see the type's current cache: place, erase, toggle the type's collision role, undo, refresh — the restored placement carries the new role.")]
+    [Description("A23 (design amendment §9.4's addendum): after a refresh, an undo-reinstated placement must carry the object type's current collision role, not its pre-toggle one.")]
     public void PlaceEraseToggleCollisionRoleUndoThenRefresh_RestoredPlacementCarriesTheNewRole()
     {
         ObjectSetEditSession objectSetSession = ObjectSetEditSession.CreateBlank("Untitled Objects");
@@ -488,7 +488,7 @@ public sealed class ObjectSetAuthoringTests
     }
 
     [Test]
-    [Description("A24 (design amendment 2026-08-27, §5.7) — discarding history for an object-type removal is not itself a dirtying mutation: IsDirty is left exactly as prior edits set it, and the call is a safe no-op when the history is already empty.")]
+    [Description("A24 (design amendment §5.7): discarding history for an object-type removal must not itself dirty the level, and must be a safe no-op on empty history.")]
     public void DiscardHistoryForObjectTypeRemoval_DoesNotItselfDirtyTheLevel_SafeOnEmptyHistory()
     {
         LevelEditSession cleanSession = new LevelEditSession(BlankLevel());

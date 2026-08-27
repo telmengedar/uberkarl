@@ -398,9 +398,8 @@ public sealed class LevelEditSession
     // History policy (the layer-index aliasing hazard, design §9.3): recorded SetCellCommands store an
     // absolute layer index. AddLayer appends at the end and SetCollision/StepScrollSpeed/SetRepeat replace
     // a layer in place — both are index-stable, so cell-edit history is preserved. DeleteLayer and
-    // MoveLayer shift indices, so a successful one clears cell-edit history (the same Clear() used on
-    // load/save-as) rather than let recorded undo alias onto the wrong layer. Layer operations themselves
-    // are not on the undo stack this increment.
+    // MoveLayer shift indices, so a successful one clears cell-edit history rather than let recorded undo
+    // alias onto the wrong layer. Layer operations themselves are not on the undo stack this increment.
 
     /// <summary>
     /// Appends a new auto-named ("Layer N") display layer (<c>collision:false, scrollSpeed:1.0, repeat:false</c>)
