@@ -26,6 +26,9 @@ namespace Uberkarl {
         /// <summary>Raised after any mutation.</summary>
         public event Action ObjectSetModelChanged;
 
+        /// <summary>Raised on the removal path only, immediately before <see cref="ObjectSetModelChanged"/>, so a history discard lands before the palette/canvas/status refresh reads it.</summary>
+        public event Action ObjectTypeRemoved;
+
         /// <summary>Raised when the panel is dismissed.</summary>
         public event Action Closed;
 
@@ -160,7 +163,7 @@ namespace Uberkarl {
                 removeButton = new Button { Text = $"In use ×{placementCount}" };
                 removeButton.Pressed += () => OnRemoveInUsePressed(id, placementCount);
             } else {
-                removeButton = new Button { Text = pendingRemoveId == id ? "Confirm Remove?" : "Remove" };
+                removeButton = new Button { Text = pendingRemoveId == id ? "Confirm Remove? (clears undo)" : "Remove" };
                 removeButton.Pressed += () => OnRemovePressed(id);
             }
             row.AddChild(removeButton);
@@ -265,6 +268,7 @@ namespace Uberkarl {
             ClearPendingConfirms();
             if (session.RemoveType(id)) {
                 GD.Print($"ObjectSetEditor: removed object #{id}.");
+                ObjectTypeRemoved?.Invoke();
                 ObjectSetModelChanged?.Invoke();
             }
             Rebuild();

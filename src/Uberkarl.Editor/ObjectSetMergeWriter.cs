@@ -30,7 +30,7 @@ public static class ObjectSetMergeWriter
     }
 
     /// <summary>The contributions of every object set <paramref name="level"/>'s placements reference, read from <paramref name="package"/>, excluding <paramref name="authored"/>. A null <paramref name="package"/> throws only when an unseeded set is actually needed.</summary>
-    public static IReadOnlyList<PendingResource> BuildContributionsForLevel(Package? package, EditableLevel level, ResourceReference? authored = null)
+    public static IReadOnlyList<PendingResource> BuildContributionsForLevel(Package? package, EditableLevel level, ResourceReference? authored)
     {
         if (level is null)
             throw new ArgumentNullException(nameof(level));

@@ -92,7 +92,7 @@ public sealed class ObjectSetAuthoringTests
     }
 
     [Test]
-    [Description("I4, for a session loaded FROM A PACKAGE rather than CreateBlank+EnsureAttached: a newly added type's sprite must land in the SAME slug namespace as its already-loaded siblings, derived from the set's own path -- not from Name, which for a loaded session has no independent meaning (ObjectSetDefinition has no name field, #8170). Distinguishes SlugFromObjectSetPath from the Slugify(Name) fallback, which the CreateBlank-based I4 test above cannot: there, Name and the derived slug always coincide.")]
+    [Description("I4: a type added to a session loaded from a package must land in the loaded set's own slug, not one re-derived from Name (ObjectSetDefinition has no name field, #8170).")]
     public void AddType_OnASessionLoadedFromAPackage_MintsTheGraphicPathInTheLoadedSetsOwnSlug()
     {
         byte[] packageBytes = BuildPackageBytesWithOneType(behavior: null, state: new Dictionary<string, object?>());
@@ -255,6 +255,28 @@ public sealed class ObjectSetAuthoringTests
     }
 
     [Test]
+    [Description("I4's divergent case: after a uniquifying EnsureAttached, Slugify(Name) and the set's actual slug differ, so a type added afterward must use the set's own slug.")]
+    public void AddType_AfterAUniquifyingEnsureAttached_MintsTheGraphicPathInTheUniquifiedSlug()
+    {
+        ObjectSetEditSession session = ObjectSetEditSession.CreateBlank("Untitled Objects");
+        session.AddType(Png("A"), ObjectCollisionRole.Solid);
+        ResourceEntry[] existingResources =
+        {
+            new ResourceEntry { Path = ResourcePath.Create("objectsets/untitled-objects.json"), Kind = ResourceKind.ObjectSet },
+        };
+        session.EnsureAttached(existingResources);
+
+        string secondId = session.AddType(Png("B"), ObjectCollisionRole.Solid);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(secondId, Is.EqualTo("object-2"));
+            Assert.That(session.Types[1].Definition.Graphic.Path, Is.EqualTo(ResourcePath.Create("objects/untitled-objects-2/object-2.png")),
+                "Slugify(Name) would derive 'untitled-objects'; the set's actual slug after uniquification is 'untitled-objects-2'.");
+        });
+    }
+
+    [Test]
     public void BuildContributions_OnASessionWithZeroTypes_ReturnsEmpty()
     {
         ObjectSetEditSession session = ObjectSetEditSession.CreateBlank("Untitled Objects");
@@ -413,6 +435,105 @@ public sealed class ObjectSetAuthoringTests
         level.RebindObjectSet(from, to);
 
         Assert.That(level.Objects[0], Is.SameAs(placement));
+    }
+
+    [Test]
+    [Description("A22 (design amendment 2026-08-27, #9879 CF-1) — the redo route to the same hole: undoing a placement pushes it onto redo, so removing the type and discarding must close that route too, not only the undo stack's.")]
+    public void PlaceThenUndoRemoveTypeAndDiscard_ThenRedo_ReinstatesNothing()
+    {
+        ObjectSetEditSession objectSetSession = ObjectSetEditSession.CreateBlank("Untitled Objects");
+        string typeId = objectSetSession.AddType(Png("A"), ObjectCollisionRole.Solid);
+        EditableObjectType objectType = objectSetSession.Types[0];
+        EditableLevel level = BlankLevel();
+        LevelEditSession session = new LevelEditSession(level);
+
+        session.PlaceObject(null, objectSetSession.Reference, objectType, x: 0, y: 0);
+        session.Undo();
+        objectSetSession.RemoveType(typeId);
+        session.DiscardHistoryForObjectTypeRemoval();
+
+        CellChange? redone = session.Redo();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(redone, Is.Null);
+            Assert.That(session.CanRedo, Is.False);
+            Assert.That(level.Objects, Is.Empty);
+        });
+    }
+
+    [Test]
+    [Description("A23 (design amendment 2026-08-27, §9.4's addendum) — an undo that reinstates a placement must see the type's current cache: place, erase, toggle the type's collision role, undo, refresh — the restored placement carries the new role.")]
+    public void PlaceEraseToggleCollisionRoleUndoThenRefresh_RestoredPlacementCarriesTheNewRole()
+    {
+        ObjectSetEditSession objectSetSession = ObjectSetEditSession.CreateBlank("Untitled Objects");
+        string typeId = objectSetSession.AddType(Png("A"), ObjectCollisionRole.Solid);
+        EditableObjectType objectType = objectSetSession.Types[0];
+        EditableLevel level = BlankLevel();
+        LevelEditSession session = new LevelEditSession(level);
+
+        session.PlaceObject(null, objectSetSession.Reference, objectType, x: 0, y: 0);
+        session.EraseObjectAt(0, 0);
+        objectSetSession.SetCollisionRole(typeId, ObjectCollisionRole.Passthrough);
+
+        session.Undo();
+        level.RefreshObjectTypes(objectSetSession.Reference, objectSetSession.Types);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(level.Objects, Has.Count.EqualTo(1));
+            Assert.That(level.Objects[0].CollisionRole, Is.EqualTo(ObjectCollisionRole.Passthrough));
+            Assert.That(level.Objects[0].Placement.ObjectId, Is.EqualTo(typeId));
+        });
+    }
+
+    [Test]
+    [Description("A24 (design amendment 2026-08-27, §5.7) — discarding history for an object-type removal is not itself a dirtying mutation: IsDirty is left exactly as prior edits set it, and the call is a safe no-op when the history is already empty.")]
+    public void DiscardHistoryForObjectTypeRemoval_DoesNotItselfDirtyTheLevel_SafeOnEmptyHistory()
+    {
+        LevelEditSession cleanSession = new LevelEditSession(BlankLevel());
+        cleanSession.DiscardHistoryForObjectTypeRemoval();
+        Assert.That(cleanSession.IsDirty, Is.False, "a discard on an empty, clean history must not dirty the level.");
+
+        ObjectSetEditSession objectSetSession = ObjectSetEditSession.CreateBlank("Untitled Objects");
+        objectSetSession.AddType(Png("A"), ObjectCollisionRole.Solid);
+        LevelEditSession dirtySession = new LevelEditSession(BlankLevel());
+        dirtySession.PlaceObject(null, objectSetSession.Reference, objectSetSession.Types[0], x: 0, y: 0);
+        Assert.That(dirtySession.IsDirty, Is.True, "placement must already have dirtied the level.");
+
+        dirtySession.DiscardHistoryForObjectTypeRemoval();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(dirtySession.IsDirty, Is.True, "the discard neither sets nor clears IsDirty -- it leaves whatever prior edits already set.");
+            Assert.That(dirtySession.CanUndo, Is.False);
+        });
+    }
+
+    [Test]
+    [Description("A25 (design amendment 2026-08-27, §9.3's amendment) — pins the accepted cost: the discard is unscoped, so history unrelated to objects is discarded too.")]
+    public void DiscardHistoryForObjectTypeRemoval_AlsoDiscardsUnrelatedTileHistory()
+    {
+        EditableTile tile = new EditableTile(1, ResourcePath.Create("tiles/grass.png"), Png("GRASS"), CollisionShapeDefinition.Full);
+        int[] cells = new int[Width * Height];
+        Array.Fill(cells, LayerDefinition.EmptyCell);
+        EditableLayer layer = new EditableLayer("terrain", collision: true, scrollSpeed: 1f, repeat: false, cells);
+        EditableLevel level = new EditableLevel(
+            "Sample", LevelPath, ResourceReference.ToSelf(TileSetPath),
+            TileSize, Width, Height, backgroundColor: null,
+            new Dictionary<string, GridPosition>(), defaultSpawn: null,
+            new[] { tile }, new[] { layer },
+            new Dictionary<ResourcePath, string>());
+        LevelEditSession session = new LevelEditSession(level);
+        session.PaintCell(0, 0, 0, 1);
+        Assert.That(session.CanUndo, Is.True, "painting a tile must be on the undo stack.");
+
+        ObjectSetEditSession objectSetSession = ObjectSetEditSession.CreateBlank("Untitled Objects");
+        string typeId = objectSetSession.AddType(Png("A"), ObjectCollisionRole.Solid);
+        objectSetSession.RemoveType(typeId);
+        session.DiscardHistoryForObjectTypeRemoval();
+
+        Assert.That(session.CanUndo, Is.False, "the tile paint, unrelated to objects, is discarded too -- the accepted cost, not a bug.");
     }
 
     private static PendingResource FindByPath(IReadOnlyList<PendingResource> contributions, ResourcePath path)

@@ -141,6 +141,18 @@ public sealed class LevelEditSession
     }
 
     /// <summary>
+    /// Clears the undo and redo stacks after a permitted object-type removal (design #9872 §9.3's
+    /// 2026-08-27 amendment) — the fourth member of the family <see cref="DeleteLayer"/>,
+    /// <see cref="MoveLayer"/> and <see cref="Resize"/> already apply: a structural mutation the undo
+    /// stack cannot express discards the history rather than let a recorded command alias onto a state
+    /// that can no longer occur. This is the worst case of the four — a retained placement command would
+    /// alias onto an object with no definition, discovered only on reopen. Idempotent on an already-empty
+    /// history. Does not touch <see cref="IsDirty"/>: a level holding no placement of the removed type is
+    /// itself unchanged by the removal.
+    /// </summary>
+    public void DiscardHistoryForObjectTypeRemoval() => history.Clear();
+
+    /// <summary>
     /// Places a trigger covering the <paramref name="width"/>x<paramref name="height"/> rect at (x,y), bound to
     /// <paramref name="binding"/> — required, per design #8049's 2026-08-18 addendum: a trigger has no identity
     /// apart from its binding, so placement and binding assignment ship as one act. No-op when the rect's

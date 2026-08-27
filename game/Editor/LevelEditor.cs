@@ -72,6 +72,7 @@ namespace Uberkarl {
 
         int activeLayerIndex;
         string currentFilePath;
+        string lastSaveFailure;
 
         IPackageSource packageSource;
         // The archive the current level resource lives in (DiVoid #7571/#7572's package-as-VFS
@@ -787,6 +788,7 @@ namespace Uberkarl {
             AddChild(tileSetBindPanel);
 
             objectSetEditor = new ObjectSetEditor();
+            objectSetEditor.ObjectTypeRemoved += OnObjectTypeRemoved;
             objectSetEditor.ObjectSetModelChanged += OnObjectSetModelChanged;
             objectSetEditor.Closed += OnObjectSetEditorClosed;
             objectSetEditor.AttachKeyboard(textKeyboard);
@@ -1037,6 +1039,8 @@ namespace Uberkarl {
             canvas.SetLevel(EditableLevelSnapshot.ToResolvedLevel(session.Level));
             UpdateState();
         }
+
+        void OnObjectTypeRemoved() => session?.DiscardHistoryForObjectTypeRemoval();
 
         void OnObjectSetEditorClosed() => canvas?.GrabFocus();
 
@@ -1517,6 +1521,7 @@ namespace Uberkarl {
                 return;
             CancelTriggerPlacement();
             ApplyCellChange(session.Undo());
+            session.Level.RefreshObjectTypes(objectSetSession.Reference, objectSetSession.Types);
             RefreshOverlay();
             UpdateState();
         }
@@ -1526,6 +1531,7 @@ namespace Uberkarl {
                 return;
             CancelTriggerPlacement();
             ApplyCellChange(session.Redo());
+            session.Level.RefreshObjectTypes(objectSetSession.Reference, objectSetSession.Types);
             RefreshOverlay();
             UpdateState();
         }
@@ -1548,6 +1554,7 @@ namespace Uberkarl {
             byte[] bytes = save(extra);
             tileSetSession?.MarkSaved();
             objectSetSession?.MarkSaved();
+            lastSaveFailure = null;
             return bytes;
         }
 
@@ -1578,7 +1585,9 @@ namespace Uberkarl {
                 GD.Print($"LevelEditor: saved {bytes.Length} bytes — level '{session.Level.Name}' in package '{packageContext.Name}'.");
             } catch (Exception exception) {
                 session.MarkDirty();
-                GD.PrintErr($"LevelEditor: save failed: {exception.GetType().Name}: {exception.Message}");
+                objectSetSession?.MarkDirty();
+                lastSaveFailure = $"{exception.GetType().Name}: {exception.Message}";
+                GD.PrintErr($"LevelEditor: save failed: {lastSaveFailure}");
             }
 
             UpdateState();
@@ -1600,7 +1609,9 @@ namespace Uberkarl {
                 GD.Print($"LevelEditor: created a new package '{proposedName}' for '{session.Level.Name}' ({bytes.Length} bytes).");
             } catch (Exception exception) {
                 session.MarkDirty();
-                GD.PrintErr($"LevelEditor: save failed: {exception.GetType().Name}: {exception.Message}");
+                objectSetSession?.MarkDirty();
+                lastSaveFailure = $"{exception.GetType().Name}: {exception.Message}";
+                GD.PrintErr($"LevelEditor: save failed: {lastSaveFailure}");
             }
 
             UpdateState();
@@ -1630,7 +1641,9 @@ namespace Uberkarl {
                 GD.Print($"LevelEditor: saved {bytes.Length} bytes to {absolutePath}.");
             } catch (Exception exception) {
                 session.MarkDirty();
-                GD.PrintErr($"LevelEditor: save failed: {exception.GetType().Name}: {exception.Message}");
+                objectSetSession?.MarkDirty();
+                lastSaveFailure = $"{exception.GetType().Name}: {exception.Message}";
+                GD.PrintErr($"LevelEditor: save failed: {lastSaveFailure}");
             }
 
             UpdateState();
@@ -1723,6 +1736,7 @@ namespace Uberkarl {
             string package = packageContext != null
                 ? packageContext.Name
                 : currentFilePath == null ? "unsaved" : Path.GetFileName(currentFilePath);
+            string saveFailure = lastSaveFailure == null ? string.Empty : $"SAVE FAILED: {lastSaveFailure}  ·  ";
             string dirty = session.IsDirty ? " *" : string.Empty;
             string layer = activeLayerIndex >= 0 && activeLayerIndex < session.Level.Layers.Count
                 ? session.Level.Layers[activeLayerIndex].Name
@@ -1738,7 +1752,7 @@ namespace Uberkarl {
             string tileSet = tileSetSession != null ? tileSetSession.TileSet.Name : "none";
             string levelScript = session.Level.LevelScript is { } binding ? BehaviorBindingLabel.Format(binding) : "none";
             string cursorSubject = cursorSubjectLabel ?? "none";
-            return $"{session.Level.Name}{dirty}  ·  package: {package}  ·  tileset: {tileSet}  ·  layer: {layer}  ·  tool: {activeTool} ({tile})  ·  level script: {levelScript}  ·  at cursor: {cursorSubject}";
+            return $"{saveFailure}{session.Level.Name}{dirty}  ·  package: {package}  ·  tileset: {tileSet}  ·  layer: {layer}  ·  tool: {activeTool} ({tile})  ·  level script: {levelScript}  ·  at cursor: {cursorSubject}";
         }
 
         // ----- small factory helpers -----

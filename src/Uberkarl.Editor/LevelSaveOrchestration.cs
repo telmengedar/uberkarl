@@ -11,7 +11,7 @@ public static class LevelSaveOrchestration
         TileSetEditSession? tileSetSession,
         IReadOnlyList<ResourceEntry> existingResources,
         Package? objectSetSourcePackage,
-        ObjectSetEditSession? objectSetSession = null)
+        ObjectSetEditSession? objectSetSession)
     {
         if (level is null)
             throw new ArgumentNullException(nameof(level));

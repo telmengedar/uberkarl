@@ -109,7 +109,7 @@ public sealed class ObjectSetRoundTripTests
         LevelEditSession session = new LevelEditSession(level);
         session.AttachAsNewResource(targetPackage.Manifest.Resources);
 
-        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, targetPackage.Manifest.Resources, originPackage);
+        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, targetPackage.Manifest.Resources, originPackage, objectSetSession: null);
         byte[] mergedBytes = session.Save(targetPackage, extra);
 
         EditableLevel reloaded = EditableLevelReader.FromPackageBytes(mergedBytes);
@@ -143,7 +143,7 @@ public sealed class ObjectSetRoundTripTests
         TileSetEditSession tileSetSession = new TileSetEditSession(tileSet);
         LevelEditSession session = new LevelEditSession(level);
 
-        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, package.Manifest.Resources, package);
+        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, package.Manifest.Resources, package, objectSetSession: null);
         byte[] mergedBytes = session.Save(package, extra);
 
         EditableLevel reloaded = EditableLevelReader.FromPackageBytes(mergedBytes);
@@ -204,7 +204,7 @@ public sealed class ObjectSetRoundTripTests
         using Package package = PackageReader.Open(new MemoryStream(packageBytes));
         EditableLevel level = EditableLevelReader.FromPackage(package, LevelPath);
 
-        Assert.That(() => ObjectSetMergeWriter.BuildContributionsForLevel(null, level),
+        Assert.That(() => ObjectSetMergeWriter.BuildContributionsForLevel(null, level, authored: null),
             Throws.TypeOf<ArgumentNullException>().With.Property("ParamName").EqualTo("package"),
             "a level with object placements must not silently lose them when no source package is available.");
     }
@@ -216,8 +216,8 @@ public sealed class ObjectSetRoundTripTests
         using Package package = PackageReader.Open(new MemoryStream(packageBytes));
         EditableLevel level = EditableLevelReader.FromPackage(package, LevelPath);
 
-        IReadOnlyList<PendingResource> withoutPackage = ObjectSetMergeWriter.BuildContributionsForLevel(null, level);
-        IReadOnlyList<PendingResource> withPackage = ObjectSetMergeWriter.BuildContributionsForLevel(package, level);
+        IReadOnlyList<PendingResource> withoutPackage = ObjectSetMergeWriter.BuildContributionsForLevel(null, level, authored: null);
+        IReadOnlyList<PendingResource> withPackage = ObjectSetMergeWriter.BuildContributionsForLevel(package, level, authored: null);
 
         Assert.That(withoutPackage, Is.EqualTo(withPackage),
             "a level with no object placements must return the same (empty) contribution list whether or not a source package is supplied.");
@@ -226,7 +226,7 @@ public sealed class ObjectSetRoundTripTests
     }
 
     [Test]
-    [Description("A6 (design docs/architecture/object-type-authoring.md §13.1): every placement in this level names the pre-seeded authored reference, so a null source package must never be needed. The unseeded-reference half of A6 is the pre-existing BuildContributionsForLevel_WithPlacementsAndNoSourcePackage_ThrowsArgumentNullException test above, unchanged.")]
+    [Description("A6 (design docs/architecture/object-type-authoring.md §13.1): every placement in this level names the pre-seeded authored reference, so a null source package must never be needed.")]
     public void BuildContributionsForLevel_WithNullPackage_PlacementsAllBelongingToTheAuthoredReference_ReturnsEmptyRatherThanThrowing()
     {
         byte[] packageBytes = BuildPackageBytes();
@@ -344,6 +344,74 @@ public sealed class ObjectSetRoundTripTests
     }
 
     [Test]
+    [Description("A20 (design amendment 2026-08-27, #9879 CF-1) — the walk-around this feature shipped broken: place, erase, remove the now-unused type and discard history; Undo must not reinstate a placement of a vanished type, and the level must still save and reopen.")]
+    public void PlaceEraseRemoveTypeDiscardThenUndo_ReinstatesNothing_SaveFreshReopensCleanly()
+    {
+        EditableTileSet tileSet = EditableTileSet.CreateBlank("Untitled Tiles");
+        TileSetEditSession tileSetSession = new TileSetEditSession(tileSet);
+        ObjectSetEditSession objectSetSession = ObjectSetEditSession.CreateBlank("Untitled Objects");
+        string typeId = objectSetSession.AddType(PlatformGraphicBytes, ObjectCollisionRole.Solid);
+        EditableObjectType objectType = objectSetSession.Types[0];
+
+        EditableLevel level = EditableLevel.CreateBlank(
+            "Untitled", TileSize, Width, Height, ResourceReference.ToSelf(tileSet.TileSetPath), tileSet.Tiles);
+        LevelEditSession session = new LevelEditSession(level);
+        session.PlaceObject(null, objectSetSession.Reference, objectType, x: 1, y: 0);
+        session.EraseObjectAt(1, 0);
+        objectSetSession.RemoveType(typeId);
+        session.DiscardHistoryForObjectTypeRemoval();
+
+        CellChange? undone = session.Undo();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(undone, Is.Null, "nothing survives the discard for Undo to reinstate.");
+            Assert.That(session.CanUndo, Is.False);
+            Assert.That(session.CanRedo, Is.False);
+        });
+
+        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(
+            level, tileSetSession, Array.Empty<ResourceEntry>(), objectSetSourcePackage: null, objectSetSession);
+        byte[] freshBytes = session.SaveFresh("Discard Pack", extra);
+        EditableLevel reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
+
+        Assert.That(reloaded.Objects, Is.Empty, "no dangling placement of the removed type -- the level opens.");
+    }
+
+    [Test]
+    [Description("A21 (design amendment 2026-08-27, #9879 CF-2) — the same walk-around when the removed type was the level's only one: the save completes and the level reopens without an object set, instead of throwing.")]
+    public void PlaceEraseRemoveOnlyTypeDiscard_SaveFreshCompletes_WithoutAnObjectSetResource()
+    {
+        EditableTileSet tileSet = EditableTileSet.CreateBlank("Untitled Tiles");
+        TileSetEditSession tileSetSession = new TileSetEditSession(tileSet);
+        ObjectSetEditSession objectSetSession = ObjectSetEditSession.CreateBlank("Untitled Objects");
+        string typeId = objectSetSession.AddType(PlatformGraphicBytes, ObjectCollisionRole.Solid);
+        EditableObjectType objectType = objectSetSession.Types[0];
+
+        EditableLevel level = EditableLevel.CreateBlank(
+            "Untitled", TileSize, Width, Height, ResourceReference.ToSelf(tileSet.TileSetPath), tileSet.Tiles);
+        LevelEditSession session = new LevelEditSession(level);
+        session.PlaceObject(null, objectSetSession.Reference, objectType, x: 1, y: 0);
+        session.EraseObjectAt(1, 0);
+        objectSetSession.RemoveType(typeId);
+        session.DiscardHistoryForObjectTypeRemoval();
+
+        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(
+            level, tileSetSession, Array.Empty<ResourceEntry>(), objectSetSourcePackage: null, objectSetSession);
+        byte[] freshBytes = session.SaveFresh("Zero Type Pack", extra);
+
+        EditableLevel reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
+        using Package freshPackage = PackageReader.Open(new MemoryStream(freshBytes));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(reloaded.Objects, Is.Empty);
+            Assert.That(freshPackage.Manifest.Resources.Any(entry => entry.Kind == ResourceKind.ObjectSet), Is.False,
+                "a zero-type session contributes no object-set resource (I8).");
+        });
+    }
+
+    [Test]
     public void SaveAsNewPackage_WithLevelPathCollidingWithReferencedObjectSet_ThrowsLevelContentException()
     {
         byte[] packageBytes = BuildPackageBytes();
@@ -354,7 +422,7 @@ public sealed class ObjectSetRoundTripTests
         LevelEditSession session = new LevelEditSession(level);
         session.AttachToExistingResource(ObjectSetPath);
 
-        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, Array.Empty<ResourceEntry>(), package);
+        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, Array.Empty<ResourceEntry>(), package, objectSetSession: null);
 
         Assert.That(() => session.SaveFresh("Collision Pack", extra),
             Throws.TypeOf<LevelContentException>().With.Message.Contains(ObjectSetPath.Value),
@@ -371,7 +439,7 @@ public sealed class ObjectSetRoundTripTests
         TileSetEditSession tileSetSession = new TileSetEditSession(freshTileSet);
         LevelEditSession session = new LevelEditSession(level);
 
-        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, Array.Empty<ResourceEntry>(), package);
+        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, Array.Empty<ResourceEntry>(), package, objectSetSession: null);
 
         Assert.That(() => session.SaveFresh("Collision Pack", extra),
             Throws.TypeOf<LevelContentException>().With.Message.Contains(CollidingObjectSetPath.Value),
@@ -414,7 +482,7 @@ public sealed class ObjectSetRoundTripTests
         TileSetEditSession tileSetSession = new TileSetEditSession(tileSet);
         LevelEditSession session = new LevelEditSession(level);
 
-        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, Array.Empty<ResourceEntry>(), package);
+        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, Array.Empty<ResourceEntry>(), package, objectSetSession: null);
         return session.SaveFresh("Fresh Object Pack", extra);
     }
 
