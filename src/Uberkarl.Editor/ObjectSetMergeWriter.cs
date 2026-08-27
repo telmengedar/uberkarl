@@ -13,9 +13,9 @@ public static class ObjectSetMergeWriter
         if (objectTypes is null)
             throw new ArgumentNullException(nameof(objectTypes));
 
-        var contributions = new List<PendingResource>(objectTypes.Count + 1);
+        List<PendingResource> contributions = new List<PendingResource>(objectTypes.Count + 1);
 
-        var objectSetDefinition = new ObjectSetDefinition
+        ObjectSetDefinition objectSetDefinition = new ObjectSetDefinition
         {
             Objects = objectTypes.Select(type => type.Definition).ToArray(),
         };
@@ -23,13 +23,13 @@ public static class ObjectSetMergeWriter
             objectSetPath, ResourceKind.ObjectSet, PackageFormat.DefaultMediaType,
             LevelContentSerializer.WriteObjectSet(objectSetDefinition), attribution: null));
 
-        foreach (var type in objectTypes.DistinctBy(type => type.Definition.Graphic.Path))
+        foreach (EditableObjectType type in objectTypes)
             contributions.Add(new PendingResource(type.Definition.Graphic.Path, ResourceKind.Sprite, "image/png", type.Graphic, attribution: null));
 
         return contributions;
     }
 
-    /// <summary>The contributions of every object set <paramref name="level"/>'s placements reference, read from <paramref name="package"/> and de-duplicated by path across all of them. A null <paramref name="package"/> is only valid when the level has no object placements to resolve; otherwise it throws.</summary>
+    /// <summary>The contributions of every object set <paramref name="level"/>'s placements reference, read from <paramref name="package"/>, keyed on whether there is placement data to lose rather than on whether the level was ever attached: a null <paramref name="package"/> throws only when <paramref name="level"/>.Objects is non-empty.</summary>
     public static IReadOnlyList<PendingResource> BuildContributionsForLevel(Package? package, EditableLevel level)
     {
         if (level is null)
@@ -39,18 +39,18 @@ public static class ObjectSetMergeWriter
         if (package is null)
             return Array.Empty<PendingResource>();
 
-        var contributions = new List<PendingResource>();
-        var seen = new HashSet<ResourceReference>();
-        foreach (var placement in level.Objects)
+        List<PendingResource> contributions = new List<PendingResource>();
+        HashSet<ResourceReference> seen = new HashSet<ResourceReference>();
+        foreach (EditableObjectPlacement placement in level.Objects)
         {
-            var reference = placement.Placement.ObjectSet;
+            ResourceReference reference = placement.Placement.ObjectSet;
             if (!seen.Add(reference))
                 continue;
 
-            var objectTypes = EditableObjectSetReader.FromPackage(package, reference);
+            IReadOnlyList<EditableObjectType> objectTypes = EditableObjectSetReader.FromPackage(package, reference);
             contributions.AddRange(BuildContributions(reference.Path, objectTypes));
         }
 
-        return contributions.DistinctBy(contribution => contribution.Path).ToList();
+        return contributions;
     }
 }

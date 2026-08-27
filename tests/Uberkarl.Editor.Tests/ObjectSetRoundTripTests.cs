@@ -20,18 +20,20 @@ public sealed class ObjectSetRoundTripTests
     private static readonly ResourcePath ObjectSetPath = ResourcePath.Create("objectsets/demo.json");
     private static readonly ResourcePath PlatformGraphicPath = ResourcePath.Create("objects/platform.png");
     private static readonly ResourcePath JumpBlockGraphicPath = ResourcePath.Create("objects/jump-block.png");
+    private static readonly ResourcePath TargetOwnResourcePath = ResourcePath.Create("targets/own-resource.png");
 
     private static readonly byte[] PlatformGraphicBytes = Encoding.UTF8.GetBytes("PLATFORM-PNG");
     private static readonly byte[] JumpBlockGraphicBytes = Encoding.UTF8.GetBytes("JUMP-BLOCK-PNG");
+    private static readonly byte[] TargetOwnResourceBytes = Encoding.UTF8.GetBytes("TARGET-OWN-PNG");
 
     [Test]
     public void SaveAsNewPackage_WithPlacedObjects_RoundTripsTheObjectSetAndEveryObjectGraphic()
     {
-        var packageBytes = BuildPackageBytes();
-        var freshBytes = BuildFreshPackageBytes(packageBytes);
-        var reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
+        byte[] packageBytes = BuildPackageBytes();
+        byte[] freshBytes = BuildFreshPackageBytes(packageBytes);
+        EditableLevel reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
 
-        using var freshPackage = PackageReader.Open(new MemoryStream(freshBytes));
+        using Package freshPackage = PackageReader.Open(new MemoryStream(freshBytes));
 
         Assert.Multiple(() =>
         {
@@ -58,9 +60,9 @@ public sealed class ObjectSetRoundTripTests
     [Test]
     public void SaveAsNewPackage_WithPlacementsInTwoDistinctObjectSets_RoundTripsBoth()
     {
-        var packageBytes = BuildTwoObjectSetPackageBytes();
-        var freshBytes = BuildFreshPackageBytes(packageBytes);
-        var reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
+        byte[] packageBytes = BuildTwoObjectSetPackageBytes();
+        byte[] freshBytes = BuildFreshPackageBytes(packageBytes);
+        EditableLevel reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
 
         Assert.Multiple(() =>
         {
@@ -76,9 +78,9 @@ public sealed class ObjectSetRoundTripTests
     [Test]
     public void SaveAsNewPackage_WithTwoObjectTypesSharingOneGraphic_DoesNotThrowAndRoundTripsBoth()
     {
-        var packageBytes = BuildSharedGraphicPackageBytes();
-        var freshBytes = BuildFreshPackageBytes(packageBytes);
-        var reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
+        byte[] packageBytes = BuildSharedGraphicPackageBytes();
+        byte[] freshBytes = BuildFreshPackageBytes(packageBytes);
+        EditableLevel reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
 
         Assert.Multiple(() =>
         {
@@ -94,23 +96,24 @@ public sealed class ObjectSetRoundTripTests
     [Test]
     public void MergeIntoDifferentExistingPackage_WithPlacedObjects_RoundTripsTheObjectSetAndEveryObjectGraphic()
     {
-        var originBytes = BuildPackageBytes();
-        var targetBytes = BuildOtherExistingPackageBytes();
+        byte[] originBytes = BuildPackageBytes();
+        byte[] targetBytes = BuildOtherExistingPackageBytes();
 
-        using var originPackage = PackageReader.Open(new MemoryStream(originBytes));
-        using var targetPackage = PackageReader.Open(new MemoryStream(targetBytes));
+        using Package originPackage = PackageReader.Open(new MemoryStream(originBytes));
+        using Package targetPackage = PackageReader.Open(new MemoryStream(targetBytes));
 
-        var level = EditableLevelReader.FromPackage(originPackage, LevelPath);
-        var tileSet = EditableTileSetReader.FromPackage(originPackage, ResourceReference.ToSelf(TileSetPath));
-        var tileSetSession = new TileSetEditSession(tileSet);
-        var session = new LevelEditSession(level);
+        EditableLevel level = EditableLevelReader.FromPackage(originPackage, LevelPath);
+        EditableTileSet tileSet = EditableTileSetReader.FromPackage(originPackage, ResourceReference.ToSelf(TileSetPath));
+        TileSetEditSession tileSetSession = new TileSetEditSession(tileSet);
+        LevelEditSession session = new LevelEditSession(level);
         session.AttachAsNewResource(targetPackage.Manifest.Resources);
 
-        var extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, targetPackage.Manifest.Resources, originPackage);
-        var mergedBytes = session.Save(targetPackage, extra);
+        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, targetPackage.Manifest.Resources, originPackage);
+        AssertContributionPathsAreUnique(extra);
+        byte[] mergedBytes = session.Save(targetPackage, extra);
 
-        var reloaded = EditableLevelReader.FromPackageBytes(mergedBytes);
-        using var mergedPackage = PackageReader.Open(new MemoryStream(mergedBytes));
+        EditableLevel reloaded = EditableLevelReader.FromPackageBytes(mergedBytes);
+        using Package mergedPackage = PackageReader.Open(new MemoryStream(mergedBytes));
 
         Assert.Multiple(() =>
         {
@@ -122,24 +125,29 @@ public sealed class ObjectSetRoundTripTests
                 "the jump-block's graphic bytes did not survive the merge-into-existing-package save.");
             Assert.That(mergedPackage.GetEntry(ObjectSetPath).Kind, Is.EqualTo(ResourceKind.ObjectSet),
                 "the object set resource must be stamped with the objectset kind after the merge.");
+            Assert.That(mergedPackage.GetEntry(TargetOwnResourcePath).Kind, Is.EqualTo(ResourceKind.Sprite),
+                "the target package's own pre-existing resource must survive the merge (carry-forward, DiVoid #7571/#7572).");
+            Assert.That(mergedPackage.ReadBytes(TargetOwnResourcePath), Is.EqualTo(TargetOwnResourceBytes),
+                "the target package's own pre-existing resource bytes must survive the merge unchanged.");
         });
     }
 
     [Test]
     public void ResaveIntoSamePackage_WithPlacedObjects_RoundTripsTheObjectSetAndEveryObjectGraphic()
     {
-        var packageBytes = BuildPackageBytes();
+        byte[] packageBytes = BuildPackageBytes();
 
-        using var package = PackageReader.Open(new MemoryStream(packageBytes));
-        var level = EditableLevelReader.FromPackage(package, LevelPath);
-        var tileSet = EditableTileSetReader.FromPackage(package, ResourceReference.ToSelf(TileSetPath));
-        var tileSetSession = new TileSetEditSession(tileSet);
-        var session = new LevelEditSession(level);
+        using Package package = PackageReader.Open(new MemoryStream(packageBytes));
+        EditableLevel level = EditableLevelReader.FromPackage(package, LevelPath);
+        EditableTileSet tileSet = EditableTileSetReader.FromPackage(package, ResourceReference.ToSelf(TileSetPath));
+        TileSetEditSession tileSetSession = new TileSetEditSession(tileSet);
+        LevelEditSession session = new LevelEditSession(level);
 
-        var extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, package.Manifest.Resources, package);
-        var mergedBytes = session.Save(package, extra);
+        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, package.Manifest.Resources, package);
+        AssertContributionPathsAreUnique(extra);
+        byte[] mergedBytes = session.Save(package, extra);
 
-        var reloaded = EditableLevelReader.FromPackageBytes(mergedBytes);
+        EditableLevel reloaded = EditableLevelReader.FromPackageBytes(mergedBytes);
 
         Assert.Multiple(() =>
         {
@@ -155,9 +163,9 @@ public sealed class ObjectSetRoundTripTests
     [Test]
     public void SaveAsNewPackage_WithTwoDistinctObjectSetsSharingOneGraphic_DoesNotThrowAndRoundTripsBoth()
     {
-        var packageBytes = BuildTwoObjectSetsSharingOneGraphicPackageBytes();
-        var freshBytes = BuildFreshPackageBytes(packageBytes);
-        var reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
+        byte[] packageBytes = BuildTwoObjectSetsSharingOneGraphicPackageBytes();
+        byte[] freshBytes = BuildFreshPackageBytes(packageBytes);
+        EditableLevel reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
 
         Assert.Multiple(() =>
         {
@@ -171,23 +179,43 @@ public sealed class ObjectSetRoundTripTests
     }
 
     [Test]
+    public void SaveAsNewPackage_WithObjectGraphicSharingTheTileSetGraphic_DoesNotThrowAndAssembledPathsStayUnique()
+    {
+        byte[] packageBytes = BuildObjectGraphicSharesTileGraphicPackageBytes();
+        byte[] freshBytes = BuildFreshPackageBytes(packageBytes);
+        EditableLevel reloaded = EditableLevelReader.FromPackageBytes(freshBytes);
+
+        using Package freshPackage = PackageReader.Open(new MemoryStream(freshBytes));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(reloaded.Objects, Has.Count.EqualTo(1),
+                "the placement must resolve when its object type's graphic path equals the tile set's own graphic path.");
+            Assert.That(reloaded.Objects[0].Graphic, Is.EqualTo(Encoding.UTF8.GetBytes("GRASS-PNG")),
+                "the shared path's single assembled entry must carry the tile set's bytes, not a second copy.");
+            Assert.That(freshPackage.Manifest.Resources.Count(entry => entry.Path == GrassPath), Is.EqualTo(1),
+                "the assembled manifest must not carry the shared path twice.");
+        });
+    }
+
+    [Test]
     public void BuildContributionsForLevel_WithPlacementsAndNoSourcePackage_ThrowsArgumentNullException()
     {
-        var packageBytes = BuildPackageBytes();
-        using var package = PackageReader.Open(new MemoryStream(packageBytes));
-        var level = EditableLevelReader.FromPackage(package, LevelPath);
+        byte[] packageBytes = BuildPackageBytes();
+        using Package package = PackageReader.Open(new MemoryStream(packageBytes));
+        EditableLevel level = EditableLevelReader.FromPackage(package, LevelPath);
 
         Assert.That(() => ObjectSetMergeWriter.BuildContributionsForLevel(null, level),
-            Throws.ArgumentNullException,
+            Throws.TypeOf<ArgumentNullException>().With.Property("ParamName").EqualTo("package"),
             "a level with object placements must not silently lose them when no source package is available.");
     }
 
     [Test]
     public void BuildContributionsForLevel_WithNoPlacementsAndNoSourcePackage_ReturnsEmpty()
     {
-        var packageBytes = BuildEmptyLevelPackageBytes();
-        using var package = PackageReader.Open(new MemoryStream(packageBytes));
-        var level = EditableLevelReader.FromPackage(package, LevelPath);
+        byte[] packageBytes = BuildEmptyLevelPackageBytes();
+        using Package package = PackageReader.Open(new MemoryStream(packageBytes));
+        EditableLevel level = EditableLevelReader.FromPackage(package, LevelPath);
 
         IReadOnlyList<PendingResource> contributions = ObjectSetMergeWriter.BuildContributionsForLevel(null, level);
 
@@ -195,21 +223,30 @@ public sealed class ObjectSetRoundTripTests
             "a level with no object placements has nothing to lose when no source package is available.");
     }
 
+    /// <summary>Asserts every contribution's resource path is unique — the property <see cref="PackageBuilder"/> requires of any list handed to it.</summary>
+    private static void AssertContributionPathsAreUnique(IReadOnlyList<PendingResource> contributions)
+    {
+        List<ResourcePath> paths = contributions.Select(contribution => contribution.Path).ToList();
+        Assert.That(paths, Is.Unique,
+            "the contribution list handed to PackageBuilder must contain each resource path at most once.");
+    }
+
     private static byte[] BuildFreshPackageBytes(byte[] packageBytes)
     {
-        using var package = PackageReader.Open(new MemoryStream(packageBytes));
-        var level = EditableLevelReader.FromPackage(package, LevelPath);
-        var tileSet = EditableTileSetReader.FromPackage(package, ResourceReference.ToSelf(TileSetPath));
-        var tileSetSession = new TileSetEditSession(tileSet);
-        var session = new LevelEditSession(level);
+        using Package package = PackageReader.Open(new MemoryStream(packageBytes));
+        EditableLevel level = EditableLevelReader.FromPackage(package, LevelPath);
+        EditableTileSet tileSet = EditableTileSetReader.FromPackage(package, ResourceReference.ToSelf(TileSetPath));
+        TileSetEditSession tileSetSession = new TileSetEditSession(tileSet);
+        LevelEditSession session = new LevelEditSession(level);
 
-        var extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, Array.Empty<ResourceEntry>(), package);
+        IReadOnlyList<PendingResource> extra = LevelSaveOrchestration.BuildExtraContributions(level, tileSetSession, Array.Empty<ResourceEntry>(), package);
+        AssertContributionPathsAreUnique(extra);
         return session.SaveFresh("Fresh Object Pack", extra);
     }
 
     private static byte[] BuildPackageBytes()
     {
-        var objectSet = new ObjectSetDefinition
+        ObjectSetDefinition objectSet = new ObjectSetDefinition
         {
             Objects = new[]
             {
@@ -226,13 +263,13 @@ public sealed class ObjectSetRoundTripTests
             },
         };
 
-        var level = BuildLevel(new[]
+        LevelDefinition level = BuildLevel(new[]
         {
             new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(ObjectSetPath), ObjectId = "platform", Cell = new GridPosition(1, 0), Name = "platform-1" },
             new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(ObjectSetPath), ObjectId = "jump-block", Cell = new GridPosition(2, 0), Name = "jump-block-1" },
         });
 
-        var builder = StartPackage();
+        PackageBuilder builder = StartPackage();
         builder.AddResource(ResourceKind.Sprite, PlatformGraphicPath, PlatformGraphicBytes, "image/png");
         builder.AddResource(ResourceKind.Sprite, JumpBlockGraphicPath, JumpBlockGraphicBytes, "image/png");
         builder.AddResource(ResourceKind.ObjectSet, ObjectSetPath, LevelContentSerializer.WriteObjectSet(objectSet));
@@ -243,17 +280,17 @@ public sealed class ObjectSetRoundTripTests
 
     private static byte[] BuildTwoObjectSetPackageBytes()
     {
-        var objectSetPathA = ResourcePath.Create("objectsets/a.json");
-        var objectSetPathB = ResourcePath.Create("objectsets/b.json");
+        ResourcePath objectSetPathA = ResourcePath.Create("objectsets/a.json");
+        ResourcePath objectSetPathB = ResourcePath.Create("objectsets/b.json");
 
-        var objectSetA = new ObjectSetDefinition
+        ObjectSetDefinition objectSetA = new ObjectSetDefinition
         {
             Objects = new[]
             {
                 new ObjectDefinition { Id = "platform", Name = "Moving Platform", Graphic = ResourceReference.ToSelf(PlatformGraphicPath), CollisionRole = ObjectCollisionRole.Solid },
             },
         };
-        var objectSetB = new ObjectSetDefinition
+        ObjectSetDefinition objectSetB = new ObjectSetDefinition
         {
             Objects = new[]
             {
@@ -261,13 +298,13 @@ public sealed class ObjectSetRoundTripTests
             },
         };
 
-        var level = BuildLevel(new[]
+        LevelDefinition level = BuildLevel(new[]
         {
             new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(objectSetPathA), ObjectId = "platform", Cell = new GridPosition(1, 0), Name = "platform-1" },
             new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(objectSetPathB), ObjectId = "jump-block", Cell = new GridPosition(2, 0), Name = "jump-block-1" },
         });
 
-        var builder = StartPackage();
+        PackageBuilder builder = StartPackage();
         builder.AddResource(ResourceKind.Sprite, PlatformGraphicPath, PlatformGraphicBytes, "image/png");
         builder.AddResource(ResourceKind.Sprite, JumpBlockGraphicPath, JumpBlockGraphicBytes, "image/png");
         builder.AddResource(ResourceKind.ObjectSet, objectSetPathA, LevelContentSerializer.WriteObjectSet(objectSetA));
@@ -279,7 +316,7 @@ public sealed class ObjectSetRoundTripTests
 
     private static byte[] BuildSharedGraphicPackageBytes()
     {
-        var objectSet = new ObjectSetDefinition
+        ObjectSetDefinition objectSet = new ObjectSetDefinition
         {
             Objects = new[]
             {
@@ -288,13 +325,13 @@ public sealed class ObjectSetRoundTripTests
             },
         };
 
-        var level = BuildLevel(new[]
+        LevelDefinition level = BuildLevel(new[]
         {
             new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(ObjectSetPath), ObjectId = "solid-crate", Cell = new GridPosition(1, 0), Name = "solid-crate-1" },
             new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(ObjectSetPath), ObjectId = "passthrough-crate", Cell = new GridPosition(2, 0), Name = "passthrough-crate-1" },
         });
 
-        var builder = StartPackage();
+        PackageBuilder builder = StartPackage();
         builder.AddResource(ResourceKind.Sprite, PlatformGraphicPath, PlatformGraphicBytes, "image/png");
         builder.AddResource(ResourceKind.ObjectSet, ObjectSetPath, LevelContentSerializer.WriteObjectSet(objectSet));
         builder.AddResource(ResourceKind.Level, LevelPath, LevelContentSerializer.WriteLevel(level));
@@ -304,23 +341,24 @@ public sealed class ObjectSetRoundTripTests
 
     private static byte[] BuildOtherExistingPackageBytes()
     {
-        var builder = new PackageBuilder().WithName("Other Existing Pack").WithVersion("0.1.0");
+        PackageBuilder builder = new PackageBuilder().WithName("Other Existing Pack").WithVersion("0.1.0");
+        builder.AddResource(ResourceKind.Sprite, TargetOwnResourcePath, TargetOwnResourceBytes, "image/png");
         return FinishPackage(builder);
     }
 
     private static byte[] BuildTwoObjectSetsSharingOneGraphicPackageBytes()
     {
-        var objectSetPathA = ResourcePath.Create("objectsets/a.json");
-        var objectSetPathB = ResourcePath.Create("objectsets/b.json");
+        ResourcePath objectSetPathA = ResourcePath.Create("objectsets/a.json");
+        ResourcePath objectSetPathB = ResourcePath.Create("objectsets/b.json");
 
-        var objectSetA = new ObjectSetDefinition
+        ObjectSetDefinition objectSetA = new ObjectSetDefinition
         {
             Objects = new[]
             {
                 new ObjectDefinition { Id = "crate-a", Name = "Crate A", Graphic = ResourceReference.ToSelf(PlatformGraphicPath), CollisionRole = ObjectCollisionRole.Solid },
             },
         };
-        var objectSetB = new ObjectSetDefinition
+        ObjectSetDefinition objectSetB = new ObjectSetDefinition
         {
             Objects = new[]
             {
@@ -328,13 +366,13 @@ public sealed class ObjectSetRoundTripTests
             },
         };
 
-        var level = BuildLevel(new[]
+        LevelDefinition level = BuildLevel(new[]
         {
             new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(objectSetPathA), ObjectId = "crate-a", Cell = new GridPosition(1, 0), Name = "crate-a-1" },
             new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(objectSetPathB), ObjectId = "crate-b", Cell = new GridPosition(2, 0), Name = "crate-b-1" },
         });
 
-        var builder = StartPackage();
+        PackageBuilder builder = StartPackage();
         builder.AddResource(ResourceKind.Sprite, PlatformGraphicPath, PlatformGraphicBytes, "image/png");
         builder.AddResource(ResourceKind.ObjectSet, objectSetPathA, LevelContentSerializer.WriteObjectSet(objectSetA));
         builder.AddResource(ResourceKind.ObjectSet, objectSetPathB, LevelContentSerializer.WriteObjectSet(objectSetB));
@@ -343,17 +381,39 @@ public sealed class ObjectSetRoundTripTests
         return FinishPackage(builder);
     }
 
+    private static byte[] BuildObjectGraphicSharesTileGraphicPackageBytes()
+    {
+        ObjectSetDefinition objectSet = new ObjectSetDefinition
+        {
+            Objects = new[]
+            {
+                new ObjectDefinition { Id = "grass-crate", Name = "Grass Crate", Graphic = ResourceReference.ToSelf(GrassPath), CollisionRole = ObjectCollisionRole.Solid },
+            },
+        };
+
+        LevelDefinition level = BuildLevel(new[]
+        {
+            new ObjectPlacement { ObjectSet = ResourceReference.ToSelf(ObjectSetPath), ObjectId = "grass-crate", Cell = new GridPosition(1, 0), Name = "grass-crate-1" },
+        });
+
+        PackageBuilder builder = StartPackage();
+        builder.AddResource(ResourceKind.ObjectSet, ObjectSetPath, LevelContentSerializer.WriteObjectSet(objectSet));
+        builder.AddResource(ResourceKind.Level, LevelPath, LevelContentSerializer.WriteLevel(level));
+
+        return FinishPackage(builder);
+    }
+
     private static byte[] BuildEmptyLevelPackageBytes()
     {
-        var level = BuildLevel(Array.Empty<ObjectPlacement>());
-        var builder = StartPackage();
+        LevelDefinition level = BuildLevel(Array.Empty<ObjectPlacement>());
+        PackageBuilder builder = StartPackage();
         builder.AddResource(ResourceKind.Level, LevelPath, LevelContentSerializer.WriteLevel(level));
         return FinishPackage(builder);
     }
 
     private static LevelDefinition BuildLevel(ObjectPlacement[] placements)
     {
-        var cells = new int[Width * Height];
+        int[] cells = new int[Width * Height];
         Array.Fill(cells, LayerDefinition.EmptyCell);
 
         return new LevelDefinition
@@ -369,12 +429,12 @@ public sealed class ObjectSetRoundTripTests
 
     private static PackageBuilder StartPackage()
     {
-        var tileSet = new TileSetDefinition
+        TileSetDefinition tileSet = new TileSetDefinition
         {
             Tiles = new[] { new TileDefinition { Id = 1, Graphic = ResourceReference.ToSelf(GrassPath), CollisionShape = CollisionShapeDefinition.Full } },
         };
 
-        var builder = new PackageBuilder().WithName("Object Round Trip Pack").WithVersion("0.1.0");
+        PackageBuilder builder = new PackageBuilder().WithName("Object Round Trip Pack").WithVersion("0.1.0");
         builder.AddResource(ResourceKind.TileGraphic, GrassPath, Encoding.UTF8.GetBytes("GRASS-PNG"), "image/png");
         builder.AddResource(ResourceKind.TileSet, TileSetPath, LevelContentSerializer.WriteTileSet(tileSet));
         return builder;
@@ -382,7 +442,7 @@ public sealed class ObjectSetRoundTripTests
 
     private static byte[] FinishPackage(PackageBuilder builder)
     {
-        using var buffer = new MemoryStream();
+        using MemoryStream buffer = new MemoryStream();
         builder.Write(buffer);
         return buffer.ToArray();
     }
