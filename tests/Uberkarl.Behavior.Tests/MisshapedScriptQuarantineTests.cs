@@ -23,6 +23,18 @@ public sealed class MisshapedScriptQuarantineTests
     }
 
     [Test]
+    public void UnbalancedGroupingParentheses_IsQuarantined_AndTheReasonNamesAParseFailure()
+    {
+        var ctx = new BehaviorTestContext();
+        var subject = ctx.CreateSubject("spike-1", "tile", "spike");
+
+        var instance = ctx.Compile(subject, "$onUpdate = $delta => { (((");
+
+        Assert.That(instance.IsQuarantined, Is.True);
+        Assert.That(instance.Compiled.QuarantineReason, Does.Contain("parse"));
+    }
+
+    [Test]
     public void ScriptNotEndingWithAMap_IsQuarantined()
     {
         var ctx = new BehaviorTestContext();
