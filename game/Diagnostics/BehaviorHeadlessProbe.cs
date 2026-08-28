@@ -24,7 +24,7 @@ namespace Uberkarl.Diagnostics {
 
         const string PlatformBodyName = "moving-platform-1";
         const string JumpBlockBodyName = "jump-block-1";
-        const string BehaviorRuntimeNodeName = "BehaviorRuntime";
+        const string BehaviorRuntimeNodeName = PlayRuntimeBuilder.BehaviorRuntimeNodeName;
         const int PlatformLandingFrames = 30;
         const int PlatformRideFrames = 90;
         const int PlatformExtendedRunFrames = 1790;
@@ -126,12 +126,12 @@ namespace Uberkarl.Diagnostics {
             }
 
             bool platformStillMovingLate = lateWindowMaxX - lateWindowMinX > PlatformMovedThreshold;
-            bool noQuarantine = runtime.QuarantinedSubjectIds.Count == 0;
+            bool noQuarantine = runtime.Quarantines.Count == 0;
             int totalFrames = PlatformLandingFrames + PlatformRideFrames + PlatformExtendedRunFrames + PlatformLateWindowFrames;
 
             GD.Print($"[probe] {Label}: late-window range {lateWindowMaxX - lateWindowMinX:0.00}px over the trailing {PlatformLateWindowFrames} of {totalFrames} total physics frames");
             GD.Print($"[probe] VERDICT {Label}: platformMoved={platformMoved} playerRode={playerRode} " +
-                $"platformStillMovingLate={platformStillMovingLate} noQuarantine={noQuarantine} (quarantined=[{string.Join(",", runtime.QuarantinedSubjectIds)}])");
+                $"platformStillMovingLate={platformStillMovingLate} noQuarantine={noQuarantine} (quarantined=[{string.Join(",", runtime.Quarantines.Select(q => q.SubjectId))}])");
 
             root.QueueFree();
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
@@ -209,7 +209,7 @@ namespace Uberkarl.Diagnostics {
             }
 
             bool grounded = Mathf.Abs(player.Position.Y - (platform.Position.Y - Player.CollisionHalfExtents.Y - level.TileSize / 2f)) < PlatformContactRestTolerance;
-            bool noQuarantine = runtime.QuarantinedSubjectIds.Count == 0;
+            bool noQuarantine = runtime.Quarantines.Count == 0;
             GD.Print($"[probe] VERDICT {Label}: sawContact={sawContact} playerRestingOnPlatform={grounded} noQuarantine={noQuarantine} " +
                 $"(contacted=[{string.Join(",", runtime.ContactedObjectIds)}] player={player.Position} platform={platform.Position})");
 
@@ -258,10 +258,10 @@ namespace Uberkarl.Diagnostics {
                 GD.Print($"[probe] {Label}: cycle {cycle} startY={cycleStartY:0.00} minY={minY:0.00} endY={cycleEndY:0.00} bumped={cycleBumped} settled={cycleSettled}");
             }
 
-            bool noQuarantine = runtime.QuarantinedSubjectIds.Count == 0;
+            bool noQuarantine = runtime.Quarantines.Count == 0;
             int totalFrames = JumpBlockCycleFrames * JumpBlockCycleCount;
             GD.Print($"[probe] VERDICT {Label}: allCyclesBumped={allCyclesBumped} allCyclesSettled={allCyclesSettled} " +
-                $"noQuarantine={noQuarantine} over {totalFrames} total physics frames (quarantined=[{string.Join(",", runtime.QuarantinedSubjectIds)}])");
+                $"noQuarantine={noQuarantine} over {totalFrames} total physics frames (quarantined=[{string.Join(",", runtime.Quarantines.Select(q => q.SubjectId))}])");
 
             bool sideApproachDidNotBump = await RunJumpBlockSideApproachCheck(level, player, runtime, jumpBlock, restY);
 
@@ -309,7 +309,7 @@ namespace Uberkarl.Diagnostics {
             bool sawContact = dispatchCountAfter > dispatchCountBefore;
 
             bool didNotBump = minY == restY;
-            bool noQuarantine = runtime.QuarantinedSubjectIds.Count == 0;
+            bool noQuarantine = runtime.Quarantines.Count == 0;
             GD.Print($"[probe] {Label}: player held at {sidePosition} (rising), restY={restY:0.00} minY={minY:0.00} sawContact={sawContact}");
             GD.Print($"[probe] VERDICT {Label}: didNotBump={didNotBump} sawContact={sawContact} noQuarantine={noQuarantine}");
 

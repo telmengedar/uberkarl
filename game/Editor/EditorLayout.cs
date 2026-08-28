@@ -25,5 +25,13 @@ namespace Uberkarl {
             control.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.TopWide);
             control.OffsetBottom = height;
         }
+
+        /// <summary>Anchors <paramref name="control"/> to the bottom edge spanning the parent's full width,
+        /// sized and grown upward from its own content rather than a fixed height — the bottom-edge sibling
+        /// of <see cref="PinTop"/> for content whose height is not known up front.</summary>
+        public static void PinBottom(Control control) {
+            control.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomWide);
+            control.GrowVertical = Control.GrowDirection.Begin;
+        }
     }
 }

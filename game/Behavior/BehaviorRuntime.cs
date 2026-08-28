@@ -37,11 +37,11 @@ namespace Uberkarl {
         readonly HashSet<string> contactedTileIds = new HashSet<string>();
         readonly HashSet<string> insideTriggerIds = new HashSet<string>();
         readonly HashSet<string> contactedObjectIds = new HashSet<string>();
-        readonly HashSet<string> quarantinedSubjectIds = new HashSet<string>();
+        readonly List<QuarantinedSubject> quarantines = new List<QuarantinedSubject>();
         readonly Dictionary<string, int> contactDispatchCounts = new Dictionary<string, int>();
 
-        /// <summary>Subject ids quarantined so far.</summary>
-        public IReadOnlyCollection<string> QuarantinedSubjectIds => quarantinedSubjectIds;
+        /// <summary>Subjects quarantined so far this run, in the order they were quarantined.</summary>
+        public IReadOnlyList<QuarantinedSubject> Quarantines => quarantines;
 
         /// <summary>Object subject ids the player is currently in contact with. Upstream bookkeeping written before dispatch — do not use this to witness that an event was actually delivered; see <see cref="ContactDispatchCounts"/>.</summary>
         public IReadOnlyCollection<string> ContactedObjectIds => contactedObjectIds;
@@ -133,7 +133,7 @@ namespace Uberkarl {
             foreach (var (layer, cell, binding) in level.EffectiveTileBehaviors()) {
                 string subjectId = $"tile:{layer}:{cell.X}:{cell.Y}";
                 var gridCell = new GridCell(cell.X, cell.Y);
-                var subject = new BehaviorSubject(subjectId, "tile", string.Empty, intents) {
+                var subject = new BehaviorSubject(subjectId, BehaviorSubjectKinds.NameOf(BehaviorSubjectKind.Tile), string.Empty, intents) {
                     Cell = gridCell,
                     Position = new BehaviorVector2(cell.X * tileSize + tileSize / 2.0, cell.Y * tileSize + tileSize / 2.0),
                 };
@@ -149,7 +149,7 @@ namespace Uberkarl {
             for (int i = 0; i < level.Triggers.Count; i++) {
                 ResolvedAreaTrigger trigger = level.Triggers[i];
                 string subjectId = $"trigger:{i}";
-                var subject = new BehaviorSubject(subjectId, "trigger", trigger.Name, intents) {
+                var subject = new BehaviorSubject(subjectId, BehaviorSubjectKinds.NameOf(BehaviorSubjectKind.Trigger), trigger.Name, intents) {
                     Cell = new GridCell(trigger.X, trigger.Y),
                     Position = new BehaviorVector2(trigger.X * tileSize, trigger.Y * tileSize),
                 };
@@ -165,7 +165,7 @@ namespace Uberkarl {
             if (level.LevelScript is not { } binding)
                 return;
 
-            var subject = new BehaviorSubject(LevelScriptSubjectId, "level", string.Empty, intents);
+            var subject = new BehaviorSubject(LevelScriptSubjectId, BehaviorSubjectKinds.NameOf(BehaviorSubjectKind.LevelScript), string.Empty, intents);
             subjectsById[LevelScriptSubjectId] = subject;
             scheduler.Register(new BehaviorInstance(LevelScriptSubjectId, loader.CompileBinding(binding, Globals(subject), BehaviorScriptRole.Init)));
             hasLevelScript = true;
@@ -180,7 +180,7 @@ namespace Uberkarl {
                 AddChild(body);
                 objectBodiesById[subjectId] = body;
 
-                var subject = new BehaviorSubject(subjectId, "object", placement.Name, intents) {
+                var subject = new BehaviorSubject(subjectId, BehaviorSubjectKinds.NameOf(BehaviorSubjectKind.Object), placement.Name, intents) {
                     Cell = new GridCell(placement.Cell.X, placement.Cell.Y),
                     Position = new BehaviorVector2(body.Position.X, body.Position.Y),
                 };
@@ -379,7 +379,8 @@ namespace Uberkarl {
         }
 
         void OnQuarantined(BehaviorQuarantineEvent quarantine) {
-            quarantinedSubjectIds.Add(quarantine.SubjectId);
+            BehaviorSubject subject = subjectsById[quarantine.SubjectId];
+            quarantines.Add(new QuarantinedSubject(quarantine.SubjectId, subject.Kind, subject.Name, subject.Cell, quarantine.TriggeringEvent, quarantine.Reason));
             GD.PrintErr($"BehaviorRuntime: subject '{quarantine.SubjectId}' quarantined " +
                 $"({(quarantine.TriggeringEvent is { } kind ? kind.ToString() : "init")}): {quarantine.Reason}");
         }

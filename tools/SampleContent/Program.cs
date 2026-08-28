@@ -8,7 +8,8 @@ const int TileSize = 16;
 const int Width = 60;   // ~60 tiles wide: clearly larger than the scrolling viewport, so the camera must follow.
 const int Height = 16;
 
-var outputPath = args.Length > 0 ? args[0] : Path.Combine("content", "sample.pkg");
+var outputDirectory = args.Length > 0 ? args[0] : "content";
+var outputPath = Path.Combine(outputDirectory, "sample.pkg");
 
 // Id, file, RGB, and whether the tile is solid (collision is a property of the tile — a full-tile shape
 // when solid, none otherwise; DiVoid #7551 Phase 4's richer shapes are an authoring-time concern, not
@@ -152,6 +153,70 @@ if (!string.IsNullOrEmpty(directory))
 builder.Write(outputPath);
 
 Console.WriteLine($"Wrote {outputPath} ({new FileInfo(outputPath).Length} bytes, {palette.Length} tiles, {Width}x{Height} grid).");
+
+const int RunawayTileSize = 16;
+const int RunawayWidth = 16;
+const int RunawayHeight = 10;
+const int RunawayGroundRow = 8;
+const int RunawayGroundTileId = 1;
+const int RunawayBackdropTileId = 2;
+
+var runawayBuilder = new PackageBuilder()
+    .WithName("Runaway Script Demo")
+    .WithVersion("0.1.0")
+    .WithAttribution(new Attribution { Author = "Uberkarl", License = "CC0-1.0" });
+
+var runawayGroundPath = ResourcePath.Create("tiles/ground.png");
+var runawayBackdropPath = ResourcePath.Create("tiles/backdrop.png");
+runawayBuilder.AddResource(ResourceKind.TileGraphic, runawayGroundPath, PngWriter.Encode(RunawayTileSize, RunawayTileSize, SolidTile(RunawayTileSize, 96, 96, 96)), "image/png");
+runawayBuilder.AddResource(ResourceKind.TileGraphic, runawayBackdropPath, PngWriter.Encode(RunawayTileSize, RunawayTileSize, SolidTile(RunawayTileSize, 40, 40, 60)), "image/png");
+
+var runawayTileSet = new TileSetDefinition
+{
+    Tiles = new List<TileDefinition>
+    {
+        new TileDefinition { Id = RunawayGroundTileId, Graphic = ResourceReference.ToSelf(runawayGroundPath), CollisionShape = CollisionShapeDefinition.Full },
+        new TileDefinition { Id = RunawayBackdropTileId, Graphic = ResourceReference.ToSelf(runawayBackdropPath), CollisionShape = CollisionShapeDefinition.None },
+    },
+};
+var runawayTileSetPath = ResourcePath.Create("tileset.json");
+runawayBuilder.AddResource(ResourceKind.TileSet, runawayTileSetPath, LevelContentSerializer.WriteTileSet(runawayTileSet));
+
+var runawayScriptPath = ResourcePath.Create("scripts/runaway.poo");
+const string RunawayScriptSource = """
+    $onUpdate = $delta => { while(true) { $x = 1; } }
+    { "onUpdate": onUpdate }
+    """;
+runawayBuilder.AddResource(ResourceKind.Script, runawayScriptPath, System.Text.Encoding.UTF8.GetBytes(RunawayScriptSource), "text/x-pooscript");
+
+var runawayLevel = new LevelDefinition
+{
+    TileSize = RunawayTileSize,
+    Width = RunawayWidth,
+    Height = RunawayHeight,
+    TileSet = ResourceReference.ToSelf(runawayTileSetPath),
+    Spawns = new Dictionary<string, GridPosition> { ["start"] = new GridPosition(2, RunawayGroundRow - 1) },
+    DefaultSpawn = "start",
+    Layers = new[]
+    {
+        new LayerDefinition { Name = "terrain", Collision = true, ScrollSpeed = 1.0f, Cells = BuildRunawayGroundLayer() },
+    },
+    LevelScript = BehaviorBinding.FromScript(ResourceReference.ToSelf(runawayScriptPath)),
+};
+runawayBuilder.AddResource(ResourceKind.Level, ResourcePath.Create("levels/runaway.json"), LevelContentSerializer.WriteLevel(runawayLevel));
+
+var runawayOutputPath = Path.Combine(outputDirectory, "runaway-script.pkg");
+runawayBuilder.Write(runawayOutputPath);
+Console.WriteLine($"Wrote {runawayOutputPath} ({new FileInfo(runawayOutputPath).Length} bytes).");
+
+static int[] BuildRunawayGroundLayer()
+{
+    var cells = new int[RunawayWidth * RunawayHeight];
+    Array.Fill(cells, LayerDefinition.EmptyCell);
+    for (var x = 0; x < RunawayWidth; x++)
+        cells[RunawayGroundRow * RunawayWidth + x] = RunawayGroundTileId;
+    return cells;
+}
 
 static byte[] SolidTile(int size, byte r, byte g, byte b)
 {

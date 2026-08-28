@@ -9,6 +9,9 @@ namespace Uberkarl {
     /// </summary>
     public static class PlayRuntimeBuilder {
 
+        /// <summary>The behavior runtime child's node name, shared by every reader that needs to find it (the playtest overlay, the headless probe).</summary>
+        public const string BehaviorRuntimeNodeName = "BehaviorRuntime";
+
         const float CameraZoom = 3f;
 
         const float CameraSmoothingSpeed = 20f;
@@ -43,7 +46,7 @@ namespace Uberkarl {
         }
 
         static void AttachBehaviorRuntime(Node2D root, ResolvedLevel level, Player player) {
-            BehaviorRuntime runtime = new BehaviorRuntime { Name = "BehaviorRuntime" };
+            BehaviorRuntime runtime = new BehaviorRuntime { Name = BehaviorRuntimeNodeName };
             root.AddChild(runtime);
             runtime.Configure(level, player);
         }
