@@ -31,7 +31,7 @@ public sealed class MisshapedScriptQuarantineTests
         var instance = ctx.Compile(subject, "$onUpdate = $delta => { (((");
 
         Assert.That(instance.IsQuarantined, Is.True);
-        Assert.That(instance.Compiled.QuarantineReason, Does.Contain("parse"));
+        Assert.That(instance.Compiled.QuarantineReason, Does.Contain("parse threw"));
     }
 
     [Test]
