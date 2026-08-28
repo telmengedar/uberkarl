@@ -21,7 +21,7 @@ public sealed class BehaviorScriptBudgetsTests
     }
 
     [Test]
-    [Description("DiVoid #10000: measured deepest parse-time nesting in tools/SampleContent + the predefined behavior library is 5 (BumpOnHitFromBelow); MaxParseDepth must clear that with real headroom while staying far below the measured ~600-deep stack-overflow ceiling (DiVoid #9999).")]
+    [Description("Pins DefaultBehavior().MaxParseDepth to a bounded range, above the authoring floor and below the parser's stack limit. DiVoid #10000.")]
     public void DefaultBehavior_MaxParseDepth_ClearsMeasuredContentWithHeadroomBelowTheStackCeiling()
     {
         Assert.That(BehaviorScriptBudgets.DefaultBehavior().MaxParseDepth, Is.Not.Null);
@@ -30,7 +30,7 @@ public sealed class BehaviorScriptBudgetsTests
     }
 
     [Test]
-    [Description("DiVoid #10000: measured deepest parse-time nesting in the level script (tools/SampleContent) is 3; MaxParseDepth must clear that with real headroom while staying far below the measured ~600-deep stack-overflow ceiling (DiVoid #9999), and stay raised over DefaultBehavior() like every other init knob.")]
+    [Description("Pins DefaultInit().MaxParseDepth to a bounded range, kept above DefaultBehavior()'s. DiVoid #10000.")]
     public void DefaultInit_MaxParseDepth_ClearsMeasuredContentWithHeadroomBelowTheStackCeiling()
     {
         Assert.That(BehaviorScriptBudgets.DefaultInit().MaxParseDepth, Is.Not.Null);

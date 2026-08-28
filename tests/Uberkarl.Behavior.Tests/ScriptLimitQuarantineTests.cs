@@ -163,7 +163,7 @@ public sealed class ScriptLimitQuarantineTests
     }
 
     [Test]
-    [Description("Load-bearing against BehaviorScriptBudgets.DefaultBehavior() specifically (DiVoid #10000): drop MaxParseDepth from that budget and this test fails, because the same script then parses instead of quarantining.")]
+    [Description("Load-bearing against DefaultBehavior()'s MaxParseDepth specifically. DiVoid #10000.")]
     public void DeepNesting_PastDefaultBehaviorBudget_IsQuarantined()
     {
         var ctx = new BehaviorTestContext();
@@ -178,7 +178,7 @@ public sealed class ScriptLimitQuarantineTests
     }
 
     [Test]
-    [Description("Load-bearing against BehaviorScriptBudgets.DefaultInit() specifically (DiVoid #10000): drop MaxParseDepth from that budget and this test fails, because the same script then parses instead of quarantining. The level script's init path is exercised directly since BehaviorTestContext.Compile always uses the behavior role.")]
+    [Description("Load-bearing against DefaultInit()'s MaxParseDepth specifically. DiVoid #10000.")]
     public void DeepNesting_PastDefaultInitBudget_IsQuarantined()
     {
         var ctx = new BehaviorTestContext();
