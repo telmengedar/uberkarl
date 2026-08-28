@@ -11,7 +11,18 @@ public sealed class ScriptLimitQuarantineTests
     private static readonly ScriptLimits TinyStepBudget = new() { MaxSteps = 500, Timeout = TimeSpan.FromSeconds(5) };
     private static readonly ScriptLimits TinyDepthBudget = new() { MaxDepth = 5, Timeout = TimeSpan.FromSeconds(5) };
     private static readonly ScriptLimits TinyMemoryBudget = new() { MaxVariableBytes = 4096, MaxSteps = 1_000_000, Timeout = TimeSpan.FromSeconds(5) };
+    private static readonly ScriptLimits TinyParseDepthBudget = new() { MaxParseDepth = 4, Timeout = TimeSpan.FromSeconds(5) };
     private static readonly TimeSpan MustReturnWithin = TimeSpan.FromSeconds(3);
+
+    /// <summary>A handler script wrapping its literal in <paramref name="extraParenPairs"/> redundant parens, each adding one level of parse-time nesting.</summary>
+    private static string NestedHandlerScript(int extraParenPairs)
+    {
+        string wrapped = new string('(', extraParenPairs) + "1" + new string(')', extraParenPairs);
+        return $$"""
+            $onUpdate = $delta => { self.setState("x", {{wrapped}}); }
+            { "onUpdate": onUpdate }
+            """;
+    }
 
     [Test]
     [CancelAfter(10_000)]
@@ -136,6 +147,49 @@ public sealed class ScriptLimitQuarantineTests
 
         Assert.That(instance.IsQuarantined, Is.True);
         Assert.That(instance.Compiled.QuarantineReason, Does.Contain("parse error"));
+    }
+
+    [Test]
+    public void DeepNesting_IsQuarantined_ViaMaxParseDepth()
+    {
+        var ctx = new BehaviorTestContext(TinyParseDepthBudget);
+        var subject = ctx.CreateSubject("obj-1", "object", "deeply-nested");
+
+        var instance = ctx.Compile(subject, NestedHandlerScript(2));
+
+        Assert.That(instance.IsQuarantined, Is.True);
+        Assert.That(instance.Compiled.QuarantineReason, Does.Contain("parse error"));
+        Assert.That(instance.Compiled.QuarantineReason, Does.Contain("nesting depth limit of 4"));
+    }
+
+    [Test]
+    [Description("Load-bearing against BehaviorScriptBudgets.DefaultBehavior() specifically (DiVoid #10000): drop MaxParseDepth from that budget and this test fails, because the same script then parses instead of quarantining.")]
+    public void DeepNesting_PastDefaultBehaviorBudget_IsQuarantined()
+    {
+        var ctx = new BehaviorTestContext();
+        var subject = ctx.CreateSubject("obj-1", "object", "deeply-nested");
+        int configuredLimit = BehaviorScriptBudgets.DefaultBehavior().MaxParseDepth!.Value;
+
+        var instance = ctx.Compile(subject, NestedHandlerScript(configuredLimit + 10));
+
+        Assert.That(instance.IsQuarantined, Is.True);
+        Assert.That(instance.Compiled.QuarantineReason, Does.Contain("parse error"));
+        Assert.That(instance.Compiled.QuarantineReason, Does.Contain($"nesting depth limit of {configuredLimit}"));
+    }
+
+    [Test]
+    [Description("Load-bearing against BehaviorScriptBudgets.DefaultInit() specifically (DiVoid #10000): drop MaxParseDepth from that budget and this test fails, because the same script then parses instead of quarantining. The level script's init path is exercised directly since BehaviorTestContext.Compile always uses the behavior role.")]
+    public void DeepNesting_PastDefaultInitBudget_IsQuarantined()
+    {
+        var ctx = new BehaviorTestContext();
+        var subject = ctx.CreateSubject("obj-1", "object", "deeply-nested");
+        int configuredLimit = BehaviorScriptBudgets.DefaultInit().MaxParseDepth!.Value;
+
+        var compiled = ctx.Loader.Compile(NestedHandlerScript(configuredLimit + 10), new Dictionary<string, object> { ["self"] = subject }, BehaviorScriptRole.Init);
+
+        Assert.That(compiled.IsQuarantined, Is.True);
+        Assert.That(compiled.QuarantineReason, Does.Contain("parse error"));
+        Assert.That(compiled.QuarantineReason, Does.Contain($"nesting depth limit of {configuredLimit}"));
     }
 
     [Test]
