@@ -19,4 +19,23 @@ public sealed class BehaviorScriptBudgetsTests
     {
         Assert.That(BehaviorScriptBudgets.DefaultInit().Timeout!.Value, Is.GreaterThanOrEqualTo(TimeSpan.FromMilliseconds(500)));
     }
+
+    [Test]
+    [Description("Pins DefaultBehavior().MaxParseDepth to a bounded range, above the authoring floor and below the parser's stack limit. DiVoid #10000.")]
+    public void DefaultBehavior_MaxParseDepth_ClearsMeasuredContentWithHeadroomBelowTheStackCeiling()
+    {
+        Assert.That(BehaviorScriptBudgets.DefaultBehavior().MaxParseDepth, Is.Not.Null);
+        Assert.That(BehaviorScriptBudgets.DefaultBehavior().MaxParseDepth!.Value, Is.GreaterThanOrEqualTo(20));
+        Assert.That(BehaviorScriptBudgets.DefaultBehavior().MaxParseDepth!.Value, Is.LessThanOrEqualTo(100));
+    }
+
+    [Test]
+    [Description("Pins DefaultInit().MaxParseDepth to a bounded range, kept above DefaultBehavior()'s. DiVoid #10000.")]
+    public void DefaultInit_MaxParseDepth_ClearsMeasuredContentWithHeadroomBelowTheStackCeiling()
+    {
+        Assert.That(BehaviorScriptBudgets.DefaultInit().MaxParseDepth, Is.Not.Null);
+        Assert.That(BehaviorScriptBudgets.DefaultInit().MaxParseDepth!.Value, Is.GreaterThanOrEqualTo(20));
+        Assert.That(BehaviorScriptBudgets.DefaultInit().MaxParseDepth!.Value, Is.LessThanOrEqualTo(150));
+        Assert.That(BehaviorScriptBudgets.DefaultInit().MaxParseDepth!.Value, Is.GreaterThan(BehaviorScriptBudgets.DefaultBehavior().MaxParseDepth!.Value));
+    }
 }
