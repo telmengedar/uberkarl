@@ -45,12 +45,17 @@ public sealed class BehaviorLoader
     /// <summary>Compiles <paramref name="source"/> against the given facade globals.</summary>
     public CompiledBehavior Compile(string source, IReadOnlyDictionary<string, object> facadeGlobals, BehaviorScriptRole role = BehaviorScriptRole.Behavior)
     {
+        ScriptParser parser = CreateSandboxedParser(role);
+
         Pooshit.Scripting.IScript script;
         try {
-            script = CreateSandboxedParser(role).Parse(source);
+            script = parser.Parse(source);
         }
         catch (ScriptParserException ex) {
             return Quarantined($"parse error: {ex.Message}");
+        }
+        catch (Exception ex) {
+            return Quarantined($"parse threw: {ex}");
         }
 
         var initVariables = new Dictionary<string, object>(facadeGlobals);
