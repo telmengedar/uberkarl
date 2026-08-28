@@ -29,23 +29,25 @@ public static class ObjectSetMergeWriter
         return contributions;
     }
 
-    /// <summary>The contributions of every object set <paramref name="level"/>'s placements reference, read from <paramref name="package"/>. A null <paramref name="package"/> throws only when <paramref name="level"/>.Objects is non-empty.</summary>
-    public static IReadOnlyList<PendingResource> BuildContributionsForLevel(Package? package, EditableLevel level)
+    /// <summary>The contributions of every object set <paramref name="level"/>'s placements reference, read from <paramref name="package"/>, excluding <paramref name="authored"/>. A null <paramref name="package"/> throws only when an unseeded set is actually needed.</summary>
+    public static IReadOnlyList<PendingResource> BuildContributionsForLevel(Package? package, EditableLevel level, ResourceReference? authored)
     {
         if (level is null)
             throw new ArgumentNullException(nameof(level));
-        if (package is null && level.Objects.Count > 0)
-            throw new ArgumentNullException(nameof(package));
-        if (package is null)
-            return Array.Empty<PendingResource>();
 
         List<PendingResource> contributions = new List<PendingResource>();
         HashSet<ResourceReference> seen = new HashSet<ResourceReference>();
+        if (authored is { } authoredReference)
+            seen.Add(authoredReference);
+
         foreach (EditableObjectPlacement placement in level.Objects)
         {
             ResourceReference reference = placement.Placement.ObjectSet;
             if (!seen.Add(reference))
                 continue;
+
+            if (package is null)
+                throw new ArgumentNullException(nameof(package));
 
             IReadOnlyList<EditableObjectType> objectTypes = EditableObjectSetReader.FromPackage(package, reference);
             contributions.AddRange(BuildContributions(reference.Path, objectTypes));

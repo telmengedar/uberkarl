@@ -101,25 +101,27 @@ public sealed class LevelEditSession
     public CellChange? EraseTerrain(int layerIndex, int x, int y)
         => PaintTerrain(layerIndex, x, y, LayerDefinition.EmptyCell);
 
-    /// <summary>Places an instance of <paramref name="objectType"/> from <paramref name="objectSet"/> at cell (x,y). No-op when out of bounds. Undoable.</summary>
-    public void PlaceObject(Package package, ResourceReference objectSet, EditableObjectType objectType, int x, int y, string name = "")
+    /// <summary>Places an instance of <paramref name="objectType"/> from <paramref name="objectSet"/> at cell (x,y). No-op when out of bounds. Undoable. <paramref name="package"/> may be <c>null</c>; it is required only when the type carries its own default behavior.</summary>
+    public void PlaceObject(Package? package, ResourceReference objectSet, EditableObjectType objectType, int x, int y, string name = "")
     {
-        if (package is null)
-            throw new ArgumentNullException(nameof(package));
         if (objectType is null)
             throw new ArgumentNullException(nameof(objectType));
+        if (package is null && objectType.Definition.Behavior is not null)
+            throw new ArgumentNullException(nameof(package));
         if (!Level.InBounds(x, y))
             return;
 
-        var effectiveBehavior = Level.CaptureBehavior(package, objectType.Definition.Behavior, $"Object type '{objectType.Definition.Id}'");
-        var placement = new ObjectPlacement
+        BehaviorBinding? effectiveBehavior = objectType.Definition.Behavior is null
+            ? null
+            : Level.CaptureBehavior(package!, objectType.Definition.Behavior, $"Object type '{objectType.Definition.Id}'");
+        ObjectPlacement placement = new ObjectPlacement
         {
             ObjectSet = objectSet,
             ObjectId = objectType.Definition.Id,
             Cell = new GridPosition(x, y),
             Name = name ?? string.Empty,
         };
-        var editablePlacement = new EditableObjectPlacement(
+        EditableObjectPlacement editablePlacement = new EditableObjectPlacement(
             placement, objectType.Definition.CollisionRole, objectType.Graphic, effectiveBehavior, objectType.Definition.State);
 
         history.Execute(new PlaceObjectCommand(editablePlacement), Level);
@@ -137,6 +139,18 @@ public sealed class LevelEditSession
         IsDirty = true;
         return true;
     }
+
+    /// <summary>
+    /// Clears the undo and redo stacks after a permitted object-type removal (design #9872 §9.3's
+    /// 2026-08-27 amendment) — the fourth member of the family <see cref="DeleteLayer"/>,
+    /// <see cref="MoveLayer"/> and <see cref="Resize"/> already apply: a structural mutation the undo
+    /// stack cannot express discards the history rather than let a recorded command alias onto a state
+    /// that can no longer occur. This is the worst case of the four — a retained placement command would
+    /// alias onto an object with no definition, discovered only on reopen. Idempotent on an already-empty
+    /// history. Does not touch <see cref="IsDirty"/>: a level holding no placement of the removed type is
+    /// itself unchanged by the removal.
+    /// </summary>
+    public void DiscardHistoryForObjectTypeRemoval() => history.Clear();
 
     /// <summary>
     /// Places a trigger covering the <paramref name="width"/>x<paramref name="height"/> rect at (x,y), bound to
@@ -384,9 +398,8 @@ public sealed class LevelEditSession
     // History policy (the layer-index aliasing hazard, design §9.3): recorded SetCellCommands store an
     // absolute layer index. AddLayer appends at the end and SetCollision/StepScrollSpeed/SetRepeat replace
     // a layer in place — both are index-stable, so cell-edit history is preserved. DeleteLayer and
-    // MoveLayer shift indices, so a successful one clears cell-edit history (the same Clear() used on
-    // load/save-as) rather than let recorded undo alias onto the wrong layer. Layer operations themselves
-    // are not on the undo stack this increment.
+    // MoveLayer shift indices, so a successful one clears cell-edit history rather than let recorded undo
+    // alias onto the wrong layer. Layer operations themselves are not on the undo stack this increment.
 
     /// <summary>
     /// Appends a new auto-named ("Layer N") display layer (<c>collision:false, scrollSpeed:1.0, repeat:false</c>)

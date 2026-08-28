@@ -58,7 +58,7 @@ public sealed class EditHistory
         return change;
     }
 
-    /// <summary>Discards all history. Called after a save-as/load that replaces the level being edited.</summary>
+    /// <summary>Discards all history.</summary>
     public void Clear()
     {
         undo.Clear();
