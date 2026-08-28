@@ -42,6 +42,12 @@ namespace Uberkarl {
             playWorld = new Node2D { Name = "Playtest" };
             AddChild(playWorld);
             PlayRuntimeBuilder.Populate(playWorld, level);
+
+            BehaviorRuntime runtime = playWorld.GetNode<BehaviorRuntime>(PlayRuntimeBuilder.BehaviorRuntimeNodeName);
+            QuarantineReportHud report = new QuarantineReportHud { Name = "QuarantineReportHud" };
+            report.Configure(runtime);
+            playWorld.AddChild(report);
+
             Visible = true;
         }
 
